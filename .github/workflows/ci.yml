@@ -1,0 +1,43 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    env:
+      # sys.monitoring core: the legacy C tracer misses async ASGI handlers, so
+      # without this the coverage number is badly under-reported (see conftest).
+      COVERAGE_CORE: sysmon
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Sync dependencies (frozen)
+        run: uv sync --frozen
+
+      - name: Lint (ruff)
+        run: uv run ruff check .
+
+      - name: Alembic migration sanity (single head)
+        run: |
+          heads=$(uv run alembic heads | grep -c '(head)')
+          test "$heads" -eq 1
+
+      # ubuntu-latest provides a Docker daemon, so testcontainers spins an
+      # ephemeral PostGIS (amd64, native) for the integration tests.
+      - name: Tests (unit + integration) with coverage gate
+        env:
+          GEOID_DATABASE_URL: postgresql+asyncpg://geoid:geoid@localhost:5432/geoid
+        run: >
+          uv run pytest
+          --cov=geoid
+          --cov-report=term-missing
+          --cov-fail-under=80
