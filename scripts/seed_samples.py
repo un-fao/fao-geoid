@@ -1,0 +1,101 @@
+#!/usr/bin/env python3
+"""Seed GeoID with the dummy sample plots and demonstrate the core behaviours.
+
+    # stack must be running (docker compose up, or `uv run uvicorn geoid.main:app`)
+    uv run python scripts/seed_samples.py
+
+Env:
+    GEOID_BASE_URL    default http://localhost:8000
+    GEOID_COLLECTION  default public  (anonymous-writable; no token needed)
+    GEOID_ADMIN_TOKEN required only when seeding a managed (non-anon) collection
+"""
+
+from __future__ import annotations
+
+import json
+import os
+from pathlib import Path
+
+import httpx
+
+BASE = os.environ.get("GEOID_BASE_URL", "http://localhost:8000").rstrip("/")
+COLLECTION = os.environ.get("GEOID_COLLECTION", "public")
+ADMIN_TOKEN = os.environ.get("GEOID_ADMIN_TOKEN")
+SAMPLES = Path(__file__).resolve().parents[1] / "samples"
+
+
+def _headers() -> dict[str, str]:
+    return {"Authorization": f"Bearer {ADMIN_TOKEN}"} if ADMIN_TOKEN else {}
+
+
+def _post(client: httpx.Client, feature: dict) -> httpx.Response:
+    return client.post(
+        f"{BASE}/collections/{COLLECTION}/items", json=feature, headers=_headers()
+    )
+
+
+def main() -> int:
+    with httpx.Client(timeout=30.0) as client:
+        try:
+            client.get(f"{BASE}/conformance").raise_for_status()
+        except Exception as exc:
+            print(f"✗ cannot reach GeoID at {BASE} ({exc}).")
+            print("  Start it first:  docker compose up --build   (or uv run uvicorn geoid.main:app)")
+            return 1
+        print(f"→ GeoID at {BASE}, collection '{COLLECTION}'\n")
+
+        first_geoid = None
+        print("== Minting sample plots ==")
+        feature_collection = json.loads((SAMPLES / "plots.geojson").read_text())
+        for feature in feature_collection["features"]:
+            resp = _post(client, feature)
+            body = resp.json()
+            ext = str(feature.get("id"))
+            if resp.status_code in (200, 201):
+                tag = "dedup→existing" if body.get("deduplicated") else "minted"
+                print(f"  [{resp.status_code}] {ext:<22} {tag:<14} geoid={body['geoid']}")
+                if first_geoid is None:
+                    first_geoid = body["geoid"]
+            else:
+                print(f"  [{resp.status_code}] {ext:<22} ERROR {body}")
+
+        print("\n== Dedup demo (GH-COCOA-001's geometry, reversed winding, no id) ==")
+        dup = json.loads((SAMPLES / "duplicate_of_GH-COCOA-001.geojson").read_text())
+        body = _post(client, dup).json()
+        status = "200 OK" if body.get("deduplicated") else "??"
+        print(f"  [{status}] deduplicated={body.get('deduplicated')} geoid={body.get('geoid')}")
+
+        print("\n== Validation demo (self-intersecting bow-tie) ==")
+        invalid = json.loads((SAMPLES / "invalid_selfintersecting.geojson").read_text())
+        resp = _post(client, invalid)
+        print(f"  [{resp.status_code}] {resp.json().get('reason')}")
+
+        print("\n== OGC read ==")
+        items = client.get(f"{BASE}/collections/{COLLECTION}/items?limit=100").json()
+        print(f"  all items                 → numberMatched={items['numberMatched']}")
+        wa = client.get(f"{BASE}/collections/{COLLECTION}/items?bbox=-6,5,-1,7").json()
+        print(f"  bbox=-6,5,-1,7 (W. Africa)→ numberMatched={wa['numberMatched']}")
+        cql = client.get(
+            f"{BASE}/collections/{COLLECTION}/items?filter=external_id='GH-COCOA-001'"
+        ).json()
+        print(f"  CQL2 external_id=GH-COCOA-001 → numberMatched={cql['numberMatched']}")
+
+        desc = client.get(f"{BASE}/collections/{COLLECTION}").json()
+        print(f"  collection extent (real)  → {desc['extent']['spatial']['bbox'][0]}")
+
+        if first_geoid:
+            props = client.get(f"{BASE}/geoid/{first_geoid}").json()["properties"]
+            print(f"\n== Resolve {first_geoid} ==")
+            print(f"  did:         {props['did']}")
+            print(f"  uri:         {props['uri']}")
+            print(f"  external_id: {props['external_id']}   commodity: {props.get('commodity')}")
+            print(f"  provenance:  {props['_geoid_provenance']['client']}")
+
+        bulk = client.get(f"{BASE}/collections/{COLLECTION}/bulk").json()
+        print(f"\n== Bulk export ==\n  GeoJSON FeatureCollection with {len(bulk['features'])} features")
+        print(f"\n✓ done — explore at {BASE}/docs")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
