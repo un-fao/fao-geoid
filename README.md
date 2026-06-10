@@ -17,7 +17,7 @@ QGIS / ogr / Whisp / Ground ──►  GeoID FastAPI (one image)
                                   └─ /docs (Swagger)
                                           │
                                           ▼
-                          PostgreSQL 16 + PostGIS 3.5.2
+                          PostgreSQL 17 + PostGIS 3.5.2
                           workspace ─< collection ─< place  (+ geoid_registry, change_log)
 ```
 
@@ -77,7 +77,7 @@ and the incumbent-lookup query.
 uv sync                       # create venv + install (editable) from the lockfile
 cp .env.example .env          # set DATABASE_URL, GEOID_ADMIN_TOKEN, BASE_URL
 
-# local stack (FastAPI + postgis/postgis:16)
+# local stack (FastAPI + postgis/postgis:17)
 docker compose up -d db
 uv run alembic upgrade head   # apply schema + triggers
 uv run uvicorn geoid.main:app --reload

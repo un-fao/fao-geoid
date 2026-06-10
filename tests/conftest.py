@@ -1,7 +1,7 @@
 """Shared test fixtures.
 
 Integration tests run against an ephemeral PostGIS container (testcontainers).
-The image is pinned to ``postgis/postgis:16-3.5`` on ``linux/amd64`` so the GEOS
+The image is pinned to ``postgis/postgis:17-3.5`` on ``linux/amd64`` so the GEOS
 build — and therefore ``ST_Normalize`` output, the load-bearing part of the dedup
 recipe — matches Cloud SQL on every host (native on amd64 CI, emulated on arm64
 dev machines). If Docker is unavailable, integration tests skip cleanly so
@@ -58,7 +58,7 @@ def _postgis():
 
     container = (
         PostgresContainer(
-            "postgis/postgis:16-3.5",
+            "postgis/postgis:17-3.5",
             username="geoid",
             password="geoid",
             dbname="geoid",
