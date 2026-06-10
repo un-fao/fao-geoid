@@ -40,6 +40,40 @@ async def test_conformance_declares_core_and_cql2(client):
     assert any("cql2-text" in c for c in classes)
 
 
+async def test_conformance_declares_queryables(client):
+    classes = (await client.get("/conformance")).json()["conformsTo"]
+    assert any(c.endswith("ogcapi-features-3/1.0/conf/queryables") for c in classes)
+
+
+async def test_queryables_is_a_json_schema_of_the_cql2_fields(client):
+    resp = await client.get("/collections/public/queryables")
+    assert resp.status_code == 200
+    assert resp.headers["content-type"].startswith("application/schema+json")
+    body = resp.json()
+    assert body["type"] == "object"
+    assert body["$id"].endswith("/collections/public/queryables")
+    assert body["additionalProperties"] is False
+    advertised = set(body["properties"])
+    assert {"geoid", "external_id", "data_quality_status", "created_at", "geometry"} == advertised
+    # An advertised queryable must be accepted by the live filter path.
+    resp = await client.get("/collections/public/items?filter=external_id='nope'")
+    assert resp.status_code == 200
+    # The collection description links to its queryables (OGC Part-3 requirement).
+    desc = (await client.get("/collections/public")).json()
+    assert any(link["rel"].endswith("queryables") for link in desc["links"])
+
+
+async def test_queryables_alias_under_items_path(client):
+    resp = await client.get("/collections/public/items/queryables")
+    assert resp.status_code == 200
+    assert resp.json()["properties"]
+
+
+async def test_queryables_unknown_collection_returns_404(client):
+    resp = await client.get("/collections/nope/queryables")
+    assert resp.status_code == 404
+
+
 async def test_collections_lists_public(client):
     body = (await client.get("/collections")).json()
     ids = {c["id"] for c in body["collections"]}
@@ -98,8 +132,57 @@ async def test_invalid_cql2_filter_returns_400(client):
     assert resp.status_code == 400
 
 
+async def test_unknown_queryable_returns_400_not_silent_empty(client):
+    await _seed(client, 1)
+    resp = await client.get("/collections/public/items?filter=bogus_field='x'")
+    assert resp.status_code == 400
+    assert "queryable" in resp.json()["detail"]
+    # The former internal 'geom' alias is no longer accepted either — the
+    # queryables document is a closed set and 'geometry' is the advertised name.
+    resp = await client.get(
+        "/collections/public/items",
+        params={"filter": "S_INTERSECTS(geom,POLYGON((0 0,1 0,1 1,0 1,0 0)))"},
+    )
+    assert resp.status_code == 400
+
+
+async def test_spatial_filter_on_geometry_works(client, unit_square_ccw):
+    await client.post("/collections/public/items", json=unit_square_ccw)
+    resp = await client.get(
+        "/collections/public/items",
+        params={"filter": "S_INTERSECTS(geometry,POLYGON((9 9,12 9,12 12,9 12,9 9)))"},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["numberMatched"] == 1
+
+
+async def test_filter_value_type_mismatch_returns_400_not_500(client):
+    await _seed(client, 1)
+    # Both pass parse + translate and only fail at bind/execute time.
+    resp = await client.get("/collections/public/items?filter=geoid='not-a-uuid'")
+    assert resp.status_code == 400
+    resp = await client.get(
+        "/collections/public/items", params={"filter": "created_at > 'lastweek'"}
+    )
+    assert resp.status_code == 400
+
+
 async def test_invalid_bbox_returns_400(client):
     resp = await client.get("/collections/public/items?bbox=1,2,3")
+    assert resp.status_code == 400
+
+
+async def test_offset_beyond_cap_returns_400(client):
+    resp = await client.get("/collections/public/items?offset=999999999")
+    assert resp.status_code == 400
+    assert "offset" in resp.json()["detail"]
+
+
+async def test_offset_cap_precedes_collection_resolution(client):
+    # Pure parameter validation runs before any I/O, on both surfaces — so an
+    # unknown collection with an over-cap offset 400s here exactly as it does
+    # on /manage item-ids.
+    resp = await client.get("/collections/no-such-collection/items?offset=999999999")
     assert resp.status_code == 400
 
 

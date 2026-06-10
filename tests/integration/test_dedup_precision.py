@@ -1,6 +1,6 @@
-"""Release-1 coordinate-precision behaviour: the dedup grid defaults to ~10m
-(0.00009 deg/vertex), is stamped onto every collection at creation, and snaps
-geometries to an absolute grid.
+"""Release-1 coordinate-precision behaviour: the dedup grid defaults to ~1cm
+(1e-7 deg/vertex — exact-match semantics per Remi's ruling), is stamped onto
+every collection at creation, and snaps geometries to an absolute grid.
 
 The stamped value in ``collection.metadata->>'dedup_grid'`` is the source of truth
 read by BOTH the BEFORE-INSERT trigger and the incumbent-lookup, so these tests pin
@@ -17,9 +17,9 @@ from geoid.config import get_settings
 
 pytestmark = pytest.mark.integration
 
-# 9e-5 deg ≈ 10m. A ~100m square (10 cells/side) with every corner on the grid, so
-# the snap is unambiguous and the perturbations below can't straddle a cell boundary.
-_SIDE = 0.0009
+# 1e-7 deg ≈ 1cm. A square 10 cells/side with every corner on the grid, so the
+# snap is unambiguous and the perturbations below can't straddle a cell boundary.
+_SIDE = 1e-6
 
 
 def _square(dx: float) -> dict:
@@ -76,15 +76,15 @@ async def test_admin_supplied_grid_overrides_the_default(client, admin_headers):
 
 
 async def test_within_cell_collapses_across_cell_is_distinct(client):
-    # The public collection carries the configured ~10m grid (9e-5 deg).
+    # The public collection carries the configured ~1cm grid (1e-7 deg).
     base = (await client.post("/collections/public/items", json=_square(0.0))).json()
-    # +1e-5 deg (~1m): every vertex snaps back to the base cell -> same geoid (dedup).
+    # +1e-8 deg (~1mm): every vertex snaps back to the base cell -> same geoid (dedup).
     same_cell = (
-        await client.post("/collections/public/items", json=_square(1e-5))
+        await client.post("/collections/public/items", json=_square(1e-8))
     ).json()
-    # +0.00027 deg (3 cells, ~30m): a clearly different cell -> a distinct geoid.
+    # +3e-7 deg (3 cells, ~3cm): a clearly different cell -> a distinct geoid.
     other_cell = (
-        await client.post("/collections/public/items", json=_square(0.00027))
+        await client.post("/collections/public/items", json=_square(3e-7))
     ).json()
 
     assert same_cell["geoid"] == base["geoid"]

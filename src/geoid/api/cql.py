@@ -6,10 +6,12 @@ clause over the place columns / geometry. Invalid filters fail fast with 400.
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 from typing import Any
 
 from fastapi import HTTPException, status
 from lark.exceptions import LarkError
+from pygeofilter import ast as cql_ast
 from pygeofilter.backends.sqlalchemy.evaluate import to_filter
 from pygeofilter.parsers.cql2_json import parse as parse_cql2_json
 from pygeofilter.parsers.cql2_text import parse as parse_cql2_text
@@ -47,6 +49,36 @@ def parse_bbox(raw: str | None) -> tuple[float, float, float, float] | None:
     return (minx, miny, maxx, maxy)
 
 
+def _iter_nodes(node: Any) -> Iterator[Any]:
+    """Depth-first walk over a pygeofilter AST (sub-nodes may be lists, e.g. IN)."""
+    yield node
+    if isinstance(node, cql_ast.Node):
+        for sub in node.get_sub_nodes():
+            if isinstance(sub, (list, tuple)):
+                for item in sub:
+                    yield from _iter_nodes(item)
+            else:
+                yield from _iter_nodes(sub)
+
+
+def _reject_unknown_queryables(tree: Any, field_mapping: dict[str, Any]) -> None:
+    """400 on attributes outside the queryables set.
+
+    Without this, pygeofilter resolves an unknown attribute to NULL and the
+    filter silently matches nothing — a typo'd field name would return an empty
+    page instead of an error, and the queryables document's
+    ``additionalProperties: false`` (closed set) would be a lie.
+    """
+    names = {n.name for n in _iter_nodes(tree) if isinstance(n, cql_ast.Attribute)}
+    unknown = sorted(names - set(field_mapping))
+    if unknown:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            f"unknown queryable(s): {', '.join(unknown)} — "
+            "see /collections/{collectionId}/queryables for the supported set",
+        )
+
+
 def build_cql_clause(
     filter_expr: str | None,
     filter_lang: str | None,
@@ -65,15 +97,16 @@ def build_cql_clause(
     # of masquerading as a bad filter. LarkError = pygeofilter parse failures.
     _USER_FILTER_ERRORS = (LarkError, ValueError, KeyError, TypeError, NotImplementedError)
     try:
-        ast = parse_cql2_json(filter_expr) if lang == FILTER_LANG_JSON else parse_cql2_text(
+        tree = parse_cql2_json(filter_expr) if lang == FILTER_LANG_JSON else parse_cql2_text(
             filter_expr
         )
     except _USER_FILTER_ERRORS as exc:
         raise HTTPException(
             status.HTTP_400_BAD_REQUEST, f"invalid CQL2 filter: {exc}"
         ) from exc
+    _reject_unknown_queryables(tree, field_mapping)
     try:
-        return to_filter(ast, field_mapping)
+        return to_filter(tree, field_mapping)
     except _USER_FILTER_ERRORS as exc:
         raise HTTPException(
             status.HTTP_400_BAD_REQUEST, f"unsupported CQL2 filter: {exc}"

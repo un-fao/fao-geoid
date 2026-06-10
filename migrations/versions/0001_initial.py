@@ -80,6 +80,11 @@ def upgrade() -> None:
     )
 
     # --- HINGE 1: geoid_registry (global uniqueness, Citus-shard ready) ----
+    # INTENTIONALLY no FK to place: this table is destined to become a Citus
+    # REFERENCE table (replicated to every node) once place is distributed by
+    # collection_id, and reference->distributed FKs are not supported; a FK
+    # would also serialize cross-shard inserts at scale. Integrity is held by
+    # the place_after_insert trigger (sole writer) + the append-only guards.
     op.execute(
         """
         CREATE TABLE geoid_registry (
@@ -91,6 +96,9 @@ def upgrade() -> None:
     )
 
     # --- HINGE 2: change_log (append-only audit / federation pull-feed) ----
+    # Same deliberate FK omission as geoid_registry: the feed must stay
+    # consumable (and its rows immutable) even after place is sharded or rows
+    # are served from another federation instance that this DB never stores.
     op.execute(
         """
         CREATE TABLE change_log (

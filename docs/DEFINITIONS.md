@@ -50,6 +50,12 @@ How they nest:
 workspace ─< collection ─< place (each place carries one geoid)
 ```
 
+> **Terminology note.** The team's final API terminology ruling — **workspace /
+> collection / item** — is the shipped default: the API surfaces each place as an
+> "item" (the OGC API Features term). Internally and in this document "place"
+> names the same concept; the surface vocabulary is a configuration choice
+> (`GEOID_VOCAB`), not a data-model difference.
+
 ---
 
 ## The three uniqueness rules
@@ -100,25 +106,29 @@ The grid size is the team's "coordinate precision" knob.
 
 - **Configurable.** Set globally via `GEOID_DEDUP_GRID_DEFAULT`, and overridable
   per collection (`collection.metadata.dedup_grid`).
-- **Default ≈ 10 metres** — `0.00009°` per vertex. (At the equator, `0.00009°` of
-  longitude is roughly 10 m; it varies with latitude.) Every collection is stamped
-  with this default at creation unless an explicit value is supplied.
+- **Default ≈ 1 centimetre** — `1e-7°` per vertex. (At the equator, `1e-7°` of
+  longitude is roughly 1 cm; it varies with latitude.) This is the team's final
+  ruling: deduplication means **exact match** — the grid exists only to absorb
+  floating-point jitter, *not* to merge shapes that are merely near each other.
+  Every collection is stamped with this default at creation unless an explicit
+  value is supplied.
 - **Frozen once a collection has data.** Changing the grid after places exist
   would re-hash existing geometries and could silently mint a second geoid for an
   already-registered place, so it is locked once a collection is non-empty.
 
 ### The honest caveat (why dedup is de-prioritized)
 
-The grid is an **absolute grid**, not a "merge anything within 10 m" radius. It
-quantizes coordinates into ~10 m cells; it does **not** measure the distance
+The grid is an **absolute grid**, not a "merge anything within 1 cm" radius. It
+quantizes coordinates into ~1 cm cells; it does **not** measure the distance
 between two points. The practical consequence:
 
-> Two points that are only a few centimetres apart but happen to fall on opposite
+> Two points that are less than a centimetre apart but happen to fall on opposite
 > sides of a cell boundary will land in **different** cells and therefore produce
 > **different** geoids — they will *not* be deduplicated.
 
 So the rule neutralizes float jitter and exact re-submissions; it does **not**
-guarantee that "visually the same" plots collapse to one geoid. This boundary
+guarantee that "visually the same" plots collapse to one geoid — and at ~1 cm
+that is the *intended* behaviour, per the team's exact-match ruling. The boundary
 behaviour is exactly the error-proneness the team flagged, and the reason
 geometry deduplication is de-prioritized for Release 1.
 

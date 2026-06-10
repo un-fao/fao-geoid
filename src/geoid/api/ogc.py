@@ -7,13 +7,16 @@ DynaStore-shaped envelopes (``numberMatched`` / ``numberReturned`` / ``timeStamp
 from __future__ import annotations
 
 import uuid
+from typing import Any
 from urllib.parse import urlencode
 
-from fastapi import APIRouter, Depends, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from sqlalchemy.exc import IntegrityError, OperationalError, StatementError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from geoid.api.cql import build_cql_clause, parse_bbox
-from geoid.api.responses import GeoJSONResponse
+from geoid.api.paging import enforce_max_offset
+from geoid.api.responses import GeoJSONResponse, SchemaJSONResponse
 from geoid.config import Settings, get_settings
 from geoid.db import get_session
 from geoid.repositories import collection_repo, place_repo
@@ -102,22 +105,37 @@ async def get_items(
     session: AsyncSession = Depends(get_session),
     settings: Settings = Depends(get_settings),
 ) -> FeatureCollectionModel:
-    collection = await collection_repo.get_by_slug(session, collection_id)
-    if collection is None:
-        raise CollectionNotFoundError(collection_id)
-
+    # Pure parameter validation precedes any I/O (and matches manage.py's order,
+    # so cap-vs-404 precedence is identical on both surfaces).
+    enforce_max_offset(offset, settings)
     effective_limit = min(limit or settings.default_limit, settings.max_limit)
     bbox_tuple = parse_bbox(bbox)
     cql_clause = build_cql_clause(cql_filter, filter_lang, place_repo.queryable_field_mapping())
 
-    rows, number_matched = await place_repo.list_items(
-        session,
-        collection.id,
-        bbox=bbox_tuple,
-        cql_clause=cql_clause,
-        limit=effective_limit,
-        offset=offset,
-    )
+    collection = await collection_repo.get_by_slug(session, collection_id)
+    if collection is None:
+        raise CollectionNotFoundError(collection_id)
+
+    try:
+        rows, number_matched = await place_repo.list_items(
+            session,
+            collection.id,
+            bbox=bbox_tuple,
+            cql_clause=cql_clause,
+            limit=effective_limit,
+            offset=offset,
+        )
+    except StatementError as exc:
+        # A type-mismatched filter literal (geoid='not-a-uuid', created_at>'x')
+        # passes parse/translate and only fails at bind/execute time — that is
+        # still user input, so map it to 400. Integrity and operational errors
+        # (timeouts, disconnects) keep their existing handling.
+        if cql_clause is None or isinstance(exc, (IntegrityError, OperationalError)):
+            raise
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            f"invalid CQL2 filter value: {exc.orig or exc}",
+        ) from exc
 
     preserved = [
         (k, v) for k, v in request.query_params.multi_items() if k not in ("limit", "offset")
@@ -131,6 +149,32 @@ async def get_items(
         offset=offset,
         query_suffix=urlencode(preserved),
     )
+
+
+# Registered BEFORE the /items/{geoid} route below, or the literal segment
+# "queryables" would be captured as a geoid. The canonical resource is
+# /collections/{id}/queryables (OGC Part-3 Queryables requirement class); the
+# /items/queryables spelling is kept as a hidden alias for discoverability.
+@router.get(
+    "/collections/{collection_id}/queryables",
+    response_class=SchemaJSONResponse,
+    summary="Queryables — the fields usable in CQL2 filters (OGC Part 3)",
+)
+@router.get("/collections/{collection_id}/items/queryables", include_in_schema=False)
+async def get_queryables(
+    collection_id: str,
+    session: AsyncSession = Depends(get_session),
+    settings: Settings = Depends(get_settings),
+) -> Any:
+    collection = await collection_repo.get_by_slug(session, collection_id)
+    if collection is None:
+        raise CollectionNotFoundError(collection_id)
+    doc = ogc_service.queryables(
+        settings,
+        collection_id=collection_id,
+        queryable_names=set(place_repo.queryable_field_mapping()),
+    )
+    return SchemaJSONResponse(doc)
 
 
 @router.get(

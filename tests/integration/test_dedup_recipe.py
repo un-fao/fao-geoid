@@ -14,7 +14,7 @@ from sqlalchemy import text
 
 pytestmark = pytest.mark.integration
 
-_DEFAULT_GRID = 9e-5  # Release-1 default: ~10m/vertex (0.00009 deg)
+_DEFAULT_GRID = 1e-7  # Release-1 default: ~1cm/vertex (exact-match per Remi's ruling)
 
 
 async def _hash(session, wkt: str, grid: float = _DEFAULT_GRID) -> str:
@@ -73,7 +73,7 @@ async def test_genuinely_different_geometry_yields_different_hash(session):
 
 
 async def test_supragrid_shift_changes_hash(session):
-    # A shift well above the 9e-5 grid is a different place -> different hash.
+    # A shift well above the 1e-7 grid is a different place -> different hash.
     base = await _hash(session, "POLYGON((0 0,1 0,1 1,0 1,0 0))")
     shifted = await _hash(session, "POLYGON((0.001 0,1 0,1 1,0 1,0.001 0))")
     assert base != shifted

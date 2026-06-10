@@ -113,7 +113,11 @@ processes.
 Intentionally **not** built now (YAGNI; the plan defers scaling):
 
 - **Keyset/cursor paging** to replace OFFSET (OFFSET cost grows with depth; the
-  composite index already makes the keyset variant an O(limit) range scan).
+  composite index already makes the keyset variant an O(limit) range scan). In the
+  interim, `GEOID_MAX_OFFSET` (default 100k) caps offset depth on both the public
+  items endpoint and the admin item-ids listing, and `rel=next` links stop at the
+  cap. Consequence: full id enumeration of a collection larger than
+  `max_offset + limit` needs the cap raised until keyset paging lands.
 - **Approximate / optional `numberMatched`** (the OGC spec allows omitting it) via
   `pg_class.reltuples` or a maintained per-collection counter, for collections too
   large to count exactly per request.

@@ -28,6 +28,7 @@ CONFORMANCE_CLASSES = [
     "http://www.opengis.net/spec/ogcapi-features-1/1.0/conf/core",
     "http://www.opengis.net/spec/ogcapi-features-1/1.0/conf/oas30",
     "http://www.opengis.net/spec/ogcapi-features-1/1.0/conf/geojson",
+    "http://www.opengis.net/spec/ogcapi-features-3/1.0/conf/queryables",
     "http://www.opengis.net/spec/ogcapi-features-3/1.0/conf/filter",
     "http://www.opengis.net/spec/ogcapi-features-3/1.0/conf/features-filter",
     "http://www.opengis.net/spec/cql2/1.0/conf/cql2-text",
@@ -36,6 +37,20 @@ CONFORMANCE_CLASSES = [
 
 _GEOJSON = "application/geo+json"
 _JSON = "application/json"
+_SCHEMA_JSON = "application/schema+json"
+_QUERYABLES_REL = "http://www.opengis.net/def/rel/ogc/1.0/queryables"
+
+# JSON-Schema fragments for the CQL2 queryables. Must mirror
+# ``place_repo.queryable_field_mapping()`` exactly — the queryables document is
+# a closed set (additionalProperties: false) and the filter path rejects names
+# outside the mapping, so the two are pinned equal by a unit test.
+_QUERYABLE_SCHEMAS: dict[str, dict[str, Any]] = {
+    "geoid": {"type": "string", "format": "uuid", "title": "geoid (UUIDv7)"},
+    "external_id": {"type": "string", "title": "Caller-supplied external id"},
+    "data_quality_status": {"type": "string", "title": "Data quality status"},
+    "created_at": {"type": "string", "format": "date-time", "title": "Creation time"},
+    "geometry": {"format": "geometry-any", "title": "Place geometry (Polygon/MultiPolygon)"},
+}
 
 
 class ItemRow(TypedDict, total=False):
@@ -103,9 +118,35 @@ def collection_desc(
             Link(href=f"{base}/collections/{slug}", rel="self", type=_JSON),
             Link(href=f"{base}/collections/{slug}/items", rel="items", type=_GEOJSON,
                  title="Features"),
+            Link(href=f"{base}/collections/{slug}/queryables", rel=_QUERYABLES_REL,
+                 type=_SCHEMA_JSON, title="Queryables (CQL2 filterable fields)"),
             Link(href=f"{base}/collections", rel="parent", type=_JSON),
         ],
     )
+
+
+def queryables(
+    settings: Settings, *, collection_id: str, queryable_names: set[str]
+) -> dict[str, Any]:
+    """The OGC Part-3 queryables resource: a JSON Schema over the CQL2 fields.
+
+    ``queryable_names`` comes from ``place_repo.queryable_field_mapping()`` — the
+    advertised set and the working set are identical (closed schema, unknown
+    names 400), which a unit test enforces.
+    """
+    properties = {
+        name: dict(schema)
+        for name, schema in _QUERYABLE_SCHEMAS.items()
+        if name in queryable_names
+    }
+    return {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "$id": f"{settings.base_url_clean}/collections/{collection_id}/queryables",
+        "type": "object",
+        "title": f"Queryables for collection '{collection_id}'",
+        "properties": properties,
+        "additionalProperties": False,
+    }
 
 
 def _feature_links(settings: Settings, *, geoid: uuid.UUID, collection: str,
@@ -194,7 +235,10 @@ def build_feature_collection(
              type=_GEOJSON),
         Link(href=f"{base}/collections/{collection}", rel="collection", type=_JSON),
     ]
-    if offset + limit < number_matched:
+    # Never advertise a link the server's own offset cap would 400 — the walk
+    # simply ends at the cap (this also makes GEOID_MAX_OFFSET=0 a coherent
+    # "no deep paging" switch instead of bricking every next link).
+    if offset + limit < number_matched and offset + limit <= settings.max_offset:
         links.append(
             Link(
                 href=f"{items_url}?{_paging_qs(limit, offset + limit, query_suffix)}",
