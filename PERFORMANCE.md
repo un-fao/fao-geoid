@@ -132,3 +132,17 @@ Intentionally **not** built now (YAGNI; the plan defers scaling):
 - **Read replicas** for the OGC read path (the write path needs the primary; the
   read path is replica-safe).
 - **Federation pull-feed** over the monotonic `change_log.seq` cursor.
+- **Batch geoid lookup** — `POST /geoid/lookup` taking a list of geoids with a
+  configurable cap (FAO DynaStore uses 10k), partitioning malformed UUIDs out
+  *before* the DB query so one bad input never fails the batch (their
+  `_partition_uuid_inputs` pattern); response is a GeoJSON FeatureCollection with
+  `numberRequested`/`numberReturned`/`invalid`/`notFound` foreign members.
+  Mirroring DynaStore's request/response shapes keeps a future merge of the two
+  products cheap, whichever direction it goes.
+- **Batch write + job-based bulk ingest/export** — `POST .../items` accepting a
+  whole FeatureCollection with per-row rejections and HTTP **207**
+  `IngestionReport{accepted_ids, rejections[], total}` partial-success semantics
+  (each rejection carries the matcher that fired: geometry-dedup vs external-id),
+  again mirroring DynaStore's shapes; larger file-based ingest/export runs as
+  async jobs on a `FOR UPDATE SKIP LOCKED` PostgreSQL queue (no new
+  infrastructure) and rides on the same milestone.

@@ -1,10 +1,10 @@
 # On-prem / local stack (milestone 2 companion) — the SAME image as Cloud Run.
-# `migrate` runs once to head, then `api` serves. Use postgis/postgis:16 to match
+# `migrate` runs once to head, then `api` serves. Use postgis/postgis:17 to match
 # Cloud SQL's PostGIS 3.5.x.
 
 services:
   db:
-    image: postgis/postgis:16-3.5
+    image: postgis/postgis:17-3.5
     # The official postgis image has no arm64 manifest; pin amd64 so it runs on
     # Apple Silicon dev hosts (emulated) and amd64 servers (native) alike. This
     # also keeps the GEOS build — and thus ST_Normalize / the dedup hash — in
