@@ -13,3 +13,9 @@ from fastapi.responses import JSONResponse
 
 class GeoJSONResponse(JSONResponse):
     media_type = "application/geo+json"
+
+
+class SchemaJSONResponse(JSONResponse):
+    """OGC Part-3 queryables are a JSON Schema document, served as schema+json."""
+
+    media_type = "application/schema+json"

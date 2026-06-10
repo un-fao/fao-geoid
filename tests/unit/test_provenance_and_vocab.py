@@ -50,6 +50,17 @@ def test_build_provenance_merges_extra():
 
 # --- vocab ------------------------------------------------------------------
 
+def test_fao_vocab_is_the_default_and_matches_the_ruling():
+    # the reviewer's final terminology ruling: workspace / collection / item.
+    assert vocab.DEFAULT_VOCAB == "fao"
+    v = vocab.get_vocab("fao")
+    assert v.label("workspace") == "workspace"
+    assert v.label("collection") == "collection"
+    assert v.label("place") == "item"
+    assert v.item_type == "item"
+    assert v.plural("place") == "items"
+
+
 def test_stac_vocab_labels():
     v = vocab.get_vocab("stac")
     assert v.label("workspace") == "catalog"

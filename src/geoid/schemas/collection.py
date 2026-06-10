@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 class WorkspaceCreate(BaseModel):
@@ -25,6 +25,22 @@ class CollectionCreate(BaseModel):
     title: str | None = None
     writable_anon: bool = False
     metadata: dict[str, Any] = Field(default_factory=dict)
+
+    @field_validator("metadata")
+    @classmethod
+    def _validate_dedup_grid(cls, metadata: dict[str, Any]) -> dict[str, Any]:
+        # The stamped value feeds ::double precision casts in the BEFORE-INSERT
+        # trigger, the incumbent-lookup, and migrations — a non-numeric (or
+        # explicit-null, which setdefault would preserve as an unstamped hole)
+        # value must never reach the database. bool is an int subclass: exclude.
+        if "dedup_grid" not in metadata:
+            return metadata
+        grid = metadata["dedup_grid"]
+        if isinstance(grid, bool) or not isinstance(grid, (int, float)) or grid <= 0:
+            raise ValueError(
+                "metadata.dedup_grid must be a positive number (decimal degrees per vertex)"
+            )
+        return metadata
 
 
 class CollectionOut(BaseModel):

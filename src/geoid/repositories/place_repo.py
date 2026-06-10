@@ -66,7 +66,15 @@ async def insert_with_dedup(
     dedup_grid_default: float,
     data_quality_status: str = "unverified",
 ) -> InsertResult:
-    """Insert a place, deduplicating on identical geometry within the collection."""
+    """Insert a place, deduplicating on identical geometry within the collection.
+
+    Dual-violation precedence: when a submission duplicates BOTH the geometry and
+    an existing external_id, the geometry arbiter wins — Postgres prechecks the
+    ON CONFLICT arbiter constraint before inserting into any other unique index,
+    so the request resolves to the incumbent geoid (dedup, 200) rather than the
+    external_id 409. Pinned by
+    ``test_review_fixes.py::test_dual_geometry_and_external_id_duplicate_resolves_to_dedup``.
+    """
     insert_stmt = text(
         f"""
         INSERT INTO place (
@@ -201,14 +209,18 @@ def _bbox_predicate(bbox: tuple[float, float, float, float]) -> ColumnElement[bo
 
 
 def queryable_field_mapping() -> dict[str, Any]:
-    """Map CQL2 queryable names to ORM columns (incl. geometry for spatial ops)."""
+    """Map CQL2 queryable names to ORM columns (incl. geometry for spatial ops).
+
+    This set IS the public filter contract: the queryables document advertises
+    exactly these names with ``additionalProperties: false``, and anything else
+    is rejected with 400 — a unit test pins the two in sync.
+    """
     return {
         "geoid": Place.id,
         "external_id": Place.external_id,
         "data_quality_status": Place.data_quality_status,
         "created_at": Place.created_at,
         "geometry": Place.geom,
-        "geom": Place.geom,
     }
 
 

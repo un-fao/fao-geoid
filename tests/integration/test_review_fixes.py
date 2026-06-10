@@ -39,6 +39,36 @@ async def test_dedup_grid_change_allowed_on_empty_collection(client, admin_heade
     assert grid is not None
 
 
+# --- dual-violation precedence: geometry dedup wins over external_id 409 -----
+# Postgres prechecks the ON CONFLICT arbiter (geom_hash) before touching any
+# other unique index, so a submission duplicating BOTH geometry and external_id
+# resolves to the incumbent geoid (200), never the external_id 409.
+
+async def test_dual_geometry_and_external_id_duplicate_resolves_to_dedup(client, unit_square_ccw):
+    feature = dict(unit_square_ccw, id="dup-ext")
+    base = await client.post("/collections/public/items", json=feature)
+    assert base.status_code == 201
+
+    resub = await client.post("/collections/public/items", json=feature)
+    assert resub.status_code == 200
+    assert resub.json()["geoid"] == base.json()["geoid"]
+    assert resub.json()["deduplicated"] is True
+
+
+async def test_geometry_dup_with_another_rows_external_id_resolves_to_dedup(
+    client, unit_square_ccw, other_square
+):
+    a = await client.post("/collections/public/items", json=dict(unit_square_ccw, id="ext-a"))
+    b = await client.post("/collections/public/items", json=dict(other_square, id="ext-b"))
+    assert a.status_code == 201 and b.status_code == 201
+
+    # A's geometry + B's external_id: the geometry arbiter prechecks first, so
+    # this dedups to A's geoid; the conflicting external_id is never written.
+    resub = await client.post("/collections/public/items", json=dict(unit_square_ccw, id="ext-b"))
+    assert resub.status_code == 200
+    assert resub.json()["geoid"] == a.json()["geoid"]
+
+
 # --- #4 TRUNCATE is blocked on place ----------------------------------------
 
 async def test_place_truncate_is_blocked(client, session, unit_square_ccw):

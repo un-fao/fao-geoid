@@ -56,6 +56,28 @@ async def test_list_item_ids_slice(client, admin_headers, unit_square_ccw, other
     assert len(body["item_ids"]) == 2
 
 
+async def test_list_item_ids_offset_beyond_cap_returns_400(client, admin_headers):
+    resp = await client.get(
+        "/manage/collections/public/item-ids?offset=999999999", headers=admin_headers
+    )
+    assert resp.status_code == 400
+    assert "offset" in resp.json()["detail"]
+
+
+async def test_collection_create_rejects_non_numeric_dedup_grid(client, admin_headers):
+    # The stamped value feeds ::double precision casts in the trigger and in
+    # migrations — junk must never reach the database (and an explicit null
+    # would survive setdefault as an unstamped hole).
+    await client.post("/manage/workspaces", headers=admin_headers, json={"slug": "wsv"})
+    for bad in ("10m", None, True, [0.0001], 0, -1e-7):
+        resp = await client.post(
+            "/manage/workspaces/wsv/collections",
+            headers=admin_headers,
+            json={"slug": "v", "metadata": {"dedup_grid": bad}},
+        )
+        assert resp.status_code == 422, f"dedup_grid={bad!r} was accepted"
+
+
 async def test_bulk_export_returns_geojson_feature_collection(client, unit_square_ccw, other_square):
     await client.post("/collections/public/items", json=unit_square_ccw)
     await client.post("/collections/public/items", json=other_square)

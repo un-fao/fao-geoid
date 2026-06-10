@@ -20,6 +20,7 @@ def _isolate_env(monkeypatch):
         "GEOID_OIDC_ISSUER",
         "GEOID_OIDC_JWKS_URL",
         "GEOID_DEDUP_GRID_DEFAULT",
+        "GEOID_MAX_OFFSET",
         "GEOID_ADMIN_TOKEN",
         "GEOID_ENVIRONMENT",
     ):
@@ -68,14 +69,20 @@ def test_oidc_enabled_with_issuer_and_jwks():
     assert settings.oidc_enabled is True
 
 
-def test_dedup_grid_default_is_10m():
-    # The Release-1 default coordinate precision: 9e-5 deg/vertex ≈ 10 m.
-    assert _settings().dedup_grid_default == 9e-5
+def test_dedup_grid_default_is_1cm():
+    # the reviewer's exact-match ruling: 1e-7 deg/vertex ≈ 1 cm — float-jitter immunity only.
+    assert _settings().dedup_grid_default == 1e-7
 
 
 def test_dedup_grid_default_env_override(monkeypatch):
     monkeypatch.setenv("GEOID_DEDUP_GRID_DEFAULT", "0.0005")
     assert _settings().dedup_grid_default == 0.0005
+
+
+def test_max_offset_default_and_rejects_negative():
+    assert _settings().max_offset == 100_000
+    with pytest.raises(ValidationError):
+        _settings(max_offset=-1)
 
 
 def test_default_admin_token_in_production_is_rejected():

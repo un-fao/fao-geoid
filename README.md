@@ -13,7 +13,7 @@ is the **write path** — *mint an immutable geoid → deduplicate by canonical 
 QGIS / ogr / Whisp / Ground ──►  GeoID FastAPI (one image)
                                   ├─ POST place → mint geoid + dedup + provenance   ◄── the product
                                   ├─ GET by geoid / by (external_id, collection)
-                                  ├─ OGC API Features read (landing, conformance, collections, items)
+                                  ├─ OGC API Features read (landing, conformance, collections, items, queryables)
                                   └─ /docs (Swagger)
                                           │
                                           ▼

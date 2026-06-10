@@ -72,9 +72,10 @@ class Settings(BaseSettings):
         description="This instance's id, stamped into provenance + originating_instance.",
     )
 
-    # --- API vocabulary (the reviewer's terminology ruling is a config flip) -------
-    vocab: Literal["stac", "neutral"] = Field(
-        default="stac", description='Surface vocabulary: "stac" or "neutral".'
+    # --- API vocabulary (the reviewer's ruling — workspace/collection/item — is the
+    #     "fao" preset and the shipped default) ------------------------------
+    vocab: Literal["fao", "stac", "neutral"] = Field(
+        default="fao", description='Surface vocabulary: "fao" (the ruling), "stac", or "neutral".'
     )
 
     # --- Object storage backend --------------------------------------------
@@ -86,18 +87,28 @@ class Settings(BaseSettings):
 
     # --- Geometry dedup precision ------------------------------------------
     dedup_grid_default: float = Field(
-        default=9e-5,
+        default=1e-7,
         gt=0,
         description=(
             "Default coordinate-precision grid (ST_ReducePrecision gridsize, decimal "
-            "degrees) for geometry dedup. 9e-5 ≈ 10m/vertex; per-collection override via "
-            "metadata->>'dedup_grid'."
+            "degrees) for geometry dedup. 1e-7 ≈ 1cm/vertex — exact-match semantics "
+            "(float-jitter immunity only), per the reviewer's security ruling; per-collection "
+            "override via metadata->>'dedup_grid'."
         ),
     )
 
     # --- Read paging guard rails -------------------------------------------
     default_limit: int = Field(default=100, ge=1)
     max_limit: int = Field(default=10_000, ge=1)
+    max_offset: int = Field(
+        default=100_000,
+        ge=0,
+        description=(
+            "Upper bound on the offset paging parameter; a deep OFFSET forces the DB "
+            "to scan and discard that many rows per request. rel=next links stop at "
+            "the cap, so 0 cleanly disables deep paging."
+        ),
+    )
 
     # --- Connection pool + server-side timeouts (bound the blast radius of a
     #     slow client on the public streaming bulk-export endpoint) ----------

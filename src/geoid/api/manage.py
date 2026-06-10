@@ -5,6 +5,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from geoid.api.paging import enforce_max_offset
 from geoid.config import Settings, get_settings
 from geoid.db import get_session
 from geoid.deps import require_admin
@@ -97,7 +98,9 @@ async def list_item_ids(
     limit: int = Query(default=1000, ge=1, le=100_000),
     offset: int = Query(default=0, ge=0),
     session: AsyncSession = Depends(get_session),
+    settings: Settings = Depends(get_settings),
 ) -> ItemIdList:
+    enforce_max_offset(offset, settings)
     return await listing_service.list_item_ids(
         session, collection_id, limit=limit, offset=offset
     )
