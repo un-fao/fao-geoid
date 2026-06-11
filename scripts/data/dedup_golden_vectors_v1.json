@@ -1,0 +1,162 @@
+{
+  "recipe_version": "v1",
+  "generated_on": {
+    "postgis_full_version": "POSTGIS=\"3.5.2 dea6d0a\" [EXTENSION] PGSQL=\"170\" GEOS=\"3.9.0-CAPI-1.16.2\" PROJ=\"7.2.1 NETWORK_ENABLED=OFF URL_ENDPOINT=https://cdn.proj.org USER_WRITABLE_DIRECTORY=/var/lib/postgresql/.local/share/proj DATABASE_PATH=/usr/share/proj/proj.db\" (compiled against PROJ 7.2.1) LIBXML=\"2.9.10\" LIBJSON=\"0.15\" LIBPROTOBUF=\"1.3.3\" WAGYU=\"0.5.0 (Internal)\" TOPOLOGY",
+    "generated_at": "2026-06-11T03:52:12+00:00"
+  },
+  "vectors": [
+    {
+      "name": "baseline_unit_square",
+      "wkt": "POLYGON((0 0,1 0,1 1,0 1,0 0))",
+      "grid": 1e-07,
+      "sha256": "c624e28423aaac2485c0cda6e2ecab95fba795d9b3ff32ffce582ec9868a24c4",
+      "strict": true,
+      "same_as": null,
+      "note": "canonical CCW unit square at the Release-1 default grid (~1cm/vertex)"
+    },
+    {
+      "name": "ring_start_rotation",
+      "wkt": "POLYGON((1 1,0 1,0 0,1 0,1 1))",
+      "grid": 1e-07,
+      "sha256": "c624e28423aaac2485c0cda6e2ecab95fba795d9b3ff32ffce582ec9868a24c4",
+      "strict": true,
+      "same_as": "baseline_unit_square",
+      "note": "same ring, different start vertex \u2014 ST_Normalize collapses it"
+    },
+    {
+      "name": "cw_winding",
+      "wkt": "POLYGON((0 0,0 1,1 1,1 0,0 0))",
+      "grid": 1e-07,
+      "sha256": "c624e28423aaac2485c0cda6e2ecab95fba795d9b3ff32ffce582ec9868a24c4",
+      "strict": true,
+      "same_as": "baseline_unit_square",
+      "note": "same ring, clockwise winding \u2014 ST_Normalize collapses it"
+    },
+    {
+      "name": "hole_order_canonical",
+      "wkt": "POLYGON((0 0,10 0,10 10,0 10,0 0),(2 2,3 2,3 3,2 3,2 2),(6 6,7 6,7 7,6 7,6 6))",
+      "grid": 1e-07,
+      "sha256": "91eec4a6f3e47aa3e86a7f263cd7284d62e5a5a59de671b91c8fb5ccfe6a49a3",
+      "strict": true,
+      "same_as": null,
+      "note": "two-hole polygon"
+    },
+    {
+      "name": "hole_order_swapped",
+      "wkt": "POLYGON((0 0,10 0,10 10,0 10,0 0),(6 6,7 6,7 7,6 7,6 6),(2 2,3 2,3 3,2 3,2 2))",
+      "grid": 1e-07,
+      "sha256": "91eec4a6f3e47aa3e86a7f263cd7284d62e5a5a59de671b91c8fb5ccfe6a49a3",
+      "strict": true,
+      "same_as": "hole_order_canonical",
+      "note": "holes listed in the other order \u2014 ST_Normalize collapses it"
+    },
+    {
+      "name": "multipart_order_canonical",
+      "wkt": "MULTIPOLYGON(((0 0,1 0,1 1,0 1,0 0)),((5 5,6 5,6 6,5 6,5 5)))",
+      "grid": 1e-07,
+      "sha256": "c7813a6a943961799cac3b52979c19d2c6ab51c1cad2fe28a86a4bad5bf96b78",
+      "strict": true,
+      "same_as": null,
+      "note": "two-part multipolygon"
+    },
+    {
+      "name": "multipart_order_swapped",
+      "wkt": "MULTIPOLYGON(((5 5,6 5,6 6,5 6,5 5)),((0 0,1 0,1 1,0 1,0 0)))",
+      "grid": 1e-07,
+      "sha256": "c7813a6a943961799cac3b52979c19d2c6ab51c1cad2fe28a86a4bad5bf96b78",
+      "strict": true,
+      "same_as": "multipart_order_canonical",
+      "note": "parts listed in the other order \u2014 ST_Normalize collapses it"
+    },
+    {
+      "name": "subgrid_jitter",
+      "wkt": "POLYGON((0.00000001 0,1 0,1 1,0 1,0.00000001 0))",
+      "grid": 1e-07,
+      "sha256": "c624e28423aaac2485c0cda6e2ecab95fba795d9b3ff32ffce582ec9868a24c4",
+      "strict": true,
+      "same_as": "baseline_unit_square",
+      "note": "1e-8 jitter, below the 1e-7 grid \u2014 ST_ReducePrecision absorbs it"
+    },
+    {
+      "name": "collinear_extra_vertex",
+      "wkt": "POLYGON((0 0,0.5 0,1 0,1 1,0 1,0 0))",
+      "grid": 1e-07,
+      "sha256": "eea7ebd781ce15cc240dc276bf8460457444055fe0d9af892e6cb75da7854d03",
+      "strict": true,
+      "same_as": null,
+      "note": "baseline square plus a collinear midpoint vertex \u2014 deliberately its OWN digest: the recipe does not simplify, so an inserted vertex is detectable"
+    },
+    {
+      "name": "supragrid_shift",
+      "wkt": "POLYGON((0.001 0,1 0,1 1,0 1,0.001 0))",
+      "grid": 1e-07,
+      "sha256": "e3a4cea7a26e220ae2988168fcccbd417b4eedecb37daf0539a4f3c5ab03f6cb",
+      "strict": true,
+      "same_as": null,
+      "note": "0.001-degree shift, far above the grid \u2014 a different place, own digest"
+    },
+    {
+      "name": "cell_straddle_low",
+      "wkt": "POLYGON((20.00000004 20,21 20,21 21,20 21,20.00000004 20))",
+      "grid": 1e-07,
+      "sha256": "512ec66179d071a9725a836b8befe305cf8ce90280502d8bbf9237d5f88a2ac6",
+      "strict": true,
+      "same_as": null,
+      "note": "x = 20 + 0.4 grid cells, snaps DOWN \u2014 with cell_straddle_high this pins the known cell-boundary caveat (the grid is absolute, not a radius)"
+    },
+    {
+      "name": "cell_straddle_high",
+      "wkt": "POLYGON((20.00000006 20,21 20,21 21,20 21,20.00000006 20))",
+      "grid": 1e-07,
+      "sha256": "42f8c2342d98e3fcd42bb49f94585738ebc1fc308c26f5b9ec0f083a95ebe9a9",
+      "strict": true,
+      "same_as": null,
+      "note": "x = 20 + 0.6 grid cells, snaps UP \u2014 differs from cell_straddle_low although the inputs are only 2e-8 apart"
+    },
+    {
+      "name": "negative_coords",
+      "wkt": "POLYGON((-10 -10,-9 -10,-9 -9,-10 -9,-10 -10))",
+      "grid": 1e-07,
+      "sha256": "b855779365d353876a36af2692a013b464c6d7cede6baef54ca8c735b9b49837",
+      "strict": true,
+      "same_as": null,
+      "note": "negative coordinates (western/southern hemispheres)"
+    },
+    {
+      "name": "high_precision_floats",
+      "wkt": "POLYGON((12.3456789012345 -45.6789012345678,13.3456789012345 -45.6789012345678,13.3456789012345 -44.6789012345678,12.3456789012345 -44.6789012345678,12.3456789012345 -45.6789012345678))",
+      "grid": 1e-07,
+      "sha256": "88ea98605b4c91ab282ce78d5629799cca10c93b9d1be6e99ed5a668608a87aa",
+      "strict": true,
+      "same_as": null,
+      "note": "15-significant-figure coordinates \u2014 exercises float round-tripping"
+    },
+    {
+      "name": "grid9e5_baseline",
+      "wkt": "POLYGON((0 0,1 0,1 1,0 1,0 0))",
+      "grid": 9e-05,
+      "sha256": "ec0ce2e156b780b0e39d991369662d80bb3345eb8825d4d2500a5702e4bc07ba",
+      "strict": true,
+      "same_as": null,
+      "note": "unit square at the 0003-era ~10m grid (stamped on pre-0004 populated collections by migration 0004)"
+    },
+    {
+      "name": "grid9e5_jitter",
+      "wkt": "POLYGON((0.000001 0,1 0,1 1,0 1,0.000001 0))",
+      "grid": 9e-05,
+      "sha256": "ec0ce2e156b780b0e39d991369662d80bb3345eb8825d4d2500a5702e4bc07ba",
+      "strict": true,
+      "same_as": "grid9e5_baseline",
+      "note": "1e-6 jitter, below the 9e-5 grid \u2014 collapses to grid9e5_baseline"
+    },
+    {
+      "name": "bowtie_makevalid",
+      "wkt": "POLYGON((0 0,1 1,1 0,0 1,0 0))",
+      "grid": 1e-07,
+      "sha256": "4918d6dd77a37faefe8e010ff09cd839de4bb077025113e1ae5589d7a913bca0",
+      "strict": false,
+      "same_as": null,
+      "note": "self-intersecting bowtie exercising the ST_MakeValid leg \u2014 ADVISORY only (D4): stored rows are always valid (CHECK constraint), so MakeValid drift can never change a stored hash"
+    }
+  ]
+}

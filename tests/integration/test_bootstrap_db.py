@@ -95,6 +95,9 @@ def _snapshot(pg, role: str, db: str, password: str = APP_PASSWORD) -> dict:
         hash_fn = conn.execute(
             "SELECT count(*) FROM pg_proc WHERE proname = 'geoid_geom_hash'"
         ).fetchone()[0]
+        recipe_stamp = conn.execute(
+            "SELECT recipe_version FROM dedup_recipe_stamp ORDER BY id DESC LIMIT 1"
+        ).fetchone()[0]
         workspaces = conn.execute("SELECT count(*) FROM workspace").fetchone()[0]
         collections = conn.execute("SELECT count(*) FROM collection").fetchone()[0]
     owner = _admin_scalar(
@@ -105,6 +108,7 @@ def _snapshot(pg, role: str, db: str, password: str = APP_PASSWORD) -> dict:
         "extensions": extensions,
         "triggers": triggers,
         "hash_fn": hash_fn,
+        "recipe_stamp": recipe_stamp,
         "workspaces": workspaces,
         "collections": collections,
         "owner": owner,
@@ -117,6 +121,7 @@ def test_fresh_bootstrap_then_idempotent_rerun(_postgis):
     first = _run_bootstrap(_postgis, role, db)
     assert first.returncode == 0, first.stdout + first.stderr
     assert "✓ bootstrap complete" in first.stdout
+    assert "golden vectors match" in first.stdout
 
     state = _snapshot(_postgis, role, db)
     assert state["owner"] == role
@@ -124,6 +129,7 @@ def test_fresh_bootstrap_then_idempotent_rerun(_postgis):
     assert state["extensions"] == ["pgcrypto", "postgis"]
     assert state["triggers"] >= 9
     assert state["hash_fn"] == 1
+    assert state["recipe_stamp"] == "v1"
     assert state["workspaces"] >= 1 and state["collections"] >= 1
 
     rerun = _run_bootstrap(_postgis, role, db)
