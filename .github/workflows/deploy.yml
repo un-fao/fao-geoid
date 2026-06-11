@@ -83,7 +83,7 @@ jobs:
             --service-account "$RUN_SERVICE_ACCOUNT" \
             --set-cloudsql-instances "$CLOUD_SQL_INSTANCE" \
             --set-secrets GEOID_DATABASE_URL=geoid-database-url:latest,GEOID_ADMIN_TOKEN=geoid-admin-token:latest \
-            --set-env-vars "^@^GEOID_ENVIRONMENT=review@GEOID_BASE_URL=${{ vars.GEOID_BASE_URL }}@GEOID_DID_HOST=${{ vars.GEOID_DID_HOST }}@GEOID_INSTANCE_ID=${{ vars.GEOID_INSTANCE_ID }}@GEOID_PUBLIC_COLLECTION=${{ vars.GEOID_PUBLIC_COLLECTION }}@GEOID_VOCAB=${{ vars.GEOID_VOCAB }}@GEOID_STORAGE_BACKEND=${{ vars.GEOID_STORAGE_BACKEND }}@GEOID_STORAGE_GCS_BUCKET=${{ vars.GEOID_STORAGE_GCS_BUCKET }}" \
+            --set-env-vars "^@^GEOID_ENVIRONMENT=review@GEOID_BASE_URL=${{ vars.GEOID_BASE_URL }}@GEOID_ROOT_PATH=${{ vars.GEOID_ROOT_PATH }}@GEOID_DID_HOST=${{ vars.GEOID_DID_HOST }}@GEOID_INSTANCE_ID=${{ vars.GEOID_INSTANCE_ID }}@GEOID_PUBLIC_COLLECTION=${{ vars.GEOID_PUBLIC_COLLECTION }}@GEOID_VOCAB=${{ vars.GEOID_VOCAB }}@GEOID_STORAGE_BACKEND=${{ vars.GEOID_STORAGE_BACKEND }}@GEOID_STORAGE_GCS_BUCKET=${{ vars.GEOID_STORAGE_GCS_BUCKET }}" \
             --port 8000 \
             --allow-unauthenticated \
             --execution-environment gen2 \
@@ -98,8 +98,17 @@ jobs:
         env:
           GEOID_DID_HOST: ${{ vars.GEOID_DID_HOST }}
           GEOID_PUBLIC_COLLECTION: ${{ vars.GEOID_PUBLIC_COLLECTION }}
+          # Public base the service mints links under (origin + sub-path). smoke_test.py
+          # asserts returned links carry THIS host, so it must hit the public URL — not
+          # the direct *.run.app URL, where root_path isn't stripped.
+          PUBLIC_URL: ${{ vars.GEOID_BASE_URL }}${{ vars.GEOID_ROOT_PATH }}
         run: |
+          # Hard gate: liveness + DB probe on the direct Cloud Run URL (served at root,
+          # needs no proxy). The revision must boot and reach Postgres or the deploy fails.
           URL=$(gcloud run services describe "$SERVICE" --region "$REGION" --project "$PROJECT" --format='value(status.url)')
           curl --fail --silent --show-error "$URL/health"
-          GEOID_BASE_URL="$URL" GEOID_COLLECTION="$GEOID_PUBLIC_COLLECTION" \
-            uv run --no-project --with httpx python scripts/smoke_test.py
+          # End-to-end link/identifier check against the public URL. Best-effort: on a
+          # fresh review env the LB/DNS may not be wired yet, so don't fail the deploy.
+          GEOID_BASE_URL="$PUBLIC_URL" GEOID_COLLECTION="$GEOID_PUBLIC_COLLECTION" \
+            uv run --no-project --with httpx python scripts/smoke_test.py \
+            || echo "::warning::end-to-end smoke against $PUBLIC_URL skipped/failed (LB/DNS not ready?)"

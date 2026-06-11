@@ -54,6 +54,9 @@ def create_app() -> FastAPI:
         version=__version__,
         description=_DESCRIPTION,
         lifespan=lifespan,
+        # Behind a proxy sub-path (e.g. /geoid/v1) so Swagger/openapi.json resolve there;
+        # "" (default) leaves the app at root. The proxy strips the prefix before forwarding.
+        root_path=settings.root_path,
         license_info={"name": "Apache-2.0", "url": "https://www.apache.org/licenses/LICENSE-2.0"},
         contact={"name": "FAO GeoID Team"},
     )

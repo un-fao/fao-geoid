@@ -23,6 +23,7 @@ def _isolate_env(monkeypatch):
         "GEOID_MAX_OFFSET",
         "GEOID_ADMIN_TOKEN",
         "GEOID_ENVIRONMENT",
+        "GEOID_ROOT_PATH",
     ):
         monkeypatch.delenv(key, raising=False)
 
@@ -45,6 +46,29 @@ def test_explicit_did_host_is_respected():
 def test_base_url_clean_strips_trailing_slash():
     settings = _settings(base_url="https://data.fao.org/")
     assert settings.base_url_clean == "https://data.fao.org"
+
+
+def test_root_path_defaults_empty_and_leaves_base_url_clean_unchanged():
+    settings = _settings(base_url="https://data.fao.org")
+    assert settings.root_path == ""
+    assert settings.base_url_clean == "https://data.fao.org"
+
+
+@pytest.mark.parametrize("given", ["geoid/v1", "/geoid/v1", "/geoid/v1/", "  /geoid/v1  "])
+def test_root_path_is_normalised_to_leading_slash_no_trailing(given):
+    assert _settings(root_path=given).root_path == "/geoid/v1"
+
+
+def test_base_url_clean_includes_root_path():
+    # The minted URI/OGC-link prefix must carry the proxy sub-path to stay resolvable.
+    settings = _settings(base_url="https://data.example.org", root_path="/geoid/v1")
+    assert settings.base_url_clean == "https://data.example.org/geoid/v1"
+
+
+def test_root_path_does_not_leak_into_did_host():
+    # did:web authority is host-only; the sub-path must never appear in the DID.
+    settings = _settings(base_url="https://data.example.org", root_path="/geoid/v1")
+    assert settings.did_host == "data.example.org"
 
 
 def test_did_host_percent_encodes_non_default_port():
