@@ -305,17 +305,29 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Check or (re)generate the dedup-hash golden-vector corpus."
     )
-    parser.add_argument("--check", action="store_true",
-                        help="recompute the pinned vectors against the live engine")
-    parser.add_argument("--generate", action="store_true",
-                        help="compute fresh digests and write the fixture (recipe-version event)")
+    parser.add_argument(
+        "--check", action="store_true", help="recompute the pinned vectors against the live engine"
+    )
+    parser.add_argument(
+        "--generate",
+        action="store_true",
+        help="compute fresh digests and write the fixture (recipe-version event)",
+    )
     parser.add_argument("--dsn", required=True, help="libpq DSN/URL of the database to use")
-    parser.add_argument("--fixture", type=Path, default=FIXTURE_PATH,
-                        help="fixture to check against (default: the committed corpus)")
-    parser.add_argument("--out", type=Path, default=FIXTURE_PATH,
-                        help="where --generate writes the fixture")
-    parser.add_argument("--force", action="store_true",
-                        help="allow --generate on a non-validated PostGIS/GEOS series")
+    parser.add_argument(
+        "--fixture",
+        type=Path,
+        default=FIXTURE_PATH,
+        help="fixture to check against (default: the committed corpus)",
+    )
+    parser.add_argument(
+        "--out", type=Path, default=FIXTURE_PATH, help="where --generate writes the fixture"
+    )
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        help="allow --generate on a non-validated PostGIS/GEOS series",
+    )
     args = parser.parse_args(argv)
     if args.check == args.generate:
         raise ConfigError("pass exactly one of --check / --generate")
@@ -358,11 +370,15 @@ def main(argv: list[str] | None = None) -> int:
             fixture = load_fixture(args.fixture)
             report = check_vectors(run_sql, fixture)
             for failure in report.advisory_failures:
-                print(f"⚠ advisory vector {failure.name!r} drifted "
-                      f"(expected {failure.expected}, got {failure.actual})")
+                print(
+                    f"⚠ advisory vector {failure.name!r} drifted "
+                    f"(expected {failure.expected}, got {failure.actual})"
+                )
             for failure in report.strict_failures:
-                print(f"✗ STRICT vector {failure.name!r} drifted "
-                      f"(expected {failure.expected}, got {failure.actual})")
+                print(
+                    f"✗ STRICT vector {failure.name!r} drifted "
+                    f"(expected {failure.expected}, got {failure.actual})"
+                )
             print(f"{report.passed}/{len(fixture['vectors'])} vectors match")
             return 3 if report.strict_failures else 0
     except StepError as exc:

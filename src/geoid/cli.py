@@ -1,7 +1,7 @@
 """CLI entrypoints — one image, two commands: ``web`` and ``migrate``.
 
-    geoid web       # run the API (uvicorn)
-    geoid migrate   # apply Alembic migrations to head (Cloud Run Job)
+geoid web       # run the API (uvicorn)
+geoid migrate   # apply Alembic migrations to head (Cloud Run Job)
 """
 
 from __future__ import annotations

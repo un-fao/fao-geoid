@@ -80,9 +80,7 @@ def db(_migrated):
 
 def _make_collection(db, slug: str) -> str:
     workspace_id, collection_id = str(uuid.uuid4()), str(uuid.uuid4())
-    db.execute(
-        "INSERT INTO workspace (id, slug) VALUES (%s, %s)", (workspace_id, f"ws-{slug}")
-    )
+    db.execute("INSERT INTO workspace (id, slug) VALUES (%s, %s)", (workspace_id, f"ws-{slug}"))
     db.execute(
         "INSERT INTO collection (id, workspace_id, slug) VALUES (%s, %s, %s)",
         (collection_id, workspace_id, slug),
@@ -94,8 +92,7 @@ def _insert_place(db, place_id: str, collection_id: str, wkt: str) -> None:
     # geom_hash is computed by the BEFORE INSERT trigger — under whatever
     # geoid_geom_hash body is currently installed.
     db.execute(
-        "INSERT INTO place (id, collection_id, geom) "
-        "VALUES (%s, %s, ST_GeomFromText(%s, 4326))",
+        "INSERT INTO place (id, collection_id, geom) VALUES (%s, %s, ST_GeomFromText(%s, 4326))",
         (place_id, collection_id, wkt),
     )
 
@@ -128,7 +125,11 @@ def _run_rehash(url: str, *flags: str) -> subprocess.CompletedProcess:
     env["GEOID_DATABASE_URL"] = url
     return subprocess.run(
         [sys.executable, str(SCRIPT), "--yes", *flags],
-        env=env, cwd=ROOT, capture_output=True, text=True, timeout=300,
+        env=env,
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        timeout=300,
     )
 
 

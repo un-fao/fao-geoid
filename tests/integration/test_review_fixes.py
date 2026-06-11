@@ -15,6 +15,7 @@ pytestmark = pytest.mark.integration
 # yields the GEOMETRY conflict (409 carrying the incumbent geoid), never the
 # external_id 409.
 
+
 async def test_dual_geometry_and_external_id_duplicate_yields_geometry_409(client, unit_square_ccw):
     feature = dict(unit_square_ccw, id="dup-ext")
     base = await client.post("/collections/public/items", json=feature)
@@ -43,6 +44,7 @@ async def test_geometry_dup_with_another_rows_external_id_yields_geometry_409(
 
 # --- #4 TRUNCATE is blocked on place ----------------------------------------
 
+
 async def test_place_truncate_is_blocked(client, session, unit_square_ccw):
     await client.post("/collections/public/items", json=unit_square_ccw)
     with pytest.raises(DBAPIError):
@@ -51,6 +53,7 @@ async def test_place_truncate_is_blocked(client, session, unit_square_ccw):
 
 
 # --- #5 hinge tables are append-only ----------------------------------------
+
 
 async def test_geoid_registry_delete_is_blocked(client, session, unit_square_ccw):
     geoid = (await client.post("/collections/public/items", json=unit_square_ccw)).json()["geoid"]
@@ -68,18 +71,22 @@ async def test_change_log_update_is_blocked(client, session, unit_square_ccw):
 
 # --- #2 antimeridian bbox ----------------------------------------------------
 
+
 def _square_at(x, y, s=0.5):
     return {
         "type": "Feature",
-        "geometry": {"type": "Polygon", "coordinates": [[[x, y], [x + s, y], [x + s, y + s], [x, y + s], [x, y]]]},
+        "geometry": {
+            "type": "Polygon",
+            "coordinates": [[[x, y], [x + s, y], [x + s, y + s], [x, y + s], [x, y]]],
+        },
         "properties": {},
     }
 
 
 async def test_antimeridian_bbox_returns_both_sides(client):
-    await client.post("/collections/public/items", json=_square_at(179.0, 0.0))     # near +180
-    await client.post("/collections/public/items", json=_square_at(-179.5, 0.0))    # near -180
-    await client.post("/collections/public/items", json=_square_at(0.0, 0.0))       # far away
+    await client.post("/collections/public/items", json=_square_at(179.0, 0.0))  # near +180
+    await client.post("/collections/public/items", json=_square_at(-179.5, 0.0))  # near -180
+    await client.post("/collections/public/items", json=_square_at(0.0, 0.0))  # far away
 
     crossing = (await client.get("/collections/public/items?bbox=178,-1,-178,1")).json()
     assert crossing["numberMatched"] == 2  # both antimeridian-adjacent, not the one at 0
@@ -93,6 +100,7 @@ async def test_non_crossing_bbox_still_works(client):
 
 
 # --- #6 GeoJSON content type -------------------------------------------------
+
 
 async def test_items_response_is_geojson_media_type(client, unit_square_ccw):
     await client.post("/collections/public/items", json=unit_square_ccw)
@@ -110,6 +118,7 @@ async def test_item_and_resolver_are_geojson_media_type(client, unit_square_ccw)
 
 # --- #7 real collection extent ----------------------------------------------
 
+
 async def test_collection_extent_reflects_data(client):
     await client.post("/collections/public/items", json=_square_at(10.0, 20.0, s=1.0))
     desc = (await client.get("/collections/public")).json()
@@ -118,12 +127,15 @@ async def test_collection_extent_reflects_data(client):
 
 async def test_empty_collection_extent_is_world(client, admin_headers):
     await client.post("/manage/workspaces", headers=admin_headers, json={"slug": "wsw"})
-    await client.post("/manage/workspaces/wsw/collections", headers=admin_headers, json={"slug": "emptyc"})
+    await client.post(
+        "/manage/workspaces/wsw/collections", headers=admin_headers, json={"slug": "emptyc"}
+    )
     desc = (await client.get("/collections/emptyc")).json()
     assert desc["extent"]["spatial"]["bbox"] == [[-180.0, -90.0, 180.0, 90.0]]
 
 
 # --- #12 Content-Disposition uses the validated slug ------------------------
+
 
 async def test_bulk_content_disposition_uses_slug(client, unit_square_ccw):
     await client.post("/collections/public/items", json=unit_square_ccw)

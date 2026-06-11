@@ -122,9 +122,7 @@ async def insert_place(
         """
     )
     incumbent = (
-        await session.execute(
-            lookup_stmt, {"geojson": geojson, "grid_default": dedup_grid_default}
-        )
+        await session.execute(lookup_stmt, {"geojson": geojson, "grid_default": dedup_grid_default})
     ).first()
     if incumbent is None:
         raise RuntimeError("dedup conflict but incumbent geoid not found (recipe drift?)")
@@ -169,10 +167,10 @@ async def get_by_external_id(
         """
     )
     row = (
-        await session.execute(
-            stmt, {"collection_id": collection_id, "external_id": external_id}
-        )
-    ).mappings().first()
+        (await session.execute(stmt, {"collection_id": collection_id, "external_id": external_id}))
+        .mappings()
+        .first()
+    )
     return dict(row) if row else None
 
 
@@ -265,9 +263,7 @@ async def list_item_ids(
     total = int(
         (
             await session.execute(
-                select(func.count()).select_from(Place).where(
-                    Place.collection_id == collection_id
-                )
+                select(func.count()).select_from(Place).where(Place.collection_id == collection_id)
             )
         ).scalar_one()
     )

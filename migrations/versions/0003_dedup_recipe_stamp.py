@@ -35,6 +35,7 @@ Revision ID: 0003_dedup_recipe_stamp
 Revises: 0002_paging_index
 Create Date: 2026-06-11
 """
+
 from __future__ import annotations
 
 from collections.abc import Sequence

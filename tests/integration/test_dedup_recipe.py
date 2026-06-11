@@ -18,9 +18,7 @@ _DEFAULT_GRID = 1e-7  # Release-1 default: ~1cm/vertex (exact-match per the revi
 
 
 async def _hash(session, wkt: str, grid: float = _DEFAULT_GRID) -> str:
-    stmt = text(
-        "SELECT encode(geoid_geom_hash(ST_GeomFromText(:wkt, 4326), :grid), 'hex')"
-    )
+    stmt = text("SELECT encode(geoid_geom_hash(ST_GeomFromText(:wkt, 4326), :grid), 'hex')")
     return (await session.execute(stmt, {"wkt": wkt, "grid": grid})).scalar_one()
 
 

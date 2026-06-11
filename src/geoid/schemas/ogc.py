@@ -43,9 +43,7 @@ class CollectionDesc(BaseModel):
     title: str | None = None
     description: str | None = None
     itemType: str = "feature"
-    crs: list[str] = Field(
-        default_factory=lambda: ["http://www.opengis.net/def/crs/OGC/1.3/CRS84"]
-    )
+    crs: list[str] = Field(default_factory=lambda: ["http://www.opengis.net/def/crs/OGC/1.3/CRS84"])
     extent: Extent = Field(default_factory=Extent)
     links: list[Link] = Field(default_factory=list)
 

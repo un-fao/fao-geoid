@@ -81,7 +81,9 @@ async def test_resolve_by_external_id(client):
     assert resp.json()["id"] == geoid
 
 
-async def test_external_id_conflict_returns_409_with_constraint(client, unit_square_ccw, other_square):
+async def test_external_id_conflict_returns_409_with_constraint(
+    client, unit_square_ccw, other_square
+):
     await client.post("/collections/public/items", json={**unit_square_ccw, "id": "dup"})
     clash = await client.post("/collections/public/items", json={**other_square, "id": "dup"})
     assert clash.status_code == 409
@@ -100,7 +102,11 @@ async def test_invalid_self_intersecting_polygon_returns_422_with_reason(client)
 
 
 async def test_point_geometry_rejected_422(client):
-    point = {"type": "Feature", "geometry": {"type": "Point", "coordinates": [0, 0]}, "properties": {}}
+    point = {
+        "type": "Feature",
+        "geometry": {"type": "Point", "coordinates": [0, 0]},
+        "properties": {},
+    }
     resp = await client.post("/collections/public/items", json=point)
     assert resp.status_code == 422
 
@@ -115,7 +121,9 @@ async def test_resolve_unknown_geoid_returns_404(client):
     assert resp.status_code == 404
 
 
-async def test_anonymous_write_to_managed_collection_forbidden(client, admin_headers, unit_square_ccw):
+async def test_anonymous_write_to_managed_collection_forbidden(
+    client, admin_headers, unit_square_ccw
+):
     await client.post("/manage/workspaces", headers=admin_headers, json={"slug": "ws1"})
     await client.post(
         "/manage/workspaces/ws1/collections",
@@ -126,5 +134,7 @@ async def test_anonymous_write_to_managed_collection_forbidden(client, admin_hea
     anon = await client.post("/collections/managed/items", json=unit_square_ccw)
     assert anon.status_code == 403
     # admin -> 201
-    owned = await client.post("/collections/managed/items", headers=admin_headers, json=unit_square_ccw)
+    owned = await client.post(
+        "/collections/managed/items", headers=admin_headers, json=unit_square_ccw
+    )
     assert owned.status_code == 201

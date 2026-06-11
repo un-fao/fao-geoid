@@ -30,6 +30,7 @@ bootstrap_db = _load_script_module()
 
 # --- _redact ------------------------------------------------------------------
 
+
 def test_redact_masks_url_password():
     redacted = bootstrap_db._redact("postgresql://geoid:hunter2@db.internal:5432/geoid")
     assert "hunter2" not in redacted
@@ -48,6 +49,7 @@ def test_redact_leaves_passwordless_dsn_readable():
 
 
 # --- _derive_app_url ----------------------------------------------------------
+
 
 def test_derive_app_url_extracts_role_db_and_keeps_asyncpg():
     url, role, db = bootstrap_db._derive_app_url(
@@ -90,12 +92,14 @@ def test_derive_app_url_rejects_garbage():
 
 # --- _psycopg_dsn -------------------------------------------------------------
 
+
 def test_psycopg_dsn_strips_the_async_driver_and_keeps_credentials():
     dsn = bootstrap_db._psycopg_dsn("postgresql+asyncpg://geoid:pw@host:5432/geoid")
     assert dsn == "postgresql://geoid:pw@host:5432/geoid"
 
 
 # --- _series ------------------------------------------------------------------
+
 
 def test_series_truncates_to_major_minor():
     assert bootstrap_db._series("3.5.2") == "3.5"

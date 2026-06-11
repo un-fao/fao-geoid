@@ -74,12 +74,14 @@ def _get_json(client: httpx.Client, path: str, *, expect_type: str | None = None
     assert resp.status_code == 200, f"GET {path} → {resp.status_code}: {resp.text[:200]}"
     if expect_type:
         ctype = resp.headers.get("content-type", "")
-        assert ctype.startswith(expect_type), \
+        assert ctype.startswith(expect_type), (
             f"GET {path} content-type {ctype!r}, expected {expect_type!r}"
+        )
     return resp.json()
 
 
 # --- Read checks (safe against production) -----------------------------------
+
 
 def check_landing(client: httpx.Client) -> str:
     body = _get_json(client, "/")
@@ -87,8 +89,9 @@ def check_landing(client: httpx.Client) -> str:
     assert links, "landing page advertises no links"
     expected = _expected_netloc()
     wrong = [link["href"] for link in links if urlsplit(link["href"]).netloc != expected]
-    assert not wrong, \
+    assert not wrong, (
         f"links not on {expected!r}: {wrong} — is GEOID_BASE_URL misconfigured on the server?"
+    )
     return f"{len(links)} links, all on {expected!r}"
 
 
@@ -118,8 +121,9 @@ def check_items(client: httpx.Client) -> str:
 
 
 def check_queryables(client: httpx.Client) -> str:
-    body = _get_json(client, f"/collections/{COLLECTION}/queryables",
-                     expect_type="application/schema+json")
+    body = _get_json(
+        client, f"/collections/{COLLECTION}/queryables", expect_type="application/schema+json"
+    )
     properties = body.get("properties") or {}
     assert properties, "queryables advertises no properties"
     return f"{len(properties)} queryable fields, application/schema+json"
@@ -137,12 +141,14 @@ READ_CHECKS: tuple[tuple[str, Callable[[httpx.Client], str]], ...] = (
 
 # --- Write probe (--mint, idempotent) ----------------------------------------
 
+
 def run_mint_probe(client: httpx.Client) -> list[bool]:
     minted: dict = {}
 
     def probe_mint() -> str:
-        resp = client.post(f"{BASE}/collections/{COLLECTION}/items",
-                           json=SENTINEL_FEATURE, headers=_headers())
+        resp = client.post(
+            f"{BASE}/collections/{COLLECTION}/items", json=SENTINEL_FEATURE, headers=_headers()
+        )
         if resp.status_code == 409:
             body = resp.json()
             if body.get("constraint") == "uq_place_geom_hash":
@@ -163,22 +169,28 @@ def run_mint_probe(client: httpx.Client) -> list[bool]:
         props = _get_json(client, f"/geoid/{minted['geoid']}").get("properties") or {}
         did, uri = props.get("did"), props.get("uri")
         did_host = did.split(":")[2] if did and did.count(":") >= 3 else None
-        assert did_host == _expected_did_host(), \
+        assert did_host == _expected_did_host(), (
             f"did host {did_host!r} != expected {_expected_did_host()!r} (did={did!r})"
+        )
         uri_netloc = urlsplit(uri or "").netloc
-        assert uri_netloc == _expected_netloc(), \
+        assert uri_netloc == _expected_netloc(), (
             f"uri host {uri_netloc!r} != expected {_expected_netloc()!r} (uri={uri!r})"
+        )
         return f"resolved; did on {did_host!r}, uri on {uri_netloc!r}"
 
     def probe_resolve_external() -> str:
         # The incumbent's collection (from the 201/409 body) — with global dedup
         # it may differ from the collection this run targeted.
         collection = minted.get("collection", COLLECTION)
-        props = _get_json(
-            client, f"/collections/{collection}/external/{SENTINEL_EXTERNAL_ID}"
-        ).get("properties") or {}
-        assert props.get("geoid") == minted["geoid"], \
+        props = (
+            _get_json(client, f"/collections/{collection}/external/{SENTINEL_EXTERNAL_ID}").get(
+                "properties"
+            )
+            or {}
+        )
+        assert props.get("geoid") == minted["geoid"], (
             f"external-id resolve returned {props.get('geoid')!r}, expected {minted['geoid']!r}"
+        )
         return f"external_id {SENTINEL_EXTERNAL_ID!r} → same geoid"
 
     results = [_run_check("mint sentinel", probe_mint)]
@@ -192,6 +204,7 @@ def run_mint_probe(client: httpx.Client) -> list[bool]:
 
 
 # --- Runner -------------------------------------------------------------------
+
 
 def _run_check(name: str, thunk: Callable[[], str]) -> bool:
     try:
@@ -208,8 +221,11 @@ def _run_check(name: str, thunk: Callable[[], str]) -> bool:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="GeoID post-deploy smoke test")
-    parser.add_argument("--mint", action="store_true",
-                        help="also mint the fixed sentinel feature (idempotent write probe)")
+    parser.add_argument(
+        "--mint",
+        action="store_true",
+        help="also mint the fixed sentinel feature (idempotent write probe)",
+    )
     args = parser.parse_args()
 
     mode = "+ mint probe" if args.mint else "read-only"

@@ -17,7 +17,9 @@ async def test_manage_rejects_wrong_token(client):
 
 
 async def test_create_workspace_and_collection(client, admin_headers):
-    ws = await client.post("/manage/workspaces", headers=admin_headers, json={"slug": "forestry", "title": "Forestry"})
+    ws = await client.post(
+        "/manage/workspaces", headers=admin_headers, json={"slug": "forestry", "title": "Forestry"}
+    )
     assert ws.status_code == 201
 
     coll = await client.post(
@@ -39,8 +41,12 @@ async def test_create_collection_in_unknown_workspace_404(client, admin_headers)
 
 async def test_list_collections_in_workspace_slice(client, admin_headers):
     await client.post("/manage/workspaces", headers=admin_headers, json={"slug": "ws"})
-    await client.post("/manage/workspaces/ws/collections", headers=admin_headers, json={"slug": "a"})
-    await client.post("/manage/workspaces/ws/collections", headers=admin_headers, json={"slug": "b"})
+    await client.post(
+        "/manage/workspaces/ws/collections", headers=admin_headers, json={"slug": "a"}
+    )
+    await client.post(
+        "/manage/workspaces/ws/collections", headers=admin_headers, json={"slug": "b"}
+    )
 
     body = (await client.get("/manage/workspaces/ws/collections", headers=admin_headers)).json()
     assert {c["slug"] for c in body} == {"a", "b"}
@@ -78,7 +84,9 @@ async def test_collection_create_rejects_any_dedup_grid(client, admin_headers):
         assert resp.status_code == 422, f"dedup_grid={bad!r} was accepted"
 
 
-async def test_bulk_export_returns_geojson_feature_collection(client, unit_square_ccw, other_square):
+async def test_bulk_export_returns_geojson_feature_collection(
+    client, unit_square_ccw, other_square
+):
     await client.post("/collections/public/items", json=unit_square_ccw)
     await client.post("/collections/public/items", json=other_square)
 

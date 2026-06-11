@@ -888,7 +888,7 @@ dev = [
     { name = "pytest", specifier = ">=8.3" },
     { name = "pytest-asyncio", specifier = ">=0.24" },
     { name = "pytest-cov", specifier = ">=6.0" },
-    { name = "ruff", specifier = ">=0.8" },
+    { name = "ruff", specifier = ">=0.15" },
     { name = "testcontainers", extras = ["postgres"], specifier = ">=4.8" },
 ]
 

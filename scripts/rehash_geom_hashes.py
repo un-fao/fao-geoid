@@ -89,8 +89,10 @@ class RehashConfig:
     @property
     def dsn(self) -> str:
         """SQLAlchemy ``postgresql+asyncpg://`` URL → plain libpq/psycopg URL."""
-        return make_url(self.app_url).set(drivername="postgresql").render_as_string(
-            hide_password=False
+        return (
+            make_url(self.app_url)
+            .set(drivername="postgresql")
+            .render_as_string(hide_password=False)
         )
 
 
@@ -128,8 +130,7 @@ def _load_config(argv: list[str] | None = None) -> RehashConfig:
     parser = argparse.ArgumentParser(
         description="Recompute place.geom_hash under the live engine (one transaction)."
     )
-    parser.add_argument("--dry-run", action="store_true",
-                        help="scan + plan only; mutate nothing")
+    parser.add_argument("--dry-run", action="store_true", help="scan + plan only; mutate nothing")
     parser.add_argument("--yes", action="store_true", help="skip the confirmation prompt")
     args = parser.parse_args(argv)
 
@@ -163,9 +164,7 @@ def _load_dedup_vectors():
 def preflight(conn: psycopg.Connection) -> None:
     print("→ pre-flight")
     if conn.execute("SELECT to_regclass('dedup_recipe_stamp')").fetchone()[0] is None:
-        raise StepError(
-            "dedup_recipe_stamp table missing — run `geoid migrate` to 0003+ first"
-        )
+        raise StepError("dedup_recipe_stamp table missing — run `geoid migrate` to 0003+ first")
     stamp = conn.execute(
         "SELECT recipe_version, postgis_version, geos_version, stamped_at "
         "FROM dedup_recipe_stamp ORDER BY id DESC LIMIT 1"
@@ -178,21 +177,23 @@ def preflight(conn: psycopg.Connection) -> None:
         raise StepError("geoid_geom_hash() is missing — run `geoid migrate` first")
     lib = conn.execute("SELECT postgis_lib_version()").fetchone()[0]
     geos = conn.execute("SELECT postgis_geos_version()").fetchone()[0]
-    print(f"  stamped : recipe {stamp[0]} on PostGIS {stamp[1]} / GEOS {stamp[2]} "
-          f"({stamp[3]:%Y-%m-%d})")
+    print(
+        f"  stamped : recipe {stamp[0]} on PostGIS {stamp[1]} / GEOS {stamp[2]} "
+        f"({stamp[3]:%Y-%m-%d})"
+    )
     print(f"  live    : PostGIS {lib} / GEOS {geos}")
 
     vectors = _load_dedup_vectors()
     try:
-        report = vectors.check_vectors(
-            vectors._psycopg_run_sql(conn), vectors.load_fixture()
-        )
+        report = vectors.check_vectors(vectors._psycopg_run_sql(conn), vectors.load_fixture())
     except vectors.StepError as exc:
         print(f"  ⚠ golden-vector check unavailable: {exc}")
         return
     if report.strict_failures:
-        print(f"  ⚠ {len(report.strict_failures)} strict golden vector(s) drifted — "
-              "stored hashes are likely stale (this run is what fixes that)")
+        print(
+            f"  ⚠ {len(report.strict_failures)} strict golden vector(s) drifted — "
+            "stored hashes are likely stale (this run is what fixes that)"
+        )
     else:
         print("  ✓ all golden vectors match — this run will likely be a no-op")
 
@@ -241,9 +242,7 @@ def plan_rehash(rows: Sequence[ScanRow]) -> RehashPlan:
     unchanged_count = len(rows) - len(drifted)
     updates = [row for row in drifted if winners[row.new_hash] is row]
     skipped: list[tuple[ScanRow, uuid.UUID]] = [
-        (row, winners[row.new_hash].id)
-        for row in drifted
-        if winners[row.new_hash] is not row
+        (row, winners[row.new_hash].id) for row in drifted if winners[row.new_hash] is not row
     ]
 
     # Fixed point: a skipped row RETAINS its old hash, so any planned update
@@ -257,8 +256,12 @@ def plan_rehash(rows: Sequence[ScanRow]) -> RehashPlan:
         skipped += [(row, retained[row.new_hash].id) for row in demoted]
 
     pairs = tuple(
-        SkippedPair(collection_id=row.collection_id, loser_id=row.id,
-                    winner_id=winner_id, geom_hash=row.new_hash)
+        SkippedPair(
+            collection_id=row.collection_id,
+            loser_id=row.id,
+            winner_id=winner_id,
+            geom_hash=row.new_hash,
+        )
         for row, winner_id in skipped
     )
     return RehashPlan(tuple(updates), pairs, unchanged_count)
@@ -266,13 +269,15 @@ def plan_rehash(rows: Sequence[ScanRow]) -> RehashPlan:
 
 def apply_updates(conn: psycopg.Connection, plan: RehashPlan) -> None:
     print(f"→ apply ({len(plan.updates)} update(s), one transaction)")
-    note = (f"updated {len(plan.updates)}, skipped {len(plan.skipped_pairs)}, "
-            f"unchanged {plan.unchanged_count}")
+    note = (
+        f"updated {len(plan.updates)}, skipped {len(plan.skipped_pairs)}, "
+        f"unchanged {plan.unchanged_count}"
+    )
     with conn.transaction():
         # ACCESS EXCLUSIVE on place — the runbook mandates a write freeze.
         conn.execute(f"ALTER TABLE place DISABLE TRIGGER {MUTATION_TRIGGER}")
         for start in range(0, len(plan.updates), UPDATE_CHUNK_SIZE):
-            chunk = plan.updates[start:start + UPDATE_CHUNK_SIZE]
+            chunk = plan.updates[start : start + UPDATE_CHUNK_SIZE]
             values = ", ".join(["(%s::uuid, %s)"] * len(chunk))
             params = [param for row in chunk for param in (str(row.id), row.new_hash)]
             conn.execute(
@@ -297,12 +302,16 @@ def apply_updates(conn: psycopg.Connection, plan: RehashPlan) -> None:
 def report(plan: RehashPlan) -> int:
     if not plan.skipped_pairs:
         return 0
-    print(f"\n⚠ {len(plan.skipped_pairs)} discovered-duplicate pair(s) — losers keep "
-          "their old hash; review and (if confirmed duplicates) supersede via the "
-          "normal predecessor flow:")
+    print(
+        f"\n⚠ {len(plan.skipped_pairs)} discovered-duplicate pair(s) — losers keep "
+        "their old hash; review and (if confirmed duplicates) supersede via the "
+        "normal predecessor flow:"
+    )
     for pair in plan.skipped_pairs:
-        print(f"  - place {pair.loser_id} (collection {pair.collection_id}) now hashes "
-              f"identically to place {pair.winner_id} (digest {pair.geom_hash}) — skipped")
+        print(
+            f"  - place {pair.loser_id} (collection {pair.collection_id}) now hashes "
+            f"identically to place {pair.winner_id} (digest {pair.geom_hash}) — skipped"
+        )
     return 3
 
 
@@ -316,8 +325,10 @@ def main(argv: list[str] | None = None) -> int:
     print(f"GeoID geom_hash re-hash ({'DRY-RUN' if cfg.dry_run else 'live'})")
     print(f"  app URL : {_redact(cfg.app_url)}")
     if not cfg.dry_run and not cfg.assume_yes:
-        answer = input("place gets an ACCESS EXCLUSIVE lock — writes must be frozen "
-                       "(docs/DEPLOYMENT.md §14). proceed? [y/N] ")
+        answer = input(
+            "place gets an ACCESS EXCLUSIVE lock — writes must be frozen "
+            "(docs/DEPLOYMENT.md §14). proceed? [y/N] "
+        )
         if answer.strip().lower() not in ("y", "yes"):
             print("aborted")
             return 2
@@ -327,8 +338,10 @@ def main(argv: list[str] | None = None) -> int:
             preflight(conn)
             rows = scan(conn)
             plan = plan_rehash(rows)
-            print(f"→ plan: {len(plan.updates)} to update, "
-                  f"{len(plan.skipped_pairs)} to skip, {plan.unchanged_count} unchanged")
+            print(
+                f"→ plan: {len(plan.updates)} to update, "
+                f"{len(plan.skipped_pairs)} to skip, {plan.unchanged_count} unchanged"
+            )
             if cfg.dry_run:
                 exit_code = report(plan)
                 print("\n✓ dry-run complete (nothing mutated)")

@@ -1,0 +1,105 @@
+name: deploy
+
+# Build -> migrate -> deploy to Cloud Run on every push to main. Keyless WIF auth
+# (no SA JSON in GitHub). Migrations run as a blocking Cloud Run Job before the
+# service is updated, so a failed `alembic upgrade head` fails the deploy.
+on:
+  push:
+    branches: [main]
+    paths:
+      - "src/**"
+      - "migrations/**"
+      - "Dockerfile"
+      - "pyproject.toml"
+      - "uv.lock"
+      - ".github/workflows/deploy.yml"
+
+# Never cancel a deploy mid-flight (a half-applied migration + old revision is worse
+# than a queued run); serialize instead.
+concurrency:
+  group: deploy-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  id-token: write   # mint the OIDC token WIF exchanges for GCP credentials
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    env:
+      PROJECT: ${{ vars.GCP_PROJECT_ID }}
+      REGION: ${{ vars.GCP_REGION }}
+      ARTIFACT_REGISTRY: ${{ vars.ARTIFACT_REGISTRY }}
+      SERVICE: ${{ vars.SERVICE_NAME }}
+      RUN_SERVICE_ACCOUNT: ${{ vars.RUN_SERVICE_ACCOUNT }}
+      CLOUD_SQL_INSTANCE: ${{ vars.CLOUD_SQL_INSTANCE }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Authenticate to Google Cloud (WIF)
+        uses: google-github-actions/auth@v3
+        with:
+          workload_identity_provider: ${{ vars.WORKLOAD_ID_PROVIDER }}
+          service_account: ${{ vars.ACTIONS_SERVICE_ACCOUNT }}
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v3
+
+      - name: Resolve image reference
+        run: |
+          echo "IMAGE=${REGION}-docker.pkg.dev/${PROJECT}/${ARTIFACT_REGISTRY}/${SERVICE}:${{ github.sha }}" >> "$GITHUB_ENV"
+
+      # Cloud Build honours the Dockerfile's buildkit cache mounts; matches the
+      # team's other repos and keeps build creds off the runner.
+      - name: Build and push image (Cloud Build)
+        run: gcloud builds submit --tag "$IMAGE" --project "$PROJECT"
+
+      # Idempotent `alembic upgrade head`, blocking: --wait fails the step (and the
+      # deploy) if the migration job exits non-zero. --max-retries 0 = no silent retry.
+      - name: Run migrations (Cloud Run Job)
+        run: |
+          gcloud run jobs deploy "${SERVICE}-migrate" \
+            --image "$IMAGE" \
+            --region "$REGION" \
+            --project "$PROJECT" \
+            --service-account "$RUN_SERVICE_ACCOUNT" \
+            --set-cloudsql-instances "$CLOUD_SQL_INSTANCE" \
+            --set-secrets GEOID_DATABASE_URL=geoid-database-url:latest \
+            --set-env-vars GEOID_ENVIRONMENT=review \
+            --command geoid --args migrate \
+            --max-retries 0
+          gcloud run jobs execute "${SERVICE}-migrate" \
+            --region "$REGION" \
+            --project "$PROJECT" \
+            --wait
+
+      - name: Deploy service (Cloud Run)
+        run: |
+          gcloud run deploy "$SERVICE" \
+            --image "$IMAGE" \
+            --region "$REGION" \
+            --project "$PROJECT" \
+            --service-account "$RUN_SERVICE_ACCOUNT" \
+            --set-cloudsql-instances "$CLOUD_SQL_INSTANCE" \
+            --set-secrets GEOID_DATABASE_URL=geoid-database-url:latest,GEOID_ADMIN_TOKEN=geoid-admin-token:latest \
+            --set-env-vars "^@^GEOID_ENVIRONMENT=review@GEOID_BASE_URL=${{ vars.GEOID_BASE_URL }}@GEOID_DID_HOST=${{ vars.GEOID_DID_HOST }}@GEOID_INSTANCE_ID=${{ vars.GEOID_INSTANCE_ID }}@GEOID_PUBLIC_COLLECTION=${{ vars.GEOID_PUBLIC_COLLECTION }}@GEOID_VOCAB=${{ vars.GEOID_VOCAB }}@GEOID_STORAGE_BACKEND=${{ vars.GEOID_STORAGE_BACKEND }}@GEOID_STORAGE_GCS_BUCKET=${{ vars.GEOID_STORAGE_GCS_BUCKET }}" \
+            --port 8000 \
+            --allow-unauthenticated \
+            --execution-environment gen2 \
+            --min-instances 0 \
+            --max-instances 4 \
+            --cpu-boost
+
+      - name: Install uv (for the smoke script)
+        uses: astral-sh/setup-uv@v8
+
+      - name: Smoke test new revision
+        env:
+          GEOID_DID_HOST: ${{ vars.GEOID_DID_HOST }}
+          GEOID_PUBLIC_COLLECTION: ${{ vars.GEOID_PUBLIC_COLLECTION }}
+        run: |
+          URL=$(gcloud run services describe "$SERVICE" --region "$REGION" --project "$PROJECT" --format='value(status.url)')
+          curl --fail --silent --show-error "$URL/health"
+          GEOID_BASE_URL="$URL" GEOID_COLLECTION="$GEOID_PUBLIC_COLLECTION" \
+            uv run --no-project --with httpx python scripts/smoke_test.py

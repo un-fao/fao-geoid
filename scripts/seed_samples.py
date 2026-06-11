@@ -29,9 +29,7 @@ def _headers() -> dict[str, str]:
 
 
 def _post(client: httpx.Client, feature: dict) -> httpx.Response:
-    return client.post(
-        f"{BASE}/collections/{COLLECTION}/items", json=feature, headers=_headers()
-    )
+    return client.post(f"{BASE}/collections/{COLLECTION}/items", json=feature, headers=_headers())
 
 
 def main() -> int:
@@ -40,7 +38,9 @@ def main() -> int:
             client.get(f"{BASE}/conformance").raise_for_status()
         except Exception as exc:
             print(f"✗ cannot reach GeoID at {BASE} ({exc}).")
-            print("  Start it first:  docker compose up --build   (or uv run uvicorn geoid.main:app)")
+            print(
+                "  Start it first:  docker compose up --build   (or uv run uvicorn geoid.main:app)"
+            )
             return 1
         print(f"→ GeoID at {BASE}, collection '{COLLECTION}'\n")
 
@@ -67,8 +67,10 @@ def main() -> int:
         resp = _post(client, dup)
         body = resp.json()
         status = "409 Conflict" if resp.status_code == 409 else f"?? {resp.status_code}"
-        print(f"  [{status}] insert rejected; incumbent geoid={body.get('geoid')} "
-              f"(collection={body.get('collection')})")
+        print(
+            f"  [{status}] insert rejected; incumbent geoid={body.get('geoid')} "
+            f"(collection={body.get('collection')})"
+        )
 
         print("\n== Validation demo (self-intersecting bow-tie) ==")
         invalid = json.loads((SAMPLES / "invalid_selfintersecting.geojson").read_text())
@@ -97,7 +99,9 @@ def main() -> int:
             print(f"  provenance:  {props['_geoid_provenance']['client']}")
 
         bulk = client.get(f"{BASE}/collections/{COLLECTION}/bulk").json()
-        print(f"\n== Bulk export ==\n  GeoJSON FeatureCollection with {len(bulk['features'])} features")
+        print(
+            f"\n== Bulk export ==\n  GeoJSON FeatureCollection with {len(bulk['features'])} features"
+        )
         print(f"\n✓ done — explore at {BASE}/docs")
     return 0
 

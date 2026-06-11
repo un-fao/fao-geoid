@@ -82,13 +82,25 @@ def landing_page(settings: Settings) -> LandingPage:
         ),
         links=[
             Link(href=f"{base}/", rel="self", type=_JSON, title="This landing page"),
-            Link(href=f"{base}/conformance", rel="conformance", type=_JSON,
-                 title="Conformance classes"),
+            Link(
+                href=f"{base}/conformance",
+                rel="conformance",
+                type=_JSON,
+                title="Conformance classes",
+            ),
             Link(href=f"{base}/collections", rel="data", type=_JSON, title="Collections"),
-            Link(href=f"{base}/docs", rel="service-doc", type="text/html",
-                 title="API documentation (Swagger)"),
-            Link(href=f"{base}/openapi.json", rel="service-desc", type=_JSON,
-                 title="OpenAPI definition"),
+            Link(
+                href=f"{base}/docs",
+                rel="service-doc",
+                type="text/html",
+                title="API documentation (Swagger)",
+            ),
+            Link(
+                href=f"{base}/openapi.json",
+                rel="service-desc",
+                type=_JSON,
+                title="OpenAPI definition",
+            ),
         ],
     )
 
@@ -116,10 +128,18 @@ def collection_desc(
         extent=extent,
         links=[
             Link(href=f"{base}/collections/{slug}", rel="self", type=_JSON),
-            Link(href=f"{base}/collections/{slug}/items", rel="items", type=_GEOJSON,
-                 title="Features"),
-            Link(href=f"{base}/collections/{slug}/queryables", rel=_QUERYABLES_REL,
-                 type=_SCHEMA_JSON, title="Queryables (CQL2 filterable fields)"),
+            Link(
+                href=f"{base}/collections/{slug}/items",
+                rel="items",
+                type=_GEOJSON,
+                title="Features",
+            ),
+            Link(
+                href=f"{base}/collections/{slug}/queryables",
+                rel=_QUERYABLES_REL,
+                type=_SCHEMA_JSON,
+                title="Queryables (CQL2 filterable fields)",
+            ),
             Link(href=f"{base}/collections", rel="parent", type=_JSON),
         ],
     )
@@ -135,9 +155,7 @@ def queryables(
     names 400), which a unit test enforces.
     """
     properties = {
-        name: dict(schema)
-        for name, schema in _QUERYABLE_SCHEMAS.items()
-        if name in queryable_names
+        name: dict(schema) for name, schema in _QUERYABLE_SCHEMAS.items() if name in queryable_names
     }
     return {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -149,13 +167,18 @@ def queryables(
     }
 
 
-def _feature_links(settings: Settings, *, geoid: uuid.UUID, collection: str,
-                   predecessor_id: uuid.UUID | None) -> list[Link]:
+def _feature_links(
+    settings: Settings, *, geoid: uuid.UUID, collection: str, predecessor_id: uuid.UUID | None
+) -> list[Link]:
     base = settings.base_url_clean
     links = [
         Link(href=f"{base}/collections/{collection}/items/{geoid}", rel="self", type=_GEOJSON),
-        Link(href=f"{base}/geoid/{geoid}", rel="alternate", type=_GEOJSON,
-             title="Durable geoid resolver"),
+        Link(
+            href=f"{base}/geoid/{geoid}",
+            rel="alternate",
+            type=_GEOJSON,
+            title="Durable geoid resolver",
+        ),
         Link(href=f"{base}/collections/{collection}", rel="collection", type=_JSON),
     ]
     if predecessor_id is not None:
@@ -231,8 +254,9 @@ def build_feature_collection(
     features = [build_feature(settings, _with_collection_slug(r, collection)) for r in rows]
 
     links = [
-        Link(href=f"{items_url}?{_paging_qs(limit, offset, query_suffix)}", rel="self",
-             type=_GEOJSON),
+        Link(
+            href=f"{items_url}?{_paging_qs(limit, offset, query_suffix)}", rel="self", type=_GEOJSON
+        ),
         Link(href=f"{base}/collections/{collection}", rel="collection", type=_JSON),
     ]
     # Never advertise a link the server's own offset cap would 400 — the walk

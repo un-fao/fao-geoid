@@ -8,6 +8,7 @@ Revision ID: 0002_paging_index
 Revises: 0001_initial
 Create Date: 2026-06-06
 """
+
 from __future__ import annotations
 
 from collections.abc import Sequence
