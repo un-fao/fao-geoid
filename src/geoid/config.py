@@ -54,6 +54,16 @@ class Settings(BaseSettings):
         default=None,
         description="did:web host authority. Defaults to the BASE_URL host if unset.",
     )
+    root_path: str = Field(
+        default="",
+        description=(
+            "Sub-path the API is mounted under behind a reverse proxy (env: "
+            "GEOID_ROOT_PATH), e.g. '/geoid/v1'. Passed to FastAPI(root_path=...) so "
+            "Swagger/OpenAPI resolve behind the proxy, and prepended to BASE_URL when "
+            "deriving public URIs/OGC links. The proxy is expected to strip this prefix "
+            "before forwarding. did_host is unaffected (authority only, never a path)."
+        ),
+    )
 
     # --- Auth (temporary static-token stopgap; unified auth service later) -
     admin_token: str = Field(
@@ -142,6 +152,13 @@ class Settings(BaseSettings):
         return self
 
     @model_validator(mode="after")
+    def _normalize_root_path(self) -> Settings:
+        # Accept "geoid/v1", "/geoid/v1", "/geoid/v1/" -> "/geoid/v1"; "" stays "".
+        rp = self.root_path.strip()
+        object.__setattr__(self, "root_path", "/" + rp.strip("/") if rp else "")
+        return self
+
+    @model_validator(mode="after")
     def _forbid_dev_token_in_prod(self) -> Settings:
         # Fail fast so a missing secret mount can't leave the dev token live in prod.
         if self.environment != "development" and self.admin_token == _DEV_ADMIN_TOKEN:
@@ -154,8 +171,13 @@ class Settings(BaseSettings):
 
     @property
     def base_url_clean(self) -> str:
-        """BASE_URL without a trailing slash (link derivation expects this)."""
-        return self.base_url.rstrip("/")
+        """Public base for link derivation: BASE_URL (no trailing slash) + ROOT_PATH.
+
+        When the API sits behind a proxy sub-path (root_path, e.g. '/geoid/v1'), every
+        minted URI / OGC link must carry that prefix to stay resolvable. root_path is
+        already normalised to '' or '/<path>', so this concatenation is safe.
+        """
+        return self.base_url.rstrip("/") + self.root_path
 
     @property
     def oidc_enabled(self) -> bool:
