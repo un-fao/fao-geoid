@@ -32,7 +32,7 @@ class Place(Base):
     __tablename__ = "place"
     __table_args__ = (
         UniqueConstraint("collection_id", "external_id", name="uq_place_collection_external_id"),
-        UniqueConstraint("collection_id", "geom_hash", name="uq_place_collection_geom_hash"),
+        UniqueConstraint("geom_hash", name="uq_place_geom_hash"),
         CheckConstraint(
             "GeometryType(geom) IN ('POLYGON', 'MULTIPOLYGON')",
             name="ck_place_geom_is_polygonal",

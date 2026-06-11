@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import uuid
+
 
 class GeoidServiceError(Exception):
     """Base class for service errors."""
@@ -39,3 +41,17 @@ class PlaceNotFoundError(GeoidServiceError):
     def __init__(self, identifier: str) -> None:
         self.identifier = identifier
         super().__init__(f"place not found: {identifier}")
+
+
+class GeometryConflictError(GeoidServiceError):
+    """An identical geometry already exists in the catalog (global dedup, 409).
+
+    Carries the incumbent geoid + its collection so the 409 body can point the
+    client at the existing registration (the reviewer/the reviewer's ruling: the insert fails
+    AND the response names the existing geoid).
+    """
+
+    def __init__(self, geoid: uuid.UUID, collection: str) -> None:
+        self.geoid = geoid
+        self.collection = collection
+        super().__init__("identical geometry already exists in the catalog")

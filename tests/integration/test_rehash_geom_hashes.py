@@ -11,7 +11,6 @@ engine build, which is exactly the state the script exists to repair.
 
 from __future__ import annotations
 
-import json
 import os
 import subprocess
 import sys
@@ -79,16 +78,14 @@ def db(_migrated):
             conn.execute("ALTER TABLE place ENABLE TRIGGER place_block_mutation_bud")
 
 
-def _make_collection(db, slug: str, dedup_grid: float | None = None) -> str:
+def _make_collection(db, slug: str) -> str:
     workspace_id, collection_id = str(uuid.uuid4()), str(uuid.uuid4())
     db.execute(
         "INSERT INTO workspace (id, slug) VALUES (%s, %s)", (workspace_id, f"ws-{slug}")
     )
-    metadata = json.dumps({"dedup_grid": dedup_grid} if dedup_grid is not None else {})
     db.execute(
-        "INSERT INTO collection (id, workspace_id, slug, metadata) "
-        "VALUES (%s, %s, %s, %s::jsonb)",
-        (collection_id, workspace_id, slug, metadata),
+        "INSERT INTO collection (id, workspace_id, slug) VALUES (%s, %s, %s)",
+        (collection_id, workspace_id, slug),
     )
     return collection_id
 
@@ -203,24 +200,27 @@ def test_collision_keeps_loser_reports_pair_and_leaves_hinges_alone(db, _migrate
     assert _latest_stamp(db)[1] == "updated 1, skipped 1, unchanged 0"
 
 
-def test_per_collection_grid_is_respected(db, _migrated):
+def test_cross_collection_collision_is_global_exit_3_both_rows_survive(db, _migrated):
+    # Geometry uniqueness is GLOBAL: the same canonical geometry in TWO
+    # different collections is a discovered duplicate. The script reports the
+    # pair (exit 3) and never deletes either row.
     db.execute(DRIFTED_FN)
-    coarse = _make_collection(db, "coarse", dedup_grid=9e-5)
-    fine = _make_collection(db, "fine")  # unstamped → 1e-7 fallback
-    jittered = "POLYGON((10.000001 10,11 10,11 11,10 11,10.000001 10))"  # 1e-6 jitter
-    _insert_place(db, _place_id(1), coarse, jittered)
-    _insert_place(db, _place_id(2), fine, jittered)
+    coll_a = _make_collection(db, "xcoll-a")
+    coll_b = _make_collection(db, "xcoll-b")
+    _insert_place(db, _place_id(1), coll_a, SQUARE)
+    _insert_place(db, _place_id(2), coll_b, SQUARE_JITTERED)
+    loser_hash_before = _stored_hash(db, _place_id(2))
     db.execute(CANONICAL_FN)
 
     result = _run_rehash(_migrated)
-    assert result.returncode == 0, result.stdout + result.stderr
+    assert result.returncode == 3, result.stdout + result.stderr
+    assert "discovered-duplicate" in result.stdout
+    assert _place_id(1) in result.stdout and _place_id(2) in result.stdout
 
-    coarse_hash = _stored_hash(db, _place_id(1))
-    fine_hash = _stored_hash(db, _place_id(2))
-    assert coarse_hash == _canonical_hash(db, _place_id(1), 9e-5)
-    assert fine_hash == _canonical_hash(db, _place_id(2), 1e-7)
-    # 1e-6 jitter is absorbed by the 9e-5 grid but preserved by the 1e-7 grid.
-    assert coarse_hash != fine_hash
+    # Earliest id won the canonical hash; the loser retains its old hash.
+    assert _stored_hash(db, _place_id(1)) == _canonical_hash(db, _place_id(1), 1e-7)
+    assert _stored_hash(db, _place_id(2)) == loser_hash_before
+    assert db.execute("SELECT count(*) FROM place").fetchone()[0] == 2  # never delete
 
 
 def test_place_is_still_immutable_after_rehash(db, _migrated):

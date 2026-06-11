@@ -55,15 +55,16 @@ async def test_change_log_hinge_records_create(client, session, unit_square_ccw)
     assert row[0] == "create"
 
 
-async def test_dedup_does_not_add_duplicate_registry_or_changelog(
+async def test_duplicate_geometry_409_leaves_hinges_untouched(
     client, session, unit_square_ccw, unit_square_reversed
 ):
     await client.post("/collections/public/items", json=unit_square_ccw)
-    await client.post("/collections/public/items", json=unit_square_reversed)  # dedup
+    second = await client.post("/collections/public/items", json=unit_square_reversed)
+    assert second.status_code == 409  # identical geometry → insert fails
 
     place_count = (await session.execute(text("SELECT count(*) FROM place"))).scalar_one()
     registry_count = (await session.execute(text("SELECT count(*) FROM geoid_registry"))).scalar_one()
     changelog_count = (await session.execute(text("SELECT count(*) FROM change_log"))).scalar_one()
     assert place_count == 1
     assert registry_count == 1
-    assert changelog_count == 1  # the dedup'd second POST adds nothing
+    assert changelog_count == 1  # the rejected second POST adds nothing

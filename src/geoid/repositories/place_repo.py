@@ -1,12 +1,12 @@
-"""Place data access — the dedup insert and the OGC read queries.
+"""Place data access — the conflict-aware insert and the OGC read queries.
 
 The insert is the product's hot path. ``geom_hash`` is computed by the BEFORE
-INSERT trigger; we dedup with ``ON CONFLICT ON CONSTRAINT
-uq_place_collection_geom_hash DO NOTHING`` so that ONLY an identical-geometry
-clash is swallowed — an external_id or geoid clash still raises 23505 and is
-mapped to 409. When the insert is swallowed we look up the incumbent geoid using
-the SAME ``geoid_geom_hash`` SQL function the trigger uses, so the two can never
-drift.
+INSERT trigger; ``ON CONFLICT ON CONSTRAINT uq_place_geom_hash DO NOTHING``
+swallows ONLY an identical-geometry clash (catalog-wide) — an external_id or
+geoid clash still raises 23505 and is mapped to 409 by constraint name. When
+the insert is swallowed we look up the incumbent geoid using the SAME
+``geoid_geom_hash`` SQL function the trigger uses, so the two can never drift;
+the service then raises ``GeometryConflictError`` (→ 409 + incumbent geoid).
 """
 
 from __future__ import annotations
@@ -29,7 +29,8 @@ _GEOM_EXPR = "ST_SetSRID(ST_GeomFromGeoJSON(:geojson), 4326)"
 @dataclass(frozen=True)
 class InsertResult:
     geoid: uuid.UUID
-    created: bool  # True = newly minted; False = deduplicated to an incumbent
+    created: bool  # True = newly minted; False = an identical geometry already exists
+    collection_slug: str | None = None  # the INCUMBENT's collection when created=False
 
 
 _POLYGONAL = ("POLYGON", "MULTIPOLYGON")
@@ -54,7 +55,7 @@ async def geometry_invalid_reason(session: AsyncSession, geojson: str) -> str:
     return row["reason"] or "invalid geometry"
 
 
-async def insert_with_dedup(
+async def insert_place(
     session: AsyncSession,
     *,
     geoid: uuid.UUID,
@@ -66,14 +67,20 @@ async def insert_with_dedup(
     dedup_grid_default: float,
     data_quality_status: str = "unverified",
 ) -> InsertResult:
-    """Insert a place, deduplicating on identical geometry within the collection.
+    """Insert a place; an identical geometry ANYWHERE in the catalog conflicts.
+
+    Race safety: Postgres speculative insertion makes a concurrent loser block on
+    the winner's XID with its own transaction still healthy, and under READ
+    COMMITTED the follow-up incumbent lookup takes a fresh snapshot that sees the
+    winner's committed row — so every conflict resolves to a real incumbent
+    geoid. This breaks if the isolation level is ever raised to REPEATABLE READ.
 
     Dual-violation precedence: when a submission duplicates BOTH the geometry and
     an existing external_id, the geometry arbiter wins — Postgres prechecks the
     ON CONFLICT arbiter constraint before inserting into any other unique index,
-    so the request resolves to the incumbent geoid (dedup, 200) rather than the
-    external_id 409. Pinned by
-    ``test_review_fixes.py::test_dual_geometry_and_external_id_duplicate_resolves_to_dedup``.
+    so the request yields the geometry 409 (incumbent geoid attached) rather than
+    the external_id 409. Pinned by
+    ``test_review_fixes.py::test_dual_geometry_and_external_id_duplicate_yields_geometry_409``.
     """
     insert_stmt = text(
         f"""
@@ -85,7 +92,7 @@ async def insert_with_dedup(
             :geoid, :collection_id, {_GEOM_EXPR}, :external_id,
             CAST(:provenance AS jsonb), :originating_instance, :data_quality_status
         )
-        ON CONFLICT ON CONSTRAINT uq_place_collection_geom_hash DO NOTHING
+        ON CONFLICT ON CONSTRAINT uq_place_geom_hash DO NOTHING
         RETURNING id
         """
     )
@@ -102,37 +109,26 @@ async def insert_with_dedup(
     if row is not None:
         return InsertResult(geoid=row[0], created=True)
 
-    # Swallowed by the geom_hash dedup -> resolve the incumbent via the SAME recipe.
-    # The grid fallback (:grid_default) must match the BEFORE-INSERT trigger's so the
-    # recomputed hash can't drift from the stored one; both default to the configured
-    # GEOID_DEDUP_GRID_DEFAULT when a collection carries no explicit dedup_grid.
+    # Swallowed by the geom_hash arbiter -> resolve the incumbent (catalog-wide)
+    # via the SAME recipe. The grid (:grid_default = GEOID_DEDUP_GRID_DEFAULT)
+    # must match the BEFORE-INSERT trigger's pinned literal (migration 0001) so
+    # the recomputed hash can't drift from the stored one — retunes are
+    # migration events, never a config-only change.
     lookup_stmt = text(
         f"""
-        SELECT id FROM place
-        WHERE collection_id = :collection_id
-          AND geom_hash = geoid_geom_hash(
-                {_GEOM_EXPR},
-                COALESCE(
-                    (SELECT (metadata->>'dedup_grid')::double precision
-                       FROM collection WHERE id = :collection_id),
-                    :grid_default
-                )
-          )
+        SELECT p.id, c.slug
+          FROM place p JOIN collection c ON c.id = p.collection_id
+         WHERE p.geom_hash = geoid_geom_hash({_GEOM_EXPR}, :grid_default)
         """
     )
     incumbent = (
         await session.execute(
-            lookup_stmt,
-            {
-                "collection_id": collection_id,
-                "geojson": geojson,
-                "grid_default": dedup_grid_default,
-            },
+            lookup_stmt, {"geojson": geojson, "grid_default": dedup_grid_default}
         )
     ).first()
     if incumbent is None:
         raise RuntimeError("dedup conflict but incumbent geoid not found (recipe drift?)")
-    return InsertResult(geoid=incumbent[0], created=False)
+    return InsertResult(geoid=incumbent[0], created=False, collection_slug=incumbent[1])
 
 
 # --- Read path --------------------------------------------------------------

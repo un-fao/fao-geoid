@@ -59,7 +59,11 @@ class PlaceCreate(Feature[PolygonalGeometry, dict[str, Any] | None]):
 
 
 class MintResponse(BaseModel):
-    """Response to a successful POST: the three resolvable forms + dedup status."""
+    """Response to a successful POST (201): the resolvable forms of the NEW geoid.
+
+    A duplicate geometry never reaches this model — it fails with a 409 whose
+    body is :class:`GeometryConflictResponse`.
+    """
 
     geoid: str = Field(description="The bare UUIDv7 — the canonical, immutable identifier.")
     did: str = Field(description="did:web form, e.g. did:web:data.fao.org:geoid:<uuid>.")
@@ -68,7 +72,19 @@ class MintResponse(BaseModel):
     collection: str = Field(description="Collection slug the place was minted into.")
     external_id: str | None = Field(default=None)
     data_quality_status: str = Field(default="unverified")
-    deduplicated: bool = Field(
-        default=False,
-        description="True when an identical geometry existed; the incumbent geoid is returned.",
-    )
+
+
+class GeometryConflictResponse(BaseModel):
+    """409 body when an identical geometry already exists anywhere in the catalog.
+
+    Mirrors the ``_error()`` envelope (``code``/``message`` + extras). The
+    ``constraint`` field discriminates this conflict from the external_id 409.
+    """
+
+    code: int = Field(description="HTTP status code (409).")
+    message: str = Field(description="Human-readable conflict description.")
+    geoid: str = Field(description="The INCUMBENT geoid the geometry is already registered under.")
+    did: str = Field(description="did:web form of the incumbent geoid.")
+    uri: str = Field(description="Durable resolver URI of the incumbent geoid.")
+    collection: str = Field(description="Collection slug the incumbent belongs to.")
+    constraint: str = Field(description='Always "uq_place_geom_hash" for this conflict.')

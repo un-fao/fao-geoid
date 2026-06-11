@@ -99,7 +99,7 @@ def test_plan_collision_earliest_id_wins_later_skipped():
 
 
 def test_plan_incumbent_unchanged_row_beats_earlier_drifted_row():
-    # Updating the drifted row would itself violate uq_place_collection_geom_hash:
+    # Updating the drifted row would itself violate uq_place_geom_hash:
     # the later row already HOLDS the hash. It must win despite the later id.
     rows = [
         _row(1, COLL_A, old_hash="aa", new_hash="HH"),
@@ -130,14 +130,21 @@ def test_plan_cascade_demotes_update_targeting_a_skipped_rows_retained_hash():
     assert losers[uuid.UUID(int=3)].geom_hash == "XX"
 
 
-def test_plan_collisions_are_scoped_per_collection():
+def test_plan_collisions_are_global():
+    # Geometry uniqueness is catalog-wide: the same new_hash in two different
+    # collections IS a collision — earliest id wins, the other is skipped and
+    # reported.
     rows = [
         _row(1, COLL_A, old_hash="aa", new_hash="HH"),
         _row(2, COLL_B, old_hash="bb", new_hash="HH"),
     ]
     plan = rehash.plan_rehash(rows)
-    assert [row.id for row in plan.updates] == [uuid.UUID(int=1), uuid.UUID(int=2)]
-    assert plan.skipped_pairs == ()
+    assert [row.id for row in plan.updates] == [uuid.UUID(int=1)]
+    assert len(plan.skipped_pairs) == 1
+    pair = plan.skipped_pairs[0]
+    assert pair.loser_id == uuid.UUID(int=2)
+    assert pair.winner_id == uuid.UUID(int=1)
+    assert pair.collection_id == COLL_B  # the loser's collection, for the report
 
 
 def test_plan_is_pure_and_frozen():

@@ -1,4 +1,4 @@
-"""The dedup-recipe version stamp (migration 0005).
+"""The dedup-recipe version stamp (migration 0003).
 
 ``dedup_recipe_stamp`` is ops bookkeeping — it records which recipe version and
 which PostGIS/GEOS stack every ``place.geom_hash`` was computed under, so an
@@ -15,7 +15,7 @@ from sqlalchemy import text
 pytestmark = pytest.mark.integration
 
 # Migration 0001's inventory — the stamp table must not grow this number.
-EXPECTED_USER_TRIGGERS = 9
+EXPECTED_USER_TRIGGERS = 8
 
 
 async def test_initial_stamp_row_exists_with_v1(session):
@@ -28,7 +28,7 @@ async def test_initial_stamp_row_exists_with_v1(session):
         )
     ).one()
     assert row.recipe_version == "v1"
-    assert row.stamped_by == "migration:0005"
+    assert row.stamped_by == "migration:0003"
     assert "initial stamp" in row.note
     assert row.stamped_at is not None
 

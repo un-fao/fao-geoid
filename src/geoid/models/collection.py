@@ -1,4 +1,4 @@
-"""Collection ORM model (≈ STAC collection) — owns places, scopes dedup + anon."""
+"""Collection ORM model (≈ STAC collection) — owns places, scopes anonymous writes."""
 
 from __future__ import annotations
 
@@ -28,7 +28,6 @@ class Collection(Base):
     writable_anon: Mapped[bool] = mapped_column(
         Boolean, nullable=False, server_default=text("false")
     )
-    # metadata->>'dedup_grid' overrides the per-collection ST_ReducePrecision grid.
     meta: Mapped[dict[str, Any]] = mapped_column(
         "metadata", JSONB, nullable=False, server_default=text("'{}'::jsonb")
     )

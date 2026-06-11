@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import uuid
 
-from fastapi import APIRouter, Depends, Response, status
+from fastapi import APIRouter, Depends, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from geoid.api.responses import GeoJSONResponse
@@ -18,7 +18,7 @@ from geoid.db import get_session
 from geoid.deps import Principal, require_principal
 from geoid.repositories import collection_repo, place_repo
 from geoid.schemas.ogc import FeatureModel
-from geoid.schemas.place import MintResponse, PlaceCreate
+from geoid.schemas.place import GeometryConflictResponse, MintResponse, PlaceCreate
 from geoid.services import ogc_service, registry_service
 from geoid.services.exceptions import CollectionNotFoundError, PlaceNotFoundError
 
@@ -29,12 +29,22 @@ router = APIRouter(tags=["registry"])
     "/collections/{collection_id}/items",
     response_model=MintResponse,
     status_code=status.HTTP_201_CREATED,
-    summary="Mint a geoid for a place (dedup-aware)",
+    summary="Mint a geoid for a place (duplicate geometry fails with 409)",
+    responses={
+        status.HTTP_409_CONFLICT: {
+            "model": GeometryConflictResponse,
+            "description": (
+                "An identical geometry already exists in the catalog; the body "
+                "carries the incumbent geoid (geometry dedup is global). An "
+                "external_id duplicate also answers 409 — discriminate on "
+                "``constraint``."
+            ),
+        }
+    },
 )
 async def create_item(
     collection_id: str,
     feature: PlaceCreate,
-    response: Response,
     principal: Principal = Depends(require_principal),
     session: AsyncSession = Depends(get_session),
     settings: Settings = Depends(get_settings),
@@ -42,18 +52,13 @@ async def create_item(
     collection = await collection_repo.get_by_slug(session, collection_id)
     if collection is None:
         raise CollectionNotFoundError(collection_id)
-    result = await registry_service.create_place(
+    return await registry_service.create_place(
         session,
         settings=settings,
         principal=principal,
         collection=collection,
         feature=feature,
     )
-    # 200 when an identical geometry already existed (incumbent returned); else 201.
-    response.status_code = (
-        status.HTTP_200_OK if result.deduplicated else status.HTTP_201_CREATED
-    )
-    return result
 
 
 @router.get(

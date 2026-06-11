@@ -45,8 +45,9 @@ Every place is minted a **UUIDv7** (RFC 9562), stored bare as the item id. On re
 `POST` returns all three. The geoid is **immutable**: `place` is INSERT-only (enforced by a DB trigger);
 corrections mint a *new* geoid linked via `predecessor_id`, and the original resolves forever.
 
-Deduplication is a **separate** concern from identity: a per-collection canonical `geom_hash` (see below),
-never the id.
+Deduplication is a **separate** concern from identity: a **global** canonical `geom_hash` (see below),
+never the id. One geometry → one geoid across the whole catalog — POSTing an identical geometry fails
+with **409** and the body carries the **incumbent geoid** (plus its did/uri and collection).
 
 ## The dedup recipe (load-bearing correctness)
 
@@ -59,12 +60,11 @@ geom_hash = sha256( ST_AsBinary(
 ```
 
 - **SHA-256** — a collision would assign the wrong geoid to a *different* place.
-- **`ST_ReducePrecision(grid)`** — coordinates that round to the same `grid` cell collapse to one geoid
-  (`grid` defaults to `1e-7` ≈ 1 cm); per-collection override via `collection.metadata->>'dedup_grid'`.
+- **`ST_ReducePrecision(grid)`** — coordinates that round to the same `grid` cell collapse to one hash
+  (`grid` is `1e-7` ≈ 1 cm — ONE global value, pinned as the trigger literal in the schema migration;
+  `GEOID_DEDUP_GRID_DEFAULT` mirrors it for the conflict lookup, and retunes are migration events).
   Note: this snaps to a fixed grid, so two points a hair apart but straddling a cell boundary can still
-  round to *different* cells — it neutralizes float jitter, not all sub-cm differences. `dedup_grid` is
-  immutable once a collection has places (a DB trigger enforces it), since changing it would re-hash and
-  silently mint a second geoid for an already-registered geometry.
+  round to *different* cells — it neutralizes float jitter, not all sub-cm differences.
 - **`ST_Normalize`** — canonical ring / part / hole order.
 - **`'NDR'` endianness pinned** — so a country instance's hash matches central at federation sync.
 
@@ -99,7 +99,7 @@ mint → dedup → validation → OGC read → bulk export in one command:
 uv run python scripts/seed_samples.py
 ```
 
-Expected: 5 plots minted, a reversed-winding duplicate dedup'd to the same geoid, a
+Expected: 5 plots minted, a reversed-winding duplicate rejected with 409 + the incumbent geoid, a
 self-intersecting polygon rejected (422), bbox/CQL2 queries, and a 5-feature bulk export.
 See `samples/README.md` for details.
 

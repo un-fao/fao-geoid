@@ -90,10 +90,12 @@ class Settings(BaseSettings):
         default=1e-7,
         gt=0,
         description=(
-            "Default coordinate-precision grid (ST_ReducePrecision gridsize, decimal "
-            "degrees) for geometry dedup. 1e-7 ≈ 1cm/vertex — exact-match semantics "
-            "(float-jitter immunity only), per the reviewer's security ruling; per-collection "
-            "override via metadata->>'dedup_grid'."
+            "The ONE global coordinate-precision grid (ST_ReducePrecision gridsize, "
+            "decimal degrees) for geometry dedup. 1e-7 ≈ 1cm/vertex — exact-match "
+            "semantics (float-jitter immunity only), per the reviewer's security ruling. "
+            "Effectively migration-pinned: it must equal the BEFORE-INSERT trigger's "
+            "literal (migration 0001) or the incumbent lookup misses on conflicts — "
+            "retunes are migration events, never a config-only change."
         ),
     )
 

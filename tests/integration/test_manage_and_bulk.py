@@ -64,12 +64,12 @@ async def test_list_item_ids_offset_beyond_cap_returns_400(client, admin_headers
     assert "offset" in resp.json()["detail"]
 
 
-async def test_collection_create_rejects_non_numeric_dedup_grid(client, admin_headers):
-    # The stamped value feeds ::double precision casts in the trigger and in
-    # migrations — junk must never reach the database (and an explicit null
-    # would survive setdefault as an unstamped hole).
+async def test_collection_create_rejects_any_dedup_grid(client, admin_headers):
+    # Geometry dedup is global: there is no per-collection grid, so the key is
+    # rejected outright (422) rather than silently ignored — silently dropping
+    # it would let an admin believe an override took.
     await client.post("/manage/workspaces", headers=admin_headers, json={"slug": "wsv"})
-    for bad in ("10m", None, True, [0.0001], 0, -1e-7):
+    for bad in ("10m", None, True, [0.0001], 0, -1e-7, 1e-7, 1e-6):
         resp = await client.post(
             "/manage/workspaces/wsv/collections",
             headers=admin_headers,
