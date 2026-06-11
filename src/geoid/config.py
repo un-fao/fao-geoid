@@ -84,10 +84,10 @@ class Settings(BaseSettings):
         description="This instance's id, stamped into provenance + originating_instance.",
     )
 
-    # --- API vocabulary (Remi's ruling — workspace/collection/item — is the
-    #     "fao" preset and the shipped default) ------------------------------
+    # --- API vocabulary (OGC/STAC-aligned — catalog/collection/item — is the
+    #     "stac" preset and the shipped default) -----------------------------
     vocab: Literal["fao", "stac", "neutral"] = Field(
-        default="fao", description='Surface vocabulary: "fao" (the ruling), "stac", or "neutral".'
+        default="stac", description='Surface vocabulary: "stac" (default), "fao", or "neutral".'
     )
 
     # --- Object storage backend --------------------------------------------

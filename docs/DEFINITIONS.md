@@ -32,30 +32,32 @@ identity — the geoid is the identity.
 
 ### collection
 
-A **named bucket of places** within a workspace (the OGC API Features
+A **named bucket of places** within a catalog (the OGC API Features
 "collection"). `external_id` uniqueness is evaluated *within a single
 collection*, never across collections; geometry deduplication, by contrast, is
 **global** — it applies across the whole catalog regardless of collection. One
 reserved collection, `public`, accepts anonymous contributions.
 
-### workspace
+### catalog
 
 A **top-level grouping of collections** — the registry's outermost organizational
-container. Release 1 runs with a single default workspace; the concept exists so
-that multiple tenants or programmes can be separated later without reshaping the
-data model.
+container (the OGC/STAC "catalog"). Release 1 runs with a single default catalog;
+the concept exists so that multiple tenants or programmes can be separated later
+without reshaping the data model.
 
 How they nest:
 
 ```
-workspace ─< collection ─< place (each place carries one geoid)
+catalog ─< collection ─< place (each place carries one geoid)
 ```
 
-> **Terminology note.** The team's final API terminology ruling — **workspace /
-> collection / item** — is the shipped default: the API surfaces each place as an
-> "item" (the OGC API Features term). Internally and in this document "place"
-> names the same concept; the surface vocabulary is a configuration choice
-> (`GEOID_VOCAB`), not a data-model difference.
+> **Terminology note.** The shipped default vocabulary is the OGC/STAC-aligned
+> **catalog / collection / item** (`GEOID_VOCAB=stac`): the top-level container
+> is surfaced as a "catalog" (the STAC term) and each place as an "item" (the
+> OGC API Features term). Internally the container is stored under the
+> label-agnostic name "workspace" and "place" names the same concept as "item";
+> the surface vocabulary is a configuration choice (`GEOID_VOCAB`, with `fao` =
+> workspace/collection/item still available), not a data-model difference.
 
 ---
 
@@ -66,7 +68,7 @@ constraints.
 
 ### 1. geoid — globally unique across the whole registry
 
-Every geoid is unique across the entire registry/workspace, not merely within one
+Every geoid is unique across the entire registry/catalog, not merely within one
 collection. No two places anywhere share a geoid. (Internally this is backed by a
 dedicated registry of every issued geoid, so the guarantee holds even as the
 system is sharded for scale and across federated instances later.)
@@ -158,7 +160,7 @@ expected to be OIDC — to be confirmed before it is wired in.
 What exists today:
 
 - A **temporary static admin token** (`GEOID_ADMIN_TOKEN`) gates the management
-  endpoints (workspace/collection creation and listing). This is the team's
+  endpoints (catalog/collection creation and listing). This is the team's
   agreed temporary stopgap and is a real, working deliverable.
 - Anonymous contributions are allowed into the reserved `public` collection. The
   identity/dedup/`external_id` rules are identical for anonymous and admin
