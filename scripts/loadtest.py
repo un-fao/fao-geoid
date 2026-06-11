@@ -7,9 +7,11 @@
     uv run python scripts/loadtest.py --scenario read  --concurrency 16 --duration 10
 
 Scenarios
-    mint  — POST a unique polygon each time   (single-POST hot path)
-    dedup — POST the SAME polygon every time   (dedup-lookup hot path; expects 200)
-    read  — GET items?limit=50                 (OGC read path)
+    mint  — POST a unique polygon each time   (single-POST hot path; expects 201)
+    dedup — POST the SAME polygon every time   (conflict-lookup hot path; expects
+                                                409 after the first 201 — global
+                                                dedup rejects duplicates)
+    read  — GET items?limit=50                 (OGC read path; expects 200)
 
 NOTE: a local PostGIS running under amd64 emulation on Apple Silicon is several
 times slower than native — treat these numbers as a pessimistic LOWER BOUND and
@@ -58,7 +60,13 @@ async def _read(client: httpx.AsyncClient) -> httpx.Response:
     return await client.get(f"{BASE}/collections/{COLLECTION}/items?limit=50")
 
 
-SCENARIOS = {"mint": _mint, "dedup": _dedup, "read": _read}
+# (request fn, success statuses): dedup duplicates are *expected* to 409 — that
+# IS the measured hot path (arbiter conflict + incumbent lookup).
+SCENARIOS = {
+    "mint": (_mint, {201}),
+    "dedup": (_dedup, {201, 409}),
+    "read": (_read, {200}),
+}
 
 
 def _pct(values: list[float], p: float) -> float:
@@ -69,19 +77,19 @@ def _pct(values: list[float], p: float) -> float:
     return ordered[idx]
 
 
-async def _worker(client, fn, deadline, lat, counters) -> None:
+async def _worker(client, fn, ok_statuses, deadline, lat, counters) -> None:
     while time.perf_counter() < deadline:
         start = time.perf_counter()
         try:
             resp = await fn(client)
             lat.append((time.perf_counter() - start) * 1000)
-            counters["ok" if resp.status_code < 400 else "err"] += 1
+            counters["ok" if resp.status_code in ok_statuses else "err"] += 1
         except Exception:
             counters["err"] += 1
 
 
 async def run_scenario(name: str, concurrency: int, duration: float) -> dict:
-    fn = SCENARIOS[name]
+    fn, ok_statuses = SCENARIOS[name]
     lat: list[float] = []
     counters = {"ok": 0, "err": 0}
     limits = httpx.Limits(max_connections=concurrency + 16, max_keepalive_connections=concurrency + 16)
@@ -90,7 +98,7 @@ async def run_scenario(name: str, concurrency: int, duration: float) -> dict:
             await fn(client)  # warmup (seeds the dedup incumbent)
         start = time.perf_counter()
         deadline = start + duration
-        await asyncio.gather(*[asyncio.create_task(_worker(client, fn, deadline, lat, counters)) for _ in range(concurrency)])
+        await asyncio.gather(*[asyncio.create_task(_worker(client, fn, ok_statuses, deadline, lat, counters)) for _ in range(concurrency)])
         elapsed = time.perf_counter() - start
 
     total = len(lat)

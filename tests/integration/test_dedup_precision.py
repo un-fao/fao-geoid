@@ -1,19 +1,16 @@
-"""Release-1 coordinate-precision behaviour: the dedup grid defaults to ~1cm
-(1e-7 deg/vertex — exact-match semantics per Remi's ruling), is stamped onto
-every collection at creation, and snaps geometries to an absolute grid.
+"""Release-1 coordinate-precision behaviour: ONE global dedup grid (~1cm,
+1e-7 deg/vertex — exact-match semantics per Remi's ruling), pinned in the
+BEFORE-INSERT trigger by migration 0001. Geometry uniqueness is catalog-wide,
+and an identical submission fails with a 409 carrying the incumbent geoid.
 
-The stamped value in ``collection.metadata->>'dedup_grid'`` is the source of truth
-read by BOTH the BEFORE-INSERT trigger and the incumbent-lookup, so these tests pin
-it for the public (bootstrap) collection and an admin-created one, then demonstrate
-the grid in action via the live write path.
+These tests demonstrate the grid in action via the live write path: sub-cell
+float jitter collapses onto the incumbent (409), a shift of several cells is a
+different place (201, distinct geoid).
 """
 
 from __future__ import annotations
 
 import pytest
-from sqlalchemy import text
-
-from geoid.config import get_settings
 
 pytestmark = pytest.mark.integration
 
@@ -42,52 +39,20 @@ def _square(dx: float) -> dict:
     }
 
 
-async def test_public_collection_is_stamped_with_default_grid(session):
-    grid = (
-        await session.execute(
-            text(
-                "SELECT (metadata->>'dedup_grid')::double precision "
-                "FROM collection WHERE slug = :slug"
-            ),
-            {"slug": "public"},
-        )
-    ).scalar_one()
-    assert grid == get_settings().dedup_grid_default
+async def test_within_cell_conflicts_across_cell_mints(client):
+    base_resp = await client.post("/collections/public/items", json=_square(0.0))
+    assert base_resp.status_code == 201
+    base = base_resp.json()
 
+    # +1e-8 deg (~1mm): every vertex snaps back to the base cell -> identical
+    # canonical geometry -> 409 carrying the incumbent geoid.
+    same_cell = await client.post("/collections/public/items", json=_square(1e-8))
+    assert same_cell.status_code == 409
+    body = same_cell.json()
+    assert body["geoid"] == base["geoid"]
+    assert body["constraint"] == "uq_place_geom_hash"
 
-async def test_admin_collection_is_stamped_with_default_grid(client, admin_headers):
-    await client.post("/manage/workspaces", headers=admin_headers, json={"slug": "ws"})
-    resp = await client.post(
-        "/manage/workspaces/ws/collections", headers=admin_headers, json={"slug": "c"}
-    )
-    assert resp.status_code == 201
-    assert resp.json()["metadata"]["dedup_grid"] == get_settings().dedup_grid_default
-
-
-async def test_admin_supplied_grid_overrides_the_default(client, admin_headers):
-    await client.post("/manage/workspaces", headers=admin_headers, json={"slug": "ws2"})
-    resp = await client.post(
-        "/manage/workspaces/ws2/collections",
-        headers=admin_headers,
-        json={"slug": "fine", "metadata": {"dedup_grid": 1e-6}},
-    )
-    assert resp.status_code == 201
-    assert resp.json()["metadata"]["dedup_grid"] == 1e-6
-
-
-async def test_within_cell_collapses_across_cell_is_distinct(client):
-    # The public collection carries the configured ~1cm grid (1e-7 deg).
-    base = (await client.post("/collections/public/items", json=_square(0.0))).json()
-    # +1e-8 deg (~1mm): every vertex snaps back to the base cell -> same geoid (dedup).
-    same_cell = (
-        await client.post("/collections/public/items", json=_square(1e-8))
-    ).json()
     # +3e-7 deg (3 cells, ~3cm): a clearly different cell -> a distinct geoid.
-    other_cell = (
-        await client.post("/collections/public/items", json=_square(3e-7))
-    ).json()
-
-    assert same_cell["geoid"] == base["geoid"]
-    assert same_cell["deduplicated"] is True
-    assert other_cell["geoid"] != base["geoid"]
-    assert other_cell["deduplicated"] is False
+    other_cell = await client.post("/collections/public/items", json=_square(3e-7))
+    assert other_cell.status_code == 201
+    assert other_cell.json()["geoid"] != base["geoid"]

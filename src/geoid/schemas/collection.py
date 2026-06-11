@@ -28,17 +28,15 @@ class CollectionCreate(BaseModel):
 
     @field_validator("metadata")
     @classmethod
-    def _validate_dedup_grid(cls, metadata: dict[str, Any]) -> dict[str, Any]:
-        # The stamped value feeds ::double precision casts in the BEFORE-INSERT
-        # trigger, the incumbent-lookup, and migrations — a non-numeric (or
-        # explicit-null, which setdefault would preserve as an unstamped hole)
-        # value must never reach the database. bool is an int subclass: exclude.
-        if "dedup_grid" not in metadata:
-            return metadata
-        grid = metadata["dedup_grid"]
-        if isinstance(grid, bool) or not isinstance(grid, (int, float)) or grid <= 0:
+    def _reject_dedup_grid(cls, metadata: dict[str, Any]) -> dict[str, Any]:
+        # Geometry dedup is global: there is no per-collection grid. Fail fast
+        # rather than silently ignore the key — an admin who sends it believes
+        # an override exists, and that belief must not survive.
+        if "dedup_grid" in metadata:
             raise ValueError(
-                "metadata.dedup_grid must be a positive number (decimal degrees per vertex)"
+                "metadata.dedup_grid is not supported: geometry dedup is global "
+                "(one geometry → one geoid across the catalog) with a single "
+                "migration-pinned precision grid"
             )
         return metadata
 

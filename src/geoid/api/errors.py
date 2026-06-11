@@ -4,8 +4,10 @@ Constraint→HTTP mapping (DB is the source of truth; switch on constraint_name)
 
     geoid (registry/pk) duplicate          -> 409 (fail)
     (collection_id, external_id) duplicate -> 409 (fail)
-    (collection_id, geom_hash) duplicate   -> handled as dedup (200) in the service;
-                                              if it ever surfaces here -> 409
+    geom_hash duplicate (catalog-wide)     -> 409 carrying the incumbent geoid,
+                                              raised as GeometryConflictError by
+                                              the service; the IntegrityError
+                                              branch is only a backstop
     invalid / non-polygon geometry         -> 422 with ST_IsValidReason
     immutability (restrict_violation)       -> 409
 """
@@ -16,6 +18,8 @@ from fastapi import FastAPI, Request, status
 from fastapi.responses import JSONResponse
 from sqlalchemy.exc import IntegrityError
 
+from geoid.config import get_settings
+from geoid.domain.identifiers import derive_identifiers
 from geoid.models import (
     PK_GEOID_REGISTRY,
     PK_PLACE,
@@ -25,6 +29,7 @@ from geoid.models import (
 from geoid.services.exceptions import (
     AnonymousWriteForbiddenError,
     CollectionNotFoundError,
+    GeometryConflictError,
     GeometryInvalidError,
     PlaceNotFoundError,
     WorkspaceNotFoundError,
@@ -80,6 +85,26 @@ def register_exception_handlers(app: FastAPI) -> None:
     async def _anon_forbidden(_: Request, exc: AnonymousWriteForbiddenError) -> JSONResponse:
         return _error(status.HTTP_403_FORBIDDEN, str(exc), collection=exc.slug)
 
+    @app.exception_handler(GeometryConflictError)
+    async def _geometry_conflict(_: Request, exc: GeometryConflictError) -> JSONResponse:
+        # The ruling: the insert fails AND the body names the existing geoid.
+        # did/uri are derived purely (domain.identifiers) so the client can
+        # resolve the incumbent without a second request; ``constraint`` lets
+        # clients discriminate this 409 from the external_id one.
+        settings = get_settings()
+        ids = derive_identifiers(
+            exc.geoid, base_url=settings.base_url_clean, did_host=settings.did_host or ""
+        )
+        return _error(
+            status.HTTP_409_CONFLICT,
+            str(exc),
+            geoid=ids["geoid"],
+            did=ids["did"],
+            uri=ids["uri"],
+            collection=exc.collection,
+            constraint=UQ_PLACE_GEOM_HASH,
+        )
+
     @app.exception_handler(IntegrityError)
     async def _integrity(_: Request, exc: IntegrityError) -> JSONResponse:
         constraint, sqlstate = _pg_fields(exc)
@@ -95,10 +120,12 @@ def register_exception_handlers(app: FastAPI) -> None:
                 status.HTTP_409_CONFLICT, "geoid already exists", constraint=constraint
             )
         if constraint == UQ_PLACE_GEOM_HASH:
-            # Normally handled as a 200 dedup in the service; surfacing here is unexpected.
+            # Backstop only: the service normally raises GeometryConflictError
+            # (whose body carries the incumbent geoid — there is no session
+            # here to look it up). Surfacing this branch is unexpected.
             return _error(
                 status.HTTP_409_CONFLICT,
-                "identical geometry already exists in this collection",
+                "identical geometry already exists in the catalog",
                 constraint=constraint,
             )
         if sqlstate == _SQLSTATE_CHECK_VIOLATION:

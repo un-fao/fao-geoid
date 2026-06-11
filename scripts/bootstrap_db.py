@@ -35,7 +35,7 @@ Steps (each idempotent):
    10. seed          default workspace + reserved public collection (--skip-seed)
    11. verify        connect as the app role (doubles as a credential check):
                      alembic head, extensions, triggers, dedup function, recipe
-                     stamp (migration 0005's dedup_recipe_stamp), seed rows
+                     stamp (migration 0003's dedup_recipe_stamp), seed rows
 
 Env:
     GEOID_BOOTSTRAP_ADMIN_DSN     required — admin (`postgres`) libpq DSN/URL to the
@@ -72,10 +72,10 @@ REQUIRED_EXTENSIONS = ("postgis", "pgcrypto")
 # a different GEOS series can canonicalize geometries differently → hash drift.
 EXPECTED_POSTGIS_SERIES = "3.5"
 EXPECTED_GEOS_SERIES = "3.9"
-# Migration 0001's user-trigger inventory: 4 on place (set_geom_hash, after_insert,
-# block_mutation, block_truncate), 2×2 append-only guards on geoid_registry and
-# change_log, 1 dedup-grid guard on collection.
-EXPECTED_USER_TRIGGERS = 9
+# Migration 0001's user-trigger inventory: 4 on place (set_geom_hash,
+# after_insert, block_mutation, block_truncate) + 2×2 append-only guards on
+# geoid_registry and change_log.
+EXPECTED_USER_TRIGGERS = 8
 
 
 class ConfigError(Exception):
@@ -548,7 +548,7 @@ def verify(cfg: BootstrapConfig) -> list[str]:
          "dedup function geoid_geom_hash is missing"),
         ("recipe stamp", recipe_version or "<absent>", recipe_version == "v1",
          f"latest dedup_recipe_stamp.recipe_version is {recipe_version!r}, expected 'v1' "
-         "— migrate to 0005+ (and re-stamp via scripts/rehash_geom_hashes.py if the "
+         "— migrate to 0003+ (and re-stamp via scripts/rehash_geom_hashes.py if the "
          "recipe ever changed)"),
         ("workspaces / collections", f"{workspaces} / {collections}",
          (workspaces or 0) >= 1 and (collections or 0) >= 1,

@@ -73,8 +73,10 @@ def upgrade() -> None:
                 CHECK (ST_IsValid(geom)),
             CONSTRAINT uq_place_collection_external_id
                 UNIQUE (collection_id, external_id),
-            CONSTRAINT uq_place_collection_geom_hash
-                UNIQUE (collection_id, geom_hash)
+            -- One geometry → one geoid across the WHOLE catalog (global dedup):
+            -- a duplicate insert fails and the API answers 409 + the incumbent.
+            CONSTRAINT uq_place_geom_hash
+                UNIQUE (geom_hash)
         );
         """
     )
@@ -163,24 +165,19 @@ def upgrade() -> None:
         """
     )
 
-    # --- BEFORE INSERT: set geom_hash using the per-collection grid ---------
+    # --- BEFORE INSERT: set geom_hash using the ONE global grid -------------
+    # 1e-7 deg ≈ 1cm/vertex — exact-match semantics (the grid absorbs float
+    # jitter only, it does not merge nearby shapes). The literal is pinned here;
+    # GEOID_DEDUP_GRID_DEFAULT (the incumbent-lookup's grid) must mirror it, so
+    # retuning is a migration event, never a config-only change.
     op.execute(
         """
         CREATE OR REPLACE FUNCTION place_set_geom_hash()
         RETURNS trigger
         LANGUAGE plpgsql
         AS $func$
-        DECLARE
-            v_grid double precision;
         BEGIN
-            SELECT COALESCE((c.metadata->>'dedup_grid')::double precision, 1e-7)
-              INTO v_grid
-              FROM collection c
-             WHERE c.id = NEW.collection_id;
-            IF v_grid IS NULL THEN
-                v_grid := 1e-7;
-            END IF;
-            NEW.geom_hash := geoid_geom_hash(NEW.geom, v_grid);
+            NEW.geom_hash := geoid_geom_hash(NEW.geom, 1e-7);
             RETURN NEW;
         END;
         $func$;
@@ -291,44 +288,12 @@ def upgrade() -> None:
             """
         )
 
-    # --- Guard the dedup invariant: dedup_grid is immutable once places exist.
-    # Changing the grid on a populated collection would recompute hashes and
-    # silently mint a second geoid for an already-registered geometry.
-    op.execute(
-        """
-        CREATE OR REPLACE FUNCTION collection_guard_dedup_grid()
-        RETURNS trigger
-        LANGUAGE plpgsql
-        AS $func$
-        BEGIN
-            IF (NEW.metadata->>'dedup_grid') IS DISTINCT FROM (OLD.metadata->>'dedup_grid')
-               AND EXISTS (SELECT 1 FROM place WHERE collection_id = OLD.id) THEN
-                RAISE EXCEPTION
-                    'dedup_grid is immutable once collection % has places (would silently break dedup)',
-                    OLD.slug
-                    USING ERRCODE = 'restrict_violation';
-            END IF;
-            RETURN NEW;
-        END;
-        $func$;
-        """
-    )
-    op.execute(
-        """
-        CREATE TRIGGER collection_guard_dedup_grid_bu
-        BEFORE UPDATE ON collection
-        FOR EACH ROW EXECUTE FUNCTION collection_guard_dedup_grid();
-        """
-    )
-
     # --- Spatial index (reads + future ST_Intersects) ----------------------
     op.execute("CREATE INDEX place_geom_gix ON place USING gist (geom);")
 
 
 def downgrade() -> None:
     op.execute("DROP INDEX IF EXISTS place_geom_gix;")
-    op.execute("DROP TRIGGER IF EXISTS collection_guard_dedup_grid_bu ON collection;")
-    op.execute("DROP FUNCTION IF EXISTS collection_guard_dedup_grid();")
     op.execute("DROP TRIGGER IF EXISTS change_log_append_only_bt ON change_log;")
     op.execute("DROP TRIGGER IF EXISTS change_log_append_only_bud ON change_log;")
     op.execute("DROP TRIGGER IF EXISTS geoid_registry_append_only_bt ON geoid_registry;")

@@ -51,19 +51,24 @@ def main() -> int:
             resp = _post(client, feature)
             body = resp.json()
             ext = str(feature.get("id"))
-            if resp.status_code in (200, 201):
-                tag = "dedup→existing" if body.get("deduplicated") else "minted"
-                print(f"  [{resp.status_code}] {ext:<22} {tag:<14} geoid={body['geoid']}")
-                if first_geoid is None:
-                    first_geoid = body["geoid"]
+            if resp.status_code == 201:
+                print(f"  [201] {ext:<22} {'minted':<18} geoid={body['geoid']}")
+            elif resp.status_code == 409 and body.get("constraint") == "uq_place_geom_hash":
+                # Re-running the seed: the geometry is already registered.
+                print(f"  [409] {ext:<22} {'duplicate→existing':<18} geoid={body['geoid']}")
             else:
                 print(f"  [{resp.status_code}] {ext:<22} ERROR {body}")
+                continue
+            if first_geoid is None:
+                first_geoid = body["geoid"]
 
         print("\n== Dedup demo (GH-COCOA-001's geometry, reversed winding, no id) ==")
         dup = json.loads((SAMPLES / "duplicate_of_GH-COCOA-001.geojson").read_text())
-        body = _post(client, dup).json()
-        status = "200 OK" if body.get("deduplicated") else "??"
-        print(f"  [{status}] deduplicated={body.get('deduplicated')} geoid={body.get('geoid')}")
+        resp = _post(client, dup)
+        body = resp.json()
+        status = "409 Conflict" if resp.status_code == 409 else f"?? {resp.status_code}"
+        print(f"  [{status}] insert rejected; incumbent geoid={body.get('geoid')} "
+              f"(collection={body.get('collection')})")
 
         print("\n== Validation demo (self-intersecting bow-tie) ==")
         invalid = json.loads((SAMPLES / "invalid_selfintersecting.geojson").read_text())

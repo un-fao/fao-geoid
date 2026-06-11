@@ -9,53 +9,24 @@ from sqlalchemy.exc import DBAPIError
 pytestmark = pytest.mark.integration
 
 
-# --- #1 dedup_grid immutability once a collection has places ----------------
-
-async def test_dedup_grid_change_blocked_when_places_exist(client, session, unit_square_ccw):
-    await client.post("/collections/public/items", json=unit_square_ccw)
-    with pytest.raises(DBAPIError):
-        await session.execute(
-            text(
-                "UPDATE collection SET metadata = jsonb_build_object('dedup_grid', 1e-6) "
-                "WHERE slug = 'public'"
-            )
-        )
-        await session.flush()
-
-
-async def test_dedup_grid_change_allowed_on_empty_collection(client, admin_headers, session):
-    await client.post("/manage/workspaces", headers=admin_headers, json={"slug": "wse"})
-    await client.post("/manage/workspaces/wse/collections", headers=admin_headers, json={"slug": "empt"})
-    await session.execute(
-        text(
-            "UPDATE collection SET metadata = jsonb_build_object('dedup_grid', 1e-6) "
-            "WHERE slug = 'empt'"
-        )
-    )
-    await session.commit()
-    grid = (
-        await session.execute(text("SELECT metadata->>'dedup_grid' FROM collection WHERE slug='empt'"))
-    ).scalar_one()
-    assert grid is not None
-
-
-# --- dual-violation precedence: geometry dedup wins over external_id 409 -----
+# --- dual-violation precedence: the geometry 409 wins over external_id's -----
 # Postgres prechecks the ON CONFLICT arbiter (geom_hash) before touching any
 # other unique index, so a submission duplicating BOTH geometry and external_id
-# resolves to the incumbent geoid (200), never the external_id 409.
+# yields the GEOMETRY conflict (409 carrying the incumbent geoid), never the
+# external_id 409.
 
-async def test_dual_geometry_and_external_id_duplicate_resolves_to_dedup(client, unit_square_ccw):
+async def test_dual_geometry_and_external_id_duplicate_yields_geometry_409(client, unit_square_ccw):
     feature = dict(unit_square_ccw, id="dup-ext")
     base = await client.post("/collections/public/items", json=feature)
     assert base.status_code == 201
 
     resub = await client.post("/collections/public/items", json=feature)
-    assert resub.status_code == 200
+    assert resub.status_code == 409
+    assert resub.json()["constraint"] == "uq_place_geom_hash"
     assert resub.json()["geoid"] == base.json()["geoid"]
-    assert resub.json()["deduplicated"] is True
 
 
-async def test_geometry_dup_with_another_rows_external_id_resolves_to_dedup(
+async def test_geometry_dup_with_another_rows_external_id_yields_geometry_409(
     client, unit_square_ccw, other_square
 ):
     a = await client.post("/collections/public/items", json=dict(unit_square_ccw, id="ext-a"))
@@ -63,9 +34,10 @@ async def test_geometry_dup_with_another_rows_external_id_resolves_to_dedup(
     assert a.status_code == 201 and b.status_code == 201
 
     # A's geometry + B's external_id: the geometry arbiter prechecks first, so
-    # this dedups to A's geoid; the conflicting external_id is never written.
+    # the 409 carries A's geoid; the conflicting external_id is never reached.
     resub = await client.post("/collections/public/items", json=dict(unit_square_ccw, id="ext-b"))
-    assert resub.status_code == 200
+    assert resub.status_code == 409
+    assert resub.json()["constraint"] == "uq_place_geom_hash"
     assert resub.json()["geoid"] == a.json()["geoid"]
 
 

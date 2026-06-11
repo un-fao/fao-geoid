@@ -15,7 +15,7 @@ operational dedup, not identity (the geoid is UUIDv7; the hash never reaches the
   the hashes were computed under (``postgis_lib_version()`` etc. at stamp time;
   ``postgis_full`` is the full forensic string). These change on instance
   upgrades/migrations while recipe_version stays 'v1'.
-- ``stamped_by``   'migration:0005' for this initial stamp; 'rehash-script' for
+- ``stamped_by``   'migration:0003' for this initial stamp; 'rehash-script' for
   rows appended by ``scripts/rehash_geom_hashes.py`` after a re-hash (or a
   verified no-op) on a new stack.
 
@@ -26,13 +26,13 @@ drift, the audited re-hash procedure (``scripts/rehash_geom_hashes.py``,
 runbook: docs/DEPLOYMENT.md §14).
 
 Design note (D1): this table is ops bookkeeping, not a data-integrity hinge — it
-deliberately gets NO triggers (the global user-trigger inventory stays at 9, as
+deliberately gets NO triggers (the global user-trigger inventory stays at 8, as
 ``scripts/bootstrap_db.py`` asserts) and NO ORM model. The migration-time INSERT
 captures the live stack, asserting that every place row existing at upgrade time
 was hashed under it.
 
-Revision ID: 0005_dedup_recipe_stamp
-Revises: 0004_dedup_grid_default_1cm
+Revision ID: 0003_dedup_recipe_stamp
+Revises: 0002_paging_index
 Create Date: 2026-06-11
 """
 from __future__ import annotations
@@ -41,8 +41,8 @@ from collections.abc import Sequence
 
 from alembic import op
 
-revision: str = "0005_dedup_recipe_stamp"
-down_revision: str | None = "0004_dedup_grid_default_1cm"
+revision: str = "0003_dedup_recipe_stamp"
+down_revision: str | None = "0002_paging_index"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
@@ -68,7 +68,7 @@ def upgrade() -> None:
             (recipe_version, postgis_version, geos_version, postgis_full,
              stamped_by, note)
         SELECT 'v1', postgis_lib_version(), postgis_geos_version(),
-               postgis_full_version(), 'migration:0005',
+               postgis_full_version(), 'migration:0003',
                'initial stamp: every existing place.geom_hash was computed under this stack';
         """
     )

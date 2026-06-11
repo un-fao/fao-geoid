@@ -3,9 +3,9 @@
 
 Read-only by default, so it is safe against production (places are append-only;
 nothing is minted unless asked). ``--mint`` adds a write probe that mints ONE
-fixed sentinel feature; exact-match dedup makes it idempotent — first run 201,
-every later run 200 ``deduplicated=true`` — at most one permanent row per
-collection, ever.
+fixed sentinel feature; global exact-match dedup makes it idempotent — first
+run 201, every later run 409 with ``constraint == "uq_place_geom_hash"`` and
+the incumbent geoid in the body — at most one permanent row per catalog, ever.
 
     uv run python scripts/smoke_test.py            # read-only checks
     uv run python scripts/smoke_test.py --mint     # + idempotent write probe
@@ -144,16 +144,20 @@ def run_mint_probe(client: httpx.Client) -> list[bool]:
         resp = client.post(f"{BASE}/collections/{COLLECTION}/items",
                            json=SENTINEL_FEATURE, headers=_headers())
         if resp.status_code == 409:
+            body = resp.json()
+            if body.get("constraint") == "uq_place_geom_hash":
+                # Expected on every run after the first: global dedup rejects the
+                # duplicate and hands back the incumbent — continue with it.
+                minted.update(body)
+                return f"[409] duplicate geometry → incumbent geoid={body['geoid']}"
             raise AssertionError(
                 "409 external_id conflict — the sentinel external_id exists with a "
                 "DIFFERENT geometry; was SENTINEL_FEATURE changed since the first run?"
             )
-        assert resp.status_code in (200, 201), f"{resp.status_code}: {resp.text[:200]}"
+        assert resp.status_code == 201, f"{resp.status_code}: {resp.text[:200]}"
         body = resp.json()
         minted.update(body)
-        tag = ("deduplicated → incumbent geoid" if body.get("deduplicated")
-               else "minted (first run against this collection)")
-        return f"[{resp.status_code}] {tag}, geoid={body['geoid']}"
+        return f"[201] minted (first run against this catalog), geoid={body['geoid']}"
 
     def probe_resolve_geoid() -> str:
         props = _get_json(client, f"/geoid/{minted['geoid']}").get("properties") or {}
@@ -167,8 +171,11 @@ def run_mint_probe(client: httpx.Client) -> list[bool]:
         return f"resolved; did on {did_host!r}, uri on {uri_netloc!r}"
 
     def probe_resolve_external() -> str:
+        # The incumbent's collection (from the 201/409 body) — with global dedup
+        # it may differ from the collection this run targeted.
+        collection = minted.get("collection", COLLECTION)
         props = _get_json(
-            client, f"/collections/{COLLECTION}/external/{SENTINEL_EXTERNAL_ID}"
+            client, f"/collections/{collection}/external/{SENTINEL_EXTERNAL_ID}"
         ).get("properties") or {}
         assert props.get("geoid") == minted["geoid"], \
             f"external-id resolve returned {props.get('geoid')!r}, expected {minted['geoid']!r}"

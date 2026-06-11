@@ -127,7 +127,7 @@ def test_fresh_bootstrap_then_idempotent_rerun(_postgis):
     assert state["owner"] == role
     assert state["alembic_version"] == _alembic_head()
     assert state["extensions"] == ["pgcrypto", "postgis"]
-    assert state["triggers"] >= 9
+    assert state["triggers"] >= 8
     assert state["hash_fn"] == 1
     assert state["recipe_stamp"] == "v1"
     assert state["workspaces"] >= 1 and state["collections"] >= 1

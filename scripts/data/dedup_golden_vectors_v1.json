@@ -138,7 +138,7 @@
       "sha256": "ec0ce2e156b780b0e39d991369662d80bb3345eb8825d4d2500a5702e4bc07ba",
       "strict": true,
       "same_as": null,
-      "note": "unit square at the 0003-era ~10m grid (stamped on pre-0004 populated collections by migration 0004)"
+      "note": "unit square at a coarse ~10m grid \u2014 exercises the recipe at a non-default gridsize (grid is a function parameter, not a constant)"
     },
     {
       "name": "grid9e5_jitter",

@@ -19,7 +19,11 @@ from geoid.domain.provenance import build_provenance, extract_client
 from geoid.models import Collection
 from geoid.repositories import place_repo
 from geoid.schemas.place import MintResponse, PlaceCreate
-from geoid.services.exceptions import AnonymousWriteForbiddenError, GeometryInvalidError
+from geoid.services.exceptions import (
+    AnonymousWriteForbiddenError,
+    GeometryConflictError,
+    GeometryInvalidError,
+)
 
 # Geometry validity (ST_IsValid) and polygon-only are enforced by CHECK constraints
 # on the INSERT (SQLSTATE 23514). Polygon-only + lon/lat bounds + RFC 7946 structure
@@ -45,11 +49,13 @@ async def create_place(
     collection: Collection,
     feature: PlaceCreate,
 ) -> MintResponse:
-    """Mint (or deduplicate to) a geoid for ``feature`` in ``collection``.
+    """Mint a geoid for ``feature`` in ``collection``.
 
     Raises:
         AnonymousWriteForbiddenError: anon POST to a non-anonymous collection.
         GeometryInvalidError: geometry unparseable / invalid (422 with reason).
+        GeometryConflictError: identical geometry already registered anywhere in
+            the catalog (409 carrying the incumbent geoid).
     """
     if principal.is_anonymous and not collection.writable_anon:
         raise AnonymousWriteForbiddenError(collection.slug)
@@ -69,7 +75,7 @@ async def create_place(
     # geometry (23514) and we recover ST_IsValidReason for the 422 ONLY on that
     # error path — so a valid POST never pays a separate pre-validation query.
     try:
-        result = await place_repo.insert_with_dedup(
+        result = await place_repo.insert_place(
             session,
             geoid=geoid,
             collection_id=collection.id,
@@ -92,14 +98,11 @@ async def create_place(
         await session.rollback()
         raise GeometryInvalidError("unparseable GeoJSON geometry") from exc
 
-    # On dedup, reflect the INCUMBENT's external_id / status, not the submission's.
-    response_external_id = external_id
-    data_quality_status = "unverified"
     if not result.created:
-        incumbent = await place_repo.get_by_geoid(session, result.geoid)
-        if incumbent is not None:
-            response_external_id = incumbent["external_id"]
-            data_quality_status = incumbent["data_quality_status"]
+        # Identical geometry already registered (anywhere in the catalog): the
+        # insert failed, and the 409 must carry the incumbent geoid + collection.
+        # The repo's incumbent lookup guarantees collection_slug when created=False.
+        raise GeometryConflictError(geoid=result.geoid, collection=result.collection_slug)
 
     ids = derive_identifiers(
         result.geoid,
@@ -113,7 +116,6 @@ async def create_place(
         uri=ids["uri"],
         item_url=ids["item_url"],
         collection=collection.slug,
-        external_id=response_external_id,
-        data_quality_status=data_quality_status,
-        deduplicated=not result.created,
+        external_id=external_id,
+        data_quality_status="unverified",
     )

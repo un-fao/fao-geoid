@@ -29,6 +29,6 @@ __all__ = [
 
 # Constraint names referenced by error mapping (single source of truth).
 UQ_PLACE_EXTERNAL_ID = "uq_place_collection_external_id"
-UQ_PLACE_GEOM_HASH = "uq_place_collection_geom_hash"
+UQ_PLACE_GEOM_HASH = "uq_place_geom_hash"
 PK_GEOID_REGISTRY = "geoid_registry_pkey"
 PK_PLACE = "place_pkey"

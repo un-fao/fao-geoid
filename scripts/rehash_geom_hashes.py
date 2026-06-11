@@ -13,17 +13,17 @@ stop deduplicating new submissions against old rows until they are recomputed.
 Steps:
     1. config       GEOID_DATABASE_URL only — the APP role: it owns ``place``, so
                     it may DISABLE TRIGGER (Cloud SQL's ``postgres`` may not)
-    2. pre-flight   latest dedup_recipe_stamp row (absent → migrate to 0005 first),
+    2. pre-flight   latest dedup_recipe_stamp row (absent → migrate to 0003 first),
                     live PostGIS/GEOS versions, golden-vector check (informational:
                     all vectors passing means this run will likely be a no-op)
-    3. scan         read-only SELECT recomputing every place's hash, mirroring the
-                    trigger's effective-grid lookup (jsonb_typeof-guarded cast per
-                    migration 0004, fallback 1e-7 — if the trigger's fallback is
-                    ever retuned, DEFAULT_GRID_FALLBACK below must move with it)
-    4. plan         pure collision resolution (decision D5): within a
-                    (collection, new_hash) group a row already holding the hash
-                    unchanged wins (updating past it would violate
-                    uq_place_collection_geom_hash); otherwise the earliest id
+    3. scan         read-only SELECT recomputing every place's hash under the ONE
+                    global grid (migration 0001 pins the trigger literal — if it
+                    is ever retuned, DEFAULT_GRID_FALLBACK below must move with it)
+    4. plan         pure collision resolution (decision D5; scope is GLOBAL —
+                    geometry uniqueness is catalog-wide): within a new_hash
+                    group a row already
+                    holding the hash unchanged wins (updating past it would
+                    violate uq_place_geom_hash); otherwise the earliest id
                     (UUIDv7 = mint-time order) wins; losers keep their old hash
                     and are reported as discovered duplicates; planned updates
                     targeting a skipped row's retained hash are cascade-demoted
@@ -67,8 +67,8 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 RECIPE_VERSION = "v1"
 MUTATION_TRIGGER = "place_block_mutation_bud"
 UPDATE_CHUNK_SIZE = 1000
-# Mirrors the deployed trigger's fallback (migrations 0001 → 0004). A future
-# fallback retune must move this value too.
+# Mirrors the 0001 trigger literal (the ONE global grid). A future retune is a
+# migration event and must move this value too.
 DEFAULT_GRID_FALLBACK = "1e-7"
 
 
@@ -97,14 +97,14 @@ class RehashConfig:
 @dataclass(frozen=True)
 class ScanRow:
     id: uuid.UUID  # orderable; UUIDv7 sorts by mint time
-    collection_id: uuid.UUID
+    collection_id: uuid.UUID  # report context only — collisions are global
     old_hash: str  # hex
     new_hash: str  # hex
 
 
 @dataclass(frozen=True)
 class SkippedPair:
-    collection_id: uuid.UUID
+    collection_id: uuid.UUID  # the LOSER's collection (the winner may be elsewhere)
     loser_id: uuid.UUID
     winner_id: uuid.UUID
     geom_hash: str  # the hex digest both rows would share / collide on
@@ -164,14 +164,14 @@ def preflight(conn: psycopg.Connection) -> None:
     print("→ pre-flight")
     if conn.execute("SELECT to_regclass('dedup_recipe_stamp')").fetchone()[0] is None:
         raise StepError(
-            "dedup_recipe_stamp table missing — run `geoid migrate` to 0005+ first"
+            "dedup_recipe_stamp table missing — run `geoid migrate` to 0003+ first"
         )
     stamp = conn.execute(
         "SELECT recipe_version, postgis_version, geos_version, stamped_at "
         "FROM dedup_recipe_stamp ORDER BY id DESC LIMIT 1"
     ).fetchone()
     if stamp is None:
-        raise StepError("dedup_recipe_stamp is empty — run `geoid migrate` to 0005+ first")
+        raise StepError("dedup_recipe_stamp is empty — run `geoid migrate` to 0003+ first")
     if not conn.execute(
         "SELECT count(*) FROM pg_proc WHERE proname = 'geoid_geom_hash'"
     ).fetchone()[0]:
@@ -200,12 +200,8 @@ def preflight(conn: psycopg.Connection) -> None:
 _SCAN_SQL = f"""
     SELECT p.id, p.collection_id,
            encode(p.geom_hash, 'hex') AS old_hash,
-           encode(geoid_geom_hash(p.geom, COALESCE(
-               CASE WHEN jsonb_typeof(c.metadata->'dedup_grid') = 'number'
-                    THEN (c.metadata->>'dedup_grid')::double precision
-               END, {DEFAULT_GRID_FALLBACK})), 'hex') AS new_hash
+           encode(geoid_geom_hash(p.geom, {DEFAULT_GRID_FALLBACK}), 'hex') AS new_hash
       FROM place p
-      JOIN collection c ON c.id = p.collection_id
      ORDER BY p.id
 """
 
@@ -221,48 +217,44 @@ def scan(conn: psycopg.Connection) -> tuple[ScanRow, ...]:
 
 
 def plan_rehash(rows: Sequence[ScanRow]) -> RehashPlan:
-    """Pure collision resolution (decision D5). Never deletes; losers keep their
-    old hash and surface as discovered-duplicate pairs."""
+    """Pure collision resolution (decision D5; geometry uniqueness is global,
+    so the scope is catalog-wide). Never deletes; losers keep their old hash
+    and surface as discovered-duplicate pairs."""
 
     def holds(row: ScanRow) -> bool:
         return row.old_hash == row.new_hash
 
-    # Group winner per (collection, new_hash): an incumbent already holding the
+    # Group winner per new_hash — catalog-wide: an incumbent already holding the
     # hash unchanged beats everyone (the UPDATE itself would violate
-    # uq_place_collection_geom_hash); otherwise the earliest id (= mint time).
-    winners: dict[tuple[uuid.UUID, str], ScanRow] = {}
+    # uq_place_geom_hash); otherwise the earliest id (= mint time).
+    winners: dict[str, ScanRow] = {}
     for row in rows:
-        key = (row.collection_id, row.new_hash)
-        incumbent = winners.get(key)
+        incumbent = winners.get(row.new_hash)
         if (
             incumbent is None
             or (holds(row) and not holds(incumbent))
             or (holds(row) == holds(incumbent) and row.id < incumbent.id)
         ):
-            winners[key] = row
+            winners[row.new_hash] = row
 
     drifted = [row for row in rows if not holds(row)]
     unchanged_count = len(rows) - len(drifted)
-    updates = [row for row in drifted
-               if winners[(row.collection_id, row.new_hash)] is row]
+    updates = [row for row in drifted if winners[row.new_hash] is row]
     skipped: list[tuple[ScanRow, uuid.UUID]] = [
-        (row, winners[(row.collection_id, row.new_hash)].id)
+        (row, winners[row.new_hash].id)
         for row in drifted
-        if winners[(row.collection_id, row.new_hash)] is not row
+        if winners[row.new_hash] is not row
     ]
 
     # Fixed point: a skipped row RETAINS its old hash, so any planned update
     # targeting that value would collide — demote it too, and so on.
     while True:
-        retained = {(row.collection_id, row.old_hash): row for row, _ in skipped}
-        demoted = [row for row in updates
-                   if (row.collection_id, row.new_hash) in retained]
+        retained = {row.old_hash: row for row, _ in skipped}
+        demoted = [row for row in updates if row.new_hash in retained]
         if not demoted:
             break
         updates = [row for row in updates if row not in demoted]
-        skipped += [
-            (row, retained[(row.collection_id, row.new_hash)].id) for row in demoted
-        ]
+        skipped += [(row, retained[row.new_hash].id) for row in demoted]
 
     pairs = tuple(
         SkippedPair(collection_id=row.collection_id, loser_id=row.id,
@@ -309,7 +301,7 @@ def report(plan: RehashPlan) -> int:
           "their old hash; review and (if confirmed duplicates) supersede via the "
           "normal predecessor flow:")
     for pair in plan.skipped_pairs:
-        print(f"  - collection {pair.collection_id}: place {pair.loser_id} now hashes "
+        print(f"  - place {pair.loser_id} (collection {pair.collection_id}) now hashes "
               f"identically to place {pair.winner_id} (digest {pair.geom_hash}) — skipped")
     return 3
 

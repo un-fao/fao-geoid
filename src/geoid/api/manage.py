@@ -49,23 +49,17 @@ async def create_collection(
     workspace_slug: str,
     body: CollectionCreate,
     session: AsyncSession = Depends(get_session),
-    settings: Settings = Depends(get_settings),
 ) -> CollectionOut:
     workspace = await workspace_repo.get_by_slug(session, workspace_slug)
     if workspace is None:
         raise WorkspaceNotFoundError(workspace_slug)
-    # Stamp the configured precision default unless the admin supplied one (theirs
-    # wins). The stamped value in metadata is the source of truth read by both the
-    # BEFORE-INSERT trigger and the incumbent-lookup, so they can't drift.
-    metadata = dict(body.metadata)
-    metadata.setdefault("dedup_grid", settings.dedup_grid_default)
     collection = await collection_repo.create(
         session,
         workspace_id=workspace.id,
         slug=body.slug,
         title=body.title,
         writable_anon=body.writable_anon,
-        metadata=metadata,
+        metadata=body.metadata,
     )
     return CollectionOut(
         id=str(collection.id),

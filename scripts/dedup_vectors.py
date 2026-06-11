@@ -181,8 +181,8 @@ VECTOR_CASES: tuple[VectorCase, ...] = (
         name="grid9e5_baseline",
         wkt=_SQUARE,
         grid=9e-5,
-        note="unit square at the 0003-era ~10m grid (stamped on pre-0004 populated "
-        "collections by migration 0004)",
+        note="unit square at a coarse ~10m grid — exercises the recipe at a "
+        "non-default gridsize (grid is a function parameter, not a constant)",
     ),
     VectorCase(
         name="grid9e5_jitter",

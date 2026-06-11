@@ -24,8 +24,10 @@ uv run python scripts/loadtest.py --scenario all --concurrency 16 --duration 10
 GEOID_BASE_URL=http://localhost:8000 k6 run tests/load/k6_smoke.js
 ```
 
-The three hot paths: **mint** (POST unique polygon), **dedup** (POST identical
-geometry → 200 incumbent), **read** (`GET items?limit=50`).
+The three hot paths: **mint** (POST unique polygon → 201), **dedup** (POST identical
+geometry → 409 carrying the incumbent geoid; the harness counts 409 as success for
+this scenario — it IS the measured path: arbiter conflict + incumbent lookup),
+**read** (`GET items?limit=50`).
 
 ## Baseline (emulated lower bound, concurrency=16, 8 s)
 
@@ -42,9 +44,10 @@ it stayed at ~73 ms p95 despite an 8× data increase — see the index result be
 
 `tests/integration/test_concurrency.py` fires **16 simultaneous identical POSTs**
 and asserts they converge to **exactly one geoid and one `place` row** (one 201,
-fifteen 200s). This proves the `ON CONFLICT … DO NOTHING` + incumbent-lookup race
-is conflict-free under concurrency — the load-bearing dedup guarantee. A companion
-test fires 16 *distinct* POSTs and asserts all mint.
+fifteen 409s — each 409 body carrying the winner's geoid). This proves the
+`ON CONFLICT … DO NOTHING` + incumbent-lookup race is conflict-free under
+concurrency — the load-bearing dedup guarantee. A companion test fires 16
+*distinct* POSTs and asserts all mint.
 
 ## Optimizations applied (with evidence)
 

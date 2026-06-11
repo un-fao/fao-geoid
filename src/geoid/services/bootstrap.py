@@ -34,6 +34,5 @@ async def ensure_public_collection(session: AsyncSession, settings: Settings) ->
             slug=settings.public_collection,
             title="Public (anonymous contributions)",
             writable_anon=True,
-            metadata={"dedup_grid": settings.dedup_grid_default},
         )
     return collection

@@ -19,9 +19,9 @@ those are derived views of the *same* underlying geoid.
   correction does not edit a place; it mints a *new* geoid that points back to the
   one it supersedes, and the original still resolves forever.
 - **Identity, not geometry.** The geoid identifies a place; it is *not* computed
-  from the shape. Two records of the same shape can have two geoids (see
-  *deduplication* below), and one place keeps its geoid even though its geometry is
-  fixed at mint time.
+  from the shape — but the registry enforces a one-to-one mapping: an identical
+  geometry is registered **once**, catalog-wide (see *deduplication* below), and
+  one place keeps its geoid even though its geometry is fixed at mint time.
 
 ### external_id
 
@@ -33,9 +33,10 @@ identity — the geoid is the identity.
 ### collection
 
 A **named bucket of places** within a workspace (the OGC API Features
-"collection"). It is the unit that scoping rules apply to: deduplication and
-`external_id` uniqueness are evaluated *within a single collection*, never across
-collections. One reserved collection, `public`, accepts anonymous contributions.
+"collection"). `external_id` uniqueness is evaluated *within a single
+collection*, never across collections; geometry deduplication, by contrast, is
+**global** — it applies across the whole catalog regardless of collection. One
+reserved collection, `public`, accepts anonymous contributions.
 
 ### workspace
 
@@ -60,9 +61,8 @@ workspace ─< collection ─< place (each place carries one geoid)
 
 ## The three uniqueness rules
 
-These are the guarantees Release 1 enforces. The first two are hard, enforced
-constraints; the third is a best-effort convenience that the team has chosen to
-de-prioritize.
+These are the guarantees Release 1 enforces. All three are hard, enforced
+constraints.
 
 ### 1. geoid — globally unique across the whole registry
 
@@ -78,12 +78,14 @@ Within one collection, an `external_id` may be used at most once. Reusing the sa
 `external_id` value may legitimately appear in *different* collections — the rule
 is scoped to the collection, by design. This is a hard, enforced rule.
 
-### 3. geometry deduplication — identical-only, per collection, de-prioritized
+### 3. geometry uniqueness — identical-only, global, enforced
 
-When a place is contributed with a geometry that is **identical** to one already in
-the same collection, GeoID returns the existing geoid instead of minting a new one
-(deduplication). This is scoped per collection: the same shape in two different
-collections produces two geoids.
+When a place is contributed with a geometry that is **identical** to one already
+registered **anywhere in the catalog**, the submission **fails with an error
+(HTTP 409)** that carries the **existing geoid** — the insert is rejected, no
+second geoid is minted. This is the team's final ruling (June 2026): one
+geometry maps to exactly one geoid across the whole catalog, regardless of
+which collection either submission targeted.
 
 Important scope of this rule, as the team agreed:
 
@@ -91,10 +93,12 @@ Important scope of this rule, as the team agreed:
   "overlapping plot" detector, and it does not attempt fuzzy/spatial matching.
 - The mechanism is **geohash-style**: the geometry is canonicalized (validity,
   ring/part/hole order, coordinate precision) and hashed; an equal hash means a
-  duplicate.
-- It is **error-prone by nature** (see the precision caveat below) and is
-  therefore **de-prioritized** for Release 1. The mechanism is kept and working,
-  but it is not something stakeholders should rely on for data-quality guarantees.
+  duplicate, enforced by a database unique constraint on the hash.
+- The error response names the incumbent: clients receive the existing geoid
+  (plus its resolvable did/uri forms and collection), so "already registered"
+  is actionable, not a dead end.
+- Near-identical shapes that differ by more than float jitter mint distinct
+  geoids by design (see the precision caveat below).
 
 ---
 
@@ -104,17 +108,17 @@ Before hashing, every coordinate is snapped to a fixed grid so that
 floating-point jitter doesn't make two copies of the same shape look different.
 The grid size is the team's "coordinate precision" knob.
 
-- **Configurable.** Set globally via `GEOID_DEDUP_GRID_DEFAULT`, and overridable
-  per collection (`collection.metadata.dedup_grid`).
-- **Default ≈ 1 centimetre** — `1e-7°` per vertex. (At the equator, `1e-7°` of
+- **One global grid.** Geometry uniqueness is catalog-wide, so there is exactly
+  one grid for the whole instance — there is no per-collection override. The
+  value is pinned in the database (a migration event to change), with
+  `GEOID_DEDUP_GRID_DEFAULT` mirroring it for the application's conflict lookup.
+- **≈ 1 centimetre** — `1e-7°` per vertex. (At the equator, `1e-7°` of
   longitude is roughly 1 cm; it varies with latitude.) This is the team's final
   ruling: deduplication means **exact match** — the grid exists only to absorb
   floating-point jitter, *not* to merge shapes that are merely near each other.
-  Every collection is stamped with this default at creation unless an explicit
-  value is supplied.
-- **Frozen once a collection has data.** Changing the grid after places exist
-  would re-hash existing geometries and could silently mint a second geoid for an
-  already-registered place, so it is locked once a collection is non-empty.
+- **Retuning is a migration event.** Changing the grid re-hashes every stored
+  geometry and can surface previously-distinct shapes as duplicates, so it is
+  done in a schema migration with an audited re-hash, never as a config flip.
 
 The hashing recipe itself is **versioned** (currently `v1`), and every instance
 records which geometry-engine stack (PostGIS/GEOS versions) its stored hashes were
@@ -126,21 +130,22 @@ any data is loaded, and an audited re-hash procedure recomputes the stored hashe
 on the new stack — any newly discovered duplicates are reported for human review,
 never silently merged or deleted.
 
-### The honest caveat (why dedup is de-prioritized)
+### The honest caveat (what "identical" means at the boundary)
 
 The grid is an **absolute grid**, not a "merge anything within 1 cm" radius. It
 quantizes coordinates into ~1 cm cells; it does **not** measure the distance
 between two points. The practical consequence:
 
 > Two points that are less than a centimetre apart but happen to fall on opposite
-> sides of a cell boundary will land in **different** cells and therefore produce
-> **different** geoids — they will *not* be deduplicated.
+> sides of a cell boundary will land in **different** cells and therefore mint
+> **different** geoids — they will *not* be treated as duplicates.
 
-So the rule neutralizes float jitter and exact re-submissions; it does **not**
+So the rule rejects float-jittered and exact re-submissions; it does **not**
 guarantee that "visually the same" plots collapse to one geoid — and at ~1 cm
-that is the *intended* behaviour, per the team's exact-match ruling. The boundary
-behaviour is exactly the error-proneness the team flagged, and the reason
-geometry deduplication is de-prioritized for Release 1.
+that is the *intended* behaviour, per the team's exact-match ruling: the
+boundary case is a *different* geometry, and a different geometry is a
+different place. Stakeholders should not expect the rule to act as a
+near-duplicate detector.
 
 ---
 

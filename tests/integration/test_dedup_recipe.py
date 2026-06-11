@@ -84,8 +84,9 @@ async def test_hash_is_sha256_32_bytes(session):
     assert len(digest) == 64  # 32 bytes hex-encoded
 
 
-async def test_dedup_is_scoped_per_collection(client, admin_headers, unit_square_ccw):
-    # The SAME geometry in two different collections mints two distinct geoids.
+async def test_dedup_is_global_across_collections(client, admin_headers, unit_square_ccw):
+    # The SAME geometry in two different collections → 409 carrying the first
+    # geoid: one geometry → one geoid across the whole catalog (Remi's ruling).
     await client.post("/manage/workspaces", headers=admin_headers, json={"slug": "wsa"})
     await client.post(
         "/manage/workspaces/wsa/collections",
@@ -94,5 +95,9 @@ async def test_dedup_is_scoped_per_collection(client, admin_headers, unit_square
     )
     a = await client.post("/collections/public/items", json=unit_square_ccw)
     b = await client.post("/collections/cola/items", json=unit_square_ccw)
-    assert a.status_code == 201 and b.status_code == 201
-    assert a.json()["geoid"] != b.json()["geoid"]
+    assert a.status_code == 201
+    assert b.status_code == 409
+    body = b.json()
+    assert body["geoid"] == a.json()["geoid"]
+    assert body["collection"] == "public"  # the INCUMBENT's collection, not the target
+    assert body["constraint"] == "uq_place_geom_hash"
