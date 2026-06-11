@@ -38,9 +38,7 @@ async def list_all(session: AsyncSession) -> list[Collection]:
     return list((await session.execute(stmt)).scalars().all())
 
 
-async def list_by_workspace(
-    session: AsyncSession, workspace_id: uuid.UUID
-) -> list[Collection]:
+async def list_by_workspace(session: AsyncSession, workspace_id: uuid.UUID) -> list[Collection]:
     stmt = (
         select(Collection)
         .where(Collection.workspace_id == workspace_id)

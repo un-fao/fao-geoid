@@ -24,8 +24,7 @@ def _collection_out(collection: Collection) -> CollectionOut:
 async def list_workspaces(session: AsyncSession) -> list[WorkspaceOut]:
     workspaces = await workspace_repo.list_all(session)
     return [
-        WorkspaceOut(id=str(w.id), slug=w.slug, title=w.title, metadata=w.meta)
-        for w in workspaces
+        WorkspaceOut(id=str(w.id), slug=w.slug, title=w.title, metadata=w.meta) for w in workspaces
     ]
 
 
@@ -45,9 +44,7 @@ async def list_item_ids(
     collection = await collection_repo.get_by_slug(session, collection_slug)
     if collection is None:
         raise CollectionNotFoundError(collection_slug)
-    ids, total = await place_repo.list_item_ids(
-        session, collection.id, limit=limit, offset=offset
-    )
+    ids, total = await place_repo.list_item_ids(session, collection.id, limit=limit, offset=offset)
     return ItemIdList(
         collection=collection_slug,
         numberMatched=total,

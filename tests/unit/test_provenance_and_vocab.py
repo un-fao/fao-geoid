@@ -11,6 +11,7 @@ pytestmark = pytest.mark.unit
 
 # --- provenance -------------------------------------------------------------
 
+
 def test_extract_client_from_whisp_block():
     client = provenance.extract_client({"_whisp": {"version": "2.1.0", "run": "abc"}})
     assert client is not None
@@ -49,6 +50,7 @@ def test_build_provenance_merges_extra():
 
 
 # --- vocab ------------------------------------------------------------------
+
 
 def test_fao_vocab_is_the_default_and_matches_the_ruling():
     # Remi's final terminology ruling: workspace / collection / item.

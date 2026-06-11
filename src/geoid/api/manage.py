@@ -95,6 +95,4 @@ async def list_item_ids(
     settings: Settings = Depends(get_settings),
 ) -> ItemIdList:
     enforce_max_offset(offset, settings)
-    return await listing_service.list_item_ids(
-        session, collection_id, limit=limit, offset=offset
-    )
+    return await listing_service.list_item_ids(session, collection_id, limit=limit, offset=offset)

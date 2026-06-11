@@ -168,22 +168,34 @@ def _load_config(argv: list[str] | None = None) -> BootstrapConfig:
     parser = argparse.ArgumentParser(
         description="Bootstrap a fresh PostgreSQL instance to GeoID app-ready (idempotent)."
     )
-    parser.add_argument("--dry-run", action="store_true",
-                        help="print the statements that would run; mutate nothing")
-    parser.add_argument("--skip-migrate", action="store_true",
-                        help="skip `geoid migrate` (the Cloud Run job will run it)")
-    parser.add_argument("--skip-seed", action="store_true",
-                        help="skip seeding the default workspace + public collection")
-    parser.add_argument("--reset-app-password", action="store_true",
-                        help="rotate an existing role's password to the configured one")
+    parser.add_argument(
+        "--dry-run", action="store_true", help="print the statements that would run; mutate nothing"
+    )
+    parser.add_argument(
+        "--skip-migrate",
+        action="store_true",
+        help="skip `geoid migrate` (the Cloud Run job will run it)",
+    )
+    parser.add_argument(
+        "--skip-seed",
+        action="store_true",
+        help="skip seeding the default workspace + public collection",
+    )
+    parser.add_argument(
+        "--reset-app-password",
+        action="store_true",
+        help="rotate an existing role's password to the configured one",
+    )
     parser.add_argument("--yes", action="store_true", help="skip the confirmation prompt")
     args = parser.parse_args(argv)
 
     admin_dsn = os.environ.get("GEOID_BOOTSTRAP_ADMIN_DSN")
     raw_app_url = os.environ.get("GEOID_DATABASE_URL")
     if not admin_dsn:
-        raise ConfigError("GEOID_BOOTSTRAP_ADMIN_DSN is required "
-                          "(admin DSN to the maintenance database, e.g. .../postgres)")
+        raise ConfigError(
+            "GEOID_BOOTSTRAP_ADMIN_DSN is required "
+            "(admin DSN to the maintenance database, e.g. .../postgres)"
+        )
     if not raw_app_url:
         raise ConfigError("GEOID_DATABASE_URL is required (the canonical app URL)")
 
@@ -246,8 +258,12 @@ def _connect(cfg: BootstrapConfig, *, dbname: str | None = None) -> psycopg.Conn
         ) from exc
 
 
-def _run(conn: psycopg.Connection, cfg: BootstrapConfig,
-         statement: sql.Composed, display: str | None = None) -> None:
+def _run(
+    conn: psycopg.Connection,
+    cfg: BootstrapConfig,
+    statement: sql.Composed,
+    display: str | None = None,
+) -> None:
     text = display or statement.as_string(conn)
     if cfg.dry_run:
         print(f"  [dry-run] {text}")
@@ -258,23 +274,24 @@ def _run(conn: psycopg.Connection, cfg: BootstrapConfig,
 def ensure_role(conn: psycopg.Connection, cfg: BootstrapConfig) -> bool:
     """Create the app role if missing. Returns True when it already existed."""
     print(f"→ role {cfg.app_role!r}")
-    existed = conn.execute(
-        "SELECT 1 FROM pg_roles WHERE rolname = %s", (cfg.app_role,)
-    ).fetchone() is not None
+    existed = (
+        conn.execute("SELECT 1 FROM pg_roles WHERE rolname = %s", (cfg.app_role,)).fetchone()
+        is not None
+    )
     if not existed:
         statement = sql.SQL("CREATE ROLE {} LOGIN PASSWORD {}").format(
             sql.Identifier(cfg.app_role), sql.Literal(cfg.app_password)
         )
-        _run(conn, cfg, statement,
-             display=f"CREATE ROLE {cfg.app_role} LOGIN PASSWORD '<redacted>'")
+        _run(
+            conn, cfg, statement, display=f"CREATE ROLE {cfg.app_role} LOGIN PASSWORD '<redacted>'"
+        )
         if not cfg.dry_run:
             print("  ✓ created")
     elif cfg.reset_app_password:
         statement = sql.SQL("ALTER ROLE {} PASSWORD {}").format(
             sql.Identifier(cfg.app_role), sql.Literal(cfg.app_password)
         )
-        _run(conn, cfg, statement,
-             display=f"ALTER ROLE {cfg.app_role} PASSWORD '<redacted>'")
+        _run(conn, cfg, statement, display=f"ALTER ROLE {cfg.app_role} PASSWORD '<redacted>'")
         if not cfg.dry_run:
             print("  ✓ exists — password reset (--reset-app-password)")
     else:
@@ -289,16 +306,24 @@ def ensure_database(conn: psycopg.Connection, cfg: BootstrapConfig) -> bool:
     if admin_user != cfg.app_role:
         # Cloud SQL's `postgres` is not a real superuser: it must be a member of the
         # target role to create a database owned by it. Re-granting is a no-op.
-        _run(conn, cfg, sql.SQL("GRANT {} TO {}").format(
-            sql.Identifier(cfg.app_role), sql.Identifier(admin_user)
-        ))
+        _run(
+            conn,
+            cfg,
+            sql.SQL("GRANT {} TO {}").format(
+                sql.Identifier(cfg.app_role), sql.Identifier(admin_user)
+            ),
+        )
     row = conn.execute(
         "SELECT pg_get_userbyid(datdba) FROM pg_database WHERE datname = %s", (cfg.app_db,)
     ).fetchone()
     if row is None:
-        _run(conn, cfg, sql.SQL("CREATE DATABASE {} OWNER {}").format(
-            sql.Identifier(cfg.app_db), sql.Identifier(cfg.app_role)
-        ))
+        _run(
+            conn,
+            cfg,
+            sql.SQL("CREATE DATABASE {} OWNER {}").format(
+                sql.Identifier(cfg.app_db), sql.Identifier(cfg.app_role)
+            ),
+        )
         if not cfg.dry_run:
             print(f"  ✓ created, owner {cfg.app_role!r}")
         return False
@@ -319,9 +344,11 @@ def harden_database(conn: psycopg.Connection, cfg: BootstrapConfig) -> None:
     print("→ harden")
     # Without this, every console-created Cloud SQL user (all cloudsqlsuperuser
     # members) could connect via the default PUBLIC grant.
-    _run(conn, cfg, sql.SQL("REVOKE CONNECT ON DATABASE {} FROM PUBLIC").format(
-        sql.Identifier(cfg.app_db)
-    ))
+    _run(
+        conn,
+        cfg,
+        sql.SQL("REVOKE CONNECT ON DATABASE {} FROM PUBLIC").format(sql.Identifier(cfg.app_db)),
+    )
     if not cfg.dry_run:
         print("  ✓ CONNECT revoked from PUBLIC (owner keeps it implicitly)")
 
@@ -329,9 +356,11 @@ def harden_database(conn: psycopg.Connection, cfg: BootstrapConfig) -> None:
 def ensure_extensions(conn: psycopg.Connection, cfg: BootstrapConfig) -> None:
     print("→ extensions (as admin — Cloud SQL restricts CREATE EXTENSION to cloudsqlsuperuser)")
     for extension in REQUIRED_EXTENSIONS:
-        _run(conn, cfg, sql.SQL("CREATE EXTENSION IF NOT EXISTS {}").format(
-            sql.Identifier(extension)
-        ))
+        _run(
+            conn,
+            cfg,
+            sql.SQL("CREATE EXTENSION IF NOT EXISTS {}").format(sql.Identifier(extension)),
+        )
     if cfg.dry_run:
         return
     rows = conn.execute(
@@ -346,9 +375,10 @@ def ensure_extensions(conn: psycopg.Connection, cfg: BootstrapConfig) -> None:
 
 
 def _has_extension(conn: psycopg.Connection, name: str) -> bool:
-    return conn.execute(
-        "SELECT 1 FROM pg_extension WHERE extname = %s", (name,)
-    ).fetchone() is not None
+    return (
+        conn.execute("SELECT 1 FROM pg_extension WHERE extname = %s", (name,)).fetchone()
+        is not None
+    )
 
 
 def _series(version: str) -> str:
@@ -377,8 +407,10 @@ def check_postgis_parity(conn: psycopg.Connection) -> list[str]:
     for problem in problems:
         print(f"  ⚠ {problem}")
     if not problems:
-        print(f"  ✓ PostGIS {lib} / GEOS {geos.split('-')[0]} "
-              f"(expected {EXPECTED_POSTGIS_SERIES}.x / {EXPECTED_GEOS_SERIES}.x)")
+        print(
+            f"  ✓ PostGIS {lib} / GEOS {geos.split('-')[0]} "
+            f"(expected {EXPECTED_POSTGIS_SERIES}.x / {EXPECTED_GEOS_SERIES}.x)"
+        )
     return problems
 
 
@@ -410,9 +442,11 @@ def check_hash_vectors(conn: psycopg.Connection) -> list[str]:
     except vectors.StepError as exc:
         raise StepError(str(exc)) from exc
     for failure in report.advisory_failures:
-        print(f"  ⚠ advisory vector {failure.name!r} drifted "
-              f"(expected {failure.expected}, got {failure.actual}) — "
-              "ST_MakeValid leg only; stored hashes are unaffected")
+        print(
+            f"  ⚠ advisory vector {failure.name!r} drifted "
+            f"(expected {failure.expected}, got {failure.actual}) — "
+            "ST_MakeValid leg only; stored hashes are unaffected"
+        )
     problems = [
         f"golden vector {failure.name!r} drifted — expected {failure.expected}, got "
         f"{failure.actual}; stored hashes are stale on this stack: freeze writes and "
@@ -422,8 +456,10 @@ def check_hash_vectors(conn: psycopg.Connection) -> list[str]:
     for problem in problems:
         print(f"  ⚠ {problem}")
     if not problems:
-        print(f"  ✓ {report.passed}/{len(fixture['vectors'])} golden vectors match "
-              f"({vectors.FIXTURE_PATH.name})")
+        print(
+            f"  ✓ {report.passed}/{len(fixture['vectors'])} golden vectors match "
+            f"({vectors.FIXTURE_PATH.name})"
+        )
     return problems
 
 
@@ -450,9 +486,7 @@ def run_migrations(cfg: BootstrapConfig) -> None:
     # Cloud Run migrate job, no lru_cache'd get_settings() bleed-through, and
     # env.py calls asyncio.run() which must own the event loop.
     env = os.environ | {"GEOID_DATABASE_URL": cfg.app_url}
-    result = subprocess.run(
-        [sys.executable, "-m", "geoid.cli", "migrate"], env=env, cwd=REPO_ROOT
-    )
+    result = subprocess.run([sys.executable, "-m", "geoid.cli", "migrate"], env=env, cwd=REPO_ROOT)
     if result.returncode != 0:
         raise StepError(f"`geoid migrate` exited {result.returncode} — see alembic output above")
     print("  ✓ migrated to head")
@@ -516,16 +550,21 @@ def verify(cfg: BootstrapConfig) -> list[str]:
     with conn:
         head = _alembic_head()
         version = _scalar(conn, "SELECT version_num FROM alembic_version")
-        extensions = dict(conn.execute(
-            "SELECT extname, extversion FROM pg_extension WHERE extname = ANY(%s)",
-            (list(REQUIRED_EXTENSIONS),),
-        ).fetchall())
-        triggers = _scalar(conn, """
+        extensions = dict(
+            conn.execute(
+                "SELECT extname, extversion FROM pg_extension WHERE extname = ANY(%s)",
+                (list(REQUIRED_EXTENSIONS),),
+            ).fetchall()
+        )
+        triggers = _scalar(
+            conn,
+            """
             SELECT count(*) FROM pg_trigger t
             JOIN pg_class c ON c.oid = t.tgrelid
             JOIN pg_namespace n ON n.oid = c.relnamespace
             WHERE NOT t.tgisinternal AND n.nspname = 'public'
-        """)
+        """,
+        )
         hash_fn = _scalar(conn, "SELECT count(*) FROM pg_proc WHERE proname = 'geoid_geom_hash'")
         recipe_version = _scalar(
             conn, "SELECT recipe_version FROM dedup_recipe_stamp ORDER BY id DESC LIMIT 1"
@@ -535,26 +574,56 @@ def verify(cfg: BootstrapConfig) -> list[str]:
         create_ok = _scalar(conn, "SELECT has_schema_privilege('public', 'CREATE')")
 
     checks = (
-        ("alembic version", version or "<absent>", version == head,
-         f"alembic_version is {version!r}, head is {head!r} — re-run without --skip-migrate"),
-        ("postgis", extensions.get("postgis", "<absent>"), "postgis" in extensions,
-         "postgis extension missing"),
-        ("pgcrypto", extensions.get("pgcrypto", "<absent>"), "pgcrypto" in extensions,
-         "pgcrypto extension missing"),
-        ("user triggers", f"{triggers} (expect >= {EXPECTED_USER_TRIGGERS})",
-         (triggers or 0) >= EXPECTED_USER_TRIGGERS,
-         f"only {triggers} user triggers — migration 0001 creates {EXPECTED_USER_TRIGGERS}"),
-        ("geoid_geom_hash()", "present" if hash_fn else "missing", bool(hash_fn),
-         "dedup function geoid_geom_hash is missing"),
-        ("recipe stamp", recipe_version or "<absent>", recipe_version == "v1",
-         f"latest dedup_recipe_stamp.recipe_version is {recipe_version!r}, expected 'v1' "
-         "— migrate to 0003+ (and re-stamp via scripts/rehash_geom_hashes.py if the "
-         "recipe ever changed)"),
-        ("workspaces / collections", f"{workspaces} / {collections}",
-         (workspaces or 0) >= 1 and (collections or 0) >= 1,
-         "seed rows missing — re-run without --skip-seed"),
-        ("schema CREATE privilege", "yes" if create_ok else "no", bool(create_ok),
-         f"role {cfg.app_role!r} cannot CREATE in schema public"),
+        (
+            "alembic version",
+            version or "<absent>",
+            version == head,
+            f"alembic_version is {version!r}, head is {head!r} — re-run without --skip-migrate",
+        ),
+        (
+            "postgis",
+            extensions.get("postgis", "<absent>"),
+            "postgis" in extensions,
+            "postgis extension missing",
+        ),
+        (
+            "pgcrypto",
+            extensions.get("pgcrypto", "<absent>"),
+            "pgcrypto" in extensions,
+            "pgcrypto extension missing",
+        ),
+        (
+            "user triggers",
+            f"{triggers} (expect >= {EXPECTED_USER_TRIGGERS})",
+            (triggers or 0) >= EXPECTED_USER_TRIGGERS,
+            f"only {triggers} user triggers — migration 0001 creates {EXPECTED_USER_TRIGGERS}",
+        ),
+        (
+            "geoid_geom_hash()",
+            "present" if hash_fn else "missing",
+            bool(hash_fn),
+            "dedup function geoid_geom_hash is missing",
+        ),
+        (
+            "recipe stamp",
+            recipe_version or "<absent>",
+            recipe_version == "v1",
+            f"latest dedup_recipe_stamp.recipe_version is {recipe_version!r}, expected 'v1' "
+            "— migrate to 0003+ (and re-stamp via scripts/rehash_geom_hashes.py if the "
+            "recipe ever changed)",
+        ),
+        (
+            "workspaces / collections",
+            f"{workspaces} / {collections}",
+            (workspaces or 0) >= 1 and (collections or 0) >= 1,
+            "seed rows missing — re-run without --skip-seed",
+        ),
+        (
+            "schema CREATE privilege",
+            "yes" if create_ok else "no",
+            bool(create_ok),
+            f"role {cfg.app_role!r} cannot CREATE in schema public",
+        ),
     )
     for label, value, ok, _ in checks:
         print(f"  {'✓' if ok else '✗'} {label:<26} {value}")
@@ -566,8 +635,7 @@ def _print_plan(cfg: BootstrapConfig) -> None:
     print(f"  admin DSN : {_redact(cfg.admin_dsn)}")
     print(f"  app URL   : {_redact(cfg.app_url)}")
     print(f"  role / db : {cfg.app_role} / {cfg.app_db}")
-    skips = [flag for flag, on in
-             (("migrate", cfg.skip_migrate), ("seed", cfg.skip_seed)) if on]
+    skips = [flag for flag, on in (("migrate", cfg.skip_migrate), ("seed", cfg.skip_seed)) if on]
     if skips:
         print(f"  skipping  : {', '.join(skips)}")
     print()
@@ -599,8 +667,10 @@ def main(argv: list[str] | None = None) -> int:
             harden_database(conn, cfg)
 
         if cfg.dry_run and not db_existed:
-            print(f"\n[dry-run] database {cfg.app_db!r} does not exist yet — extensions, "
-                  "parity check, migrations, seed and verify would follow its creation")
+            print(
+                f"\n[dry-run] database {cfg.app_db!r} does not exist yet — extensions, "
+                "parity check, migrations, seed and verify would follow its creation"
+            )
             print("✓ dry-run complete (nothing mutated)")
             return 0
 
@@ -615,8 +685,10 @@ def main(argv: list[str] | None = None) -> int:
                 check_owner_privileges(conn, cfg)
 
         if cfg.dry_run:
-            print(f"\n[dry-run] would then run `geoid migrate` (as {cfg.app_role!r}), "
-                  "seed the public collection, and verify")
+            print(
+                f"\n[dry-run] would then run `geoid migrate` (as {cfg.app_role!r}), "
+                "seed the public collection, and verify"
+            )
             if drift:
                 print("⚠ dry-run found drift (see above)")
                 return 3

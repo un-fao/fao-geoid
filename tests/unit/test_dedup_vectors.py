@@ -39,6 +39,7 @@ _HEX64 = re.compile(r"^[0-9a-f]{64}$")
 
 # --- committed fixture well-formedness -----------------------------------------
 
+
 def test_fixture_is_recipe_v1_with_provenance():
     assert FIXTURE["recipe_version"] == "v1"
     assert "POSTGIS=" in FIXTURE["generated_on"]["postgis_full_version"]
@@ -82,13 +83,11 @@ def test_cell_straddle_pair_pins_distinct_digests():
 
 
 def test_collinear_extra_vertex_has_its_own_digest():
-    assert (
-        BY_NAME["collinear_extra_vertex"]["sha256"]
-        != BY_NAME["baseline_unit_square"]["sha256"]
-    )
+    assert BY_NAME["collinear_extra_vertex"]["sha256"] != BY_NAME["baseline_unit_square"]["sha256"]
 
 
 # --- load_fixture ----------------------------------------------------------------
+
 
 def test_load_fixture_missing_file_raises_step_error(tmp_path):
     with pytest.raises(dedup_vectors.StepError, match="missing"):
@@ -107,10 +106,24 @@ def test_load_fixture_wrong_recipe_version_raises_step_error(tmp_path):
 _FAKE_FIXTURE = {
     "recipe_version": "v1",
     "vectors": [
-        {"name": "pinned_strict", "wkt": "POLYGON EMPTY", "grid": 1e-7,
-         "sha256": "aa" * 32, "strict": True, "same_as": None, "note": None},
-        {"name": "pinned_advisory", "wkt": "POLYGON EMPTY", "grid": 1e-7,
-         "sha256": "bb" * 32, "strict": False, "same_as": None, "note": None},
+        {
+            "name": "pinned_strict",
+            "wkt": "POLYGON EMPTY",
+            "grid": 1e-7,
+            "sha256": "aa" * 32,
+            "strict": True,
+            "same_as": None,
+            "note": None,
+        },
+        {
+            "name": "pinned_advisory",
+            "wkt": "POLYGON EMPTY",
+            "grid": 1e-7,
+            "sha256": "bb" * 32,
+            "strict": False,
+            "same_as": None,
+            "note": None,
+        },
     ],
 }
 
@@ -125,9 +138,7 @@ def test_check_vectors_all_pass():
 
 
 def test_check_vectors_never_crosses_strict_and_advisory():
-    report = dedup_vectors.check_vectors(
-        lambda query, params=None: "ff" * 32, _FAKE_FIXTURE
-    )
+    report = dedup_vectors.check_vectors(lambda query, params=None: "ff" * 32, _FAKE_FIXTURE)
     assert report.passed == 0
     assert [failure.name for failure in report.strict_failures] == ["pinned_strict"]
     assert [failure.name for failure in report.advisory_failures] == ["pinned_advisory"]
@@ -137,12 +148,12 @@ def test_check_vectors_never_crosses_strict_and_advisory():
 
 # --- generate_fixture -------------------------------------------------------------
 
+
 def _fake_run_sql(lib: str, geos: str):
     """Version queries → the given stack; recipe queries → a digest derived from
     the vector's canonical group, so same_as pairs collapse and others differ."""
     groups = {
-        (case.wkt, case.grid): case.same_as or case.name
-        for case in dedup_vectors.VECTOR_CASES
+        (case.wkt, case.grid): case.same_as or case.name for case in dedup_vectors.VECTOR_CASES
     }
 
     def run_sql(query: str, params: dict | None = None) -> str:
@@ -194,6 +205,7 @@ def test_generate_self_check_rejects_inconsistent_engine():
 
 
 # --- CLI argument validation -------------------------------------------------------
+
 
 def test_cli_requires_exactly_one_mode():
     assert dedup_vectors.main(["--dsn", "postgresql://x/y"]) == 2

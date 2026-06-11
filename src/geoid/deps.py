@@ -96,9 +96,7 @@ async def require_admin(principal: Principal = Depends(require_principal)) -> Pr
         return principal
     raise HTTPException(
         status_code=(
-            status.HTTP_401_UNAUTHORIZED
-            if principal.is_anonymous
-            else status.HTTP_403_FORBIDDEN
+            status.HTTP_401_UNAUTHORIZED if principal.is_anonymous else status.HTTP_403_FORBIDDEN
         ),
         detail="Admin privileges required",
         headers=_WWW_AUTH,

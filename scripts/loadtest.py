@@ -37,7 +37,10 @@ COLLECTION = os.environ.get("GEOID_COLLECTION", "public")
 def _polygon(x: float, y: float, s: float = 0.0008) -> dict:
     return {
         "type": "Feature",
-        "geometry": {"type": "Polygon", "coordinates": [[[x, y], [x + s, y], [x + s, y + s], [x, y + s], [x, y]]]},
+        "geometry": {
+            "type": "Polygon",
+            "coordinates": [[[x, y], [x + s, y], [x + s, y + s], [x, y + s], [x, y]]],
+        },
         "properties": {},
     }
 
@@ -92,24 +95,39 @@ async def run_scenario(name: str, concurrency: int, duration: float) -> dict:
     fn, ok_statuses = SCENARIOS[name]
     lat: list[float] = []
     counters = {"ok": 0, "err": 0}
-    limits = httpx.Limits(max_connections=concurrency + 16, max_keepalive_connections=concurrency + 16)
+    limits = httpx.Limits(
+        max_connections=concurrency + 16, max_keepalive_connections=concurrency + 16
+    )
     async with httpx.AsyncClient(timeout=30.0, limits=limits) as client:
         with contextlib.suppress(Exception):
             await fn(client)  # warmup (seeds the dedup incumbent)
         start = time.perf_counter()
         deadline = start + duration
-        await asyncio.gather(*[asyncio.create_task(_worker(client, fn, ok_statuses, deadline, lat, counters)) for _ in range(concurrency)])
+        await asyncio.gather(
+            *[
+                asyncio.create_task(_worker(client, fn, ok_statuses, deadline, lat, counters))
+                for _ in range(concurrency)
+            ]
+        )
         elapsed = time.perf_counter() - start
 
     total = len(lat)
     rps = total / elapsed if elapsed else 0.0
-    print(f"\n[{name}] concurrency={concurrency} duration={duration:.0f}s  requests={total}  ok={counters['ok']} err={counters['err']}  RPS={rps:.1f}")
+    print(
+        f"\n[{name}] concurrency={concurrency} duration={duration:.0f}s  requests={total}  ok={counters['ok']} err={counters['err']}  RPS={rps:.1f}"
+    )
     if lat:
         print(
             f"  latency ms:  p50={_pct(lat, 50):.1f}  p90={_pct(lat, 90):.1f}  "
             f"p95={_pct(lat, 95):.1f}  p99={_pct(lat, 99):.1f}  max={max(lat):.1f}  mean={statistics.mean(lat):.1f}"
         )
-    return {"scenario": name, "requests": total, "rps": rps, "p95_ms": _pct(lat, 95), "errors": counters["err"]}
+    return {
+        "scenario": name,
+        "requests": total,
+        "rps": rps,
+        "p95_ms": _pct(lat, 95),
+        "errors": counters["err"],
+    }
 
 
 async def main() -> int:

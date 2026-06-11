@@ -23,7 +23,9 @@ def _square(x: int, y: int, *, external_id: str | None = None) -> dict:
 
 async def _seed(client, n: int) -> None:
     for i in range(n):
-        resp = await client.post("/collections/public/items", json=_square(i * 2, i * 2, external_id=f"f{i}"))
+        resp = await client.post(
+            "/collections/public/items", json=_square(i * 2, i * 2, external_id=f"f{i}")
+        )
         assert resp.status_code == 201
 
 

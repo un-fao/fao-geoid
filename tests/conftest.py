@@ -33,8 +33,7 @@ if "DOCKER_HOST" not in os.environ:
 os.environ.setdefault("TESTCONTAINERS_RYUK_DISABLED", "true")
 
 _TRUNCATE = (
-    "TRUNCATE place, geoid_registry, change_log, collection, workspace "
-    "RESTART IDENTITY CASCADE"
+    "TRUNCATE place, geoid_registry, change_log, collection, workspace RESTART IDENTITY CASCADE"
 )
 
 
@@ -56,16 +55,13 @@ def _postgis():
         pytest.skip("Docker is not available; skipping PostGIS integration tests")
     from testcontainers.postgres import PostgresContainer
 
-    container = (
-        PostgresContainer(
-            "postgis/postgis:17-3.5",
-            username="geoid",
-            password="geoid",
-            dbname="geoid",
-            driver="asyncpg",
-        )
-        .with_kwargs(platform="linux/amd64")
-    )
+    container = PostgresContainer(
+        "postgis/postgis:17-3.5",
+        username="geoid",
+        password="geoid",
+        dbname="geoid",
+        driver="asyncpg",
+    ).with_kwargs(platform="linux/amd64")
     with container as pg:
         yield pg
 
@@ -144,6 +140,7 @@ def admin_headers() -> dict[str, str]:
 
 
 # --- Shared geometry fixtures (GeoJSON Features) ----------------------------
+
 
 def _feature(coords, *, external_id=None, properties=None, geom_type="Polygon"):
     feature = {

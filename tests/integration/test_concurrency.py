@@ -36,7 +36,9 @@ async def test_concurrent_identical_posts_converge_to_one_geoid(client, session,
             assert resp.json()["constraint"] == "uq_place_geom_hash"
 
     place_count = (await session.execute(text("SELECT count(*) FROM place"))).scalar_one()
-    registry_count = (await session.execute(text("SELECT count(*) FROM geoid_registry"))).scalar_one()
+    registry_count = (
+        await session.execute(text("SELECT count(*) FROM geoid_registry"))
+    ).scalar_one()
     changelog_count = (await session.execute(text("SELECT count(*) FROM change_log"))).scalar_one()
     assert place_count == 1
     assert registry_count == 1
@@ -51,7 +53,10 @@ async def test_concurrent_distinct_posts_all_mint(client, session):
         x = -150 + i  # distinct, well-separated
         return {
             "type": "Feature",
-            "geometry": {"type": "Polygon", "coordinates": [[[x, 0], [x + 0.5, 0], [x + 0.5, 0.5], [x, 0.5], [x, 0]]]},
+            "geometry": {
+                "type": "Polygon",
+                "coordinates": [[[x, 0], [x + 0.5, 0], [x + 0.5, 0.5], [x, 0.5], [x, 0]]],
+            },
             "properties": {},
         }
 

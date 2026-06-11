@@ -38,17 +38,24 @@ def _app_url(pg, role: str, db: str, password: str = APP_PASSWORD) -> str:
     return f"postgresql+asyncpg://{role}:{password}@{host}:{port}/{db}"
 
 
-def _run_bootstrap(pg, role: str, db: str, *flags: str,
-                   password: str = APP_PASSWORD) -> subprocess.CompletedProcess:
+def _run_bootstrap(
+    pg, role: str, db: str, *flags: str, password: str = APP_PASSWORD
+) -> subprocess.CompletedProcess:
     env = {key: value for key, value in os.environ.items() if not key.startswith("GEOID_")}
-    env.update({
-        "GEOID_BOOTSTRAP_ADMIN_DSN": _admin_dsn(pg),
-        "GEOID_DATABASE_URL": _app_url(pg, role, db, password),
-        "GEOID_ENVIRONMENT": "development",
-    })
+    env.update(
+        {
+            "GEOID_BOOTSTRAP_ADMIN_DSN": _admin_dsn(pg),
+            "GEOID_DATABASE_URL": _app_url(pg, role, db, password),
+            "GEOID_ENVIRONMENT": "development",
+        }
+    )
     return subprocess.run(
         [sys.executable, str(SCRIPT), "--yes", *flags],
-        env=env, cwd=ROOT, capture_output=True, text=True, timeout=600,
+        env=env,
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        timeout=600,
     )
 
 
@@ -83,9 +90,12 @@ def _snapshot(pg, role: str, db: str, password: str = APP_PASSWORD) -> dict:
     host, port = _endpoint(pg)
     with psycopg.connect(f"postgresql://{role}:{password}@{host}:{port}/{db}") as conn:
         version = conn.execute("SELECT version_num FROM alembic_version").fetchone()[0]
-        extensions = sorted(name for (name,) in conn.execute(
-            "SELECT extname FROM pg_extension WHERE extname IN ('postgis', 'pgcrypto')"
-        ))
+        extensions = sorted(
+            name
+            for (name,) in conn.execute(
+                "SELECT extname FROM pg_extension WHERE extname IN ('postgis', 'pgcrypto')"
+            )
+        )
         triggers = conn.execute("""
             SELECT count(*) FROM pg_trigger t
             JOIN pg_class c ON c.oid = t.tgrelid
@@ -144,15 +154,23 @@ def test_rerun_never_silently_rotates_the_password(_postgis):
 
     # A re-run with a different password in the URL must NOT rotate the role's
     # password; it fails at the verify step (credential check) with the hint.
-    wrong = _run_bootstrap(_postgis, role, db, "--skip-migrate", "--skip-seed",
-                           password="some-new-password")
+    wrong = _run_bootstrap(
+        _postgis, role, db, "--skip-migrate", "--skip-seed", password="some-new-password"
+    )
     assert wrong.returncode == 1, wrong.stdout + wrong.stderr
     assert "--reset-app-password" in wrong.stdout
     assert _snapshot(_postgis, role, db)["owner"] == role  # original password still valid
 
     # Opting in rotates it, and the new credentials pass verification.
-    reset = _run_bootstrap(_postgis, role, db, "--reset-app-password", "--skip-migrate",
-                           "--skip-seed", password="some-new-password")
+    reset = _run_bootstrap(
+        _postgis,
+        role,
+        db,
+        "--reset-app-password",
+        "--skip-migrate",
+        "--skip-seed",
+        password="some-new-password",
+    )
     assert reset.returncode == 0, reset.stdout + reset.stderr
     assert _snapshot(_postgis, role, db, password="some-new-password")["owner"] == role
 

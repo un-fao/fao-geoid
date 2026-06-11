@@ -63,7 +63,9 @@ async def test_duplicate_geometry_409_leaves_hinges_untouched(
     assert second.status_code == 409  # identical geometry → insert fails
 
     place_count = (await session.execute(text("SELECT count(*) FROM place"))).scalar_one()
-    registry_count = (await session.execute(text("SELECT count(*) FROM geoid_registry"))).scalar_one()
+    registry_count = (
+        await session.execute(text("SELECT count(*) FROM geoid_registry"))
+    ).scalar_one()
     changelog_count = (await session.execute(text("SELECT count(*) FROM change_log"))).scalar_one()
     assert place_count == 1
     assert registry_count == 1

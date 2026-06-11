@@ -97,17 +97,15 @@ def build_cql_clause(
     # of masquerading as a bad filter. LarkError = pygeofilter parse failures.
     _USER_FILTER_ERRORS = (LarkError, ValueError, KeyError, TypeError, NotImplementedError)
     try:
-        tree = parse_cql2_json(filter_expr) if lang == FILTER_LANG_JSON else parse_cql2_text(
-            filter_expr
+        tree = (
+            parse_cql2_json(filter_expr)
+            if lang == FILTER_LANG_JSON
+            else parse_cql2_text(filter_expr)
         )
     except _USER_FILTER_ERRORS as exc:
-        raise HTTPException(
-            status.HTTP_400_BAD_REQUEST, f"invalid CQL2 filter: {exc}"
-        ) from exc
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, f"invalid CQL2 filter: {exc}") from exc
     _reject_unknown_queryables(tree, field_mapping)
     try:
         return to_filter(tree, field_mapping)
     except _USER_FILTER_ERRORS as exc:
-        raise HTTPException(
-            status.HTTP_400_BAD_REQUEST, f"unsupported CQL2 filter: {exc}"
-        ) from exc
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, f"unsupported CQL2 filter: {exc}") from exc

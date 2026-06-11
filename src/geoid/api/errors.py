@@ -116,9 +116,7 @@ def register_exception_handlers(app: FastAPI) -> None:
                 constraint=constraint,
             )
         if constraint in (PK_GEOID_REGISTRY, PK_PLACE):
-            return _error(
-                status.HTTP_409_CONFLICT, "geoid already exists", constraint=constraint
-            )
+            return _error(status.HTTP_409_CONFLICT, "geoid already exists", constraint=constraint)
         if constraint == UQ_PLACE_GEOM_HASH:
             # Backstop only: the service normally raises GeometryConflictError
             # (whose body carries the incumbent geoid — there is no session
@@ -139,5 +137,9 @@ def register_exception_handlers(app: FastAPI) -> None:
                 status.HTTP_409_CONFLICT,
                 "place is immutable; corrections mint a new geoid via predecessor_id",
             )
-        return _error(status.HTTP_409_CONFLICT, "integrity constraint violation",
-                      constraint=constraint, sqlstate=sqlstate)
+        return _error(
+            status.HTTP_409_CONFLICT,
+            "integrity constraint violation",
+            constraint=constraint,
+            sqlstate=sqlstate,
+        )

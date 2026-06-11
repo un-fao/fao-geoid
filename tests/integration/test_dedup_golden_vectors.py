@@ -44,12 +44,8 @@ dedup_vectors = _load_dedup_vectors()
 
 # The module's inline recipe (pyformat params for psycopg) as a SQLAlchemy stmt —
 # same SQL string, so this file pins the inline copy to the deployed function (D3).
-_INLINE_SQL = text(
-    dedup_vectors.RECIPE_SQL.replace("%(wkt)s", ":wkt").replace("%(grid)s", ":grid")
-)
-_FUNCTION_SQL = text(
-    "SELECT encode(geoid_geom_hash(ST_GeomFromText(:wkt, 4326), :grid), 'hex')"
-)
+_INLINE_SQL = text(dedup_vectors.RECIPE_SQL.replace("%(wkt)s", ":wkt").replace("%(grid)s", ":grid"))
+_FUNCTION_SQL = text("SELECT encode(geoid_geom_hash(ST_GeomFromText(:wkt, 4326), :grid), 'hex')")
 
 
 async def _digest(session, stmt, wkt: str, grid: float) -> str:

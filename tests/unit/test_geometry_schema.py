@@ -11,7 +11,10 @@ pytestmark = pytest.mark.unit
 
 _VALID_POLYGON = {
     "type": "Feature",
-    "geometry": {"type": "Polygon", "coordinates": [[[10, 10], [11, 10], [11, 11], [10, 11], [10, 10]]]},
+    "geometry": {
+        "type": "Polygon",
+        "coordinates": [[[10, 10], [11, 10], [11, 11], [10, 11], [10, 10]]],
+    },
     "properties": {},
 }
 
@@ -56,7 +59,11 @@ def test_accepts_multipolygon():
 def test_rejects_point_geometry():
     with pytest.raises(ValidationError):
         PlaceCreate.model_validate(
-            {"type": "Feature", "geometry": {"type": "Point", "coordinates": [0, 0]}, "properties": {}}
+            {
+                "type": "Feature",
+                "geometry": {"type": "Point", "coordinates": [0, 0]},
+                "properties": {},
+            }
         )
 
 

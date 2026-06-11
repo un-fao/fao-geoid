@@ -38,12 +38,15 @@ def _row(n: int, collection_id: uuid.UUID, old_hash: str, new_hash: str) -> obje
     # uuid.UUID(int=n) keeps id ordering aligned with n — the planner only relies
     # on id order (UUIDv7 = mint-time order in production).
     return rehash.ScanRow(
-        id=uuid.UUID(int=n), collection_id=collection_id,
-        old_hash=old_hash, new_hash=new_hash,
+        id=uuid.UUID(int=n),
+        collection_id=collection_id,
+        old_hash=old_hash,
+        new_hash=new_hash,
     )
 
 
 # --- config ---------------------------------------------------------------------
+
 
 def test_config_error_on_missing_env(monkeypatch):
     monkeypatch.delenv("GEOID_DATABASE_URL", raising=False)
@@ -70,6 +73,7 @@ def test_config_dsn_strips_async_driver(monkeypatch):
 
 
 # --- plan_rehash ------------------------------------------------------------------
+
 
 def test_plan_with_no_collisions_updates_every_drifted_row():
     rows = [

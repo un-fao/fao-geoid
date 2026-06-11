@@ -29,11 +29,13 @@ class Settings(BaseSettings):
     )
 
     # --- Deployment ---------------------------------------------------------
-    environment: Literal["development", "test", "production"] = Field(
+    environment: Literal["development", "review", "production"] = Field(
         default="development",
         description=(
             "Deployment mode (env: GEOID_ENVIRONMENT). Outside development the "
-            "default admin token is rejected at startup — see the validator."
+            "default admin token is rejected at startup — see the validator. "
+            "'review' is a deployed pre-production env: it enforces the real-token "
+            "guard exactly like 'production'."
         ),
     )
 
