@@ -24,13 +24,18 @@ Steps (each idempotent):
                      migration 0001's IF NOT EXISTS then no-ops under the app role
     6. parity        PostGIS 3.5.x / GEOS 3.9.x check (the dedup hash is validated
                      against PostGIS 3.5.2 / GEOS 3.9.0)
-    7. privileges    assert the owner has CONNECT + public-schema CREATE (PG15+
+    7. golden vectors  recompute the pinned dedup-hash corpus
+                     (scripts/data/dedup_golden_vectors_v1.json) with an inline
+                     copy of the recipe — works pre-migrate; strict digest drift
+                     joins the exit-3 path, advisory (ST_MakeValid-leg) only warns
+    8. privileges    assert the owner has CONNECT + public-schema CREATE (PG15+
                      grants these via pg_database_owner when ownership is right)
-    8. migrate       `geoid migrate` subprocess AS THE APP ROLE, so every table,
+    9. migrate       `geoid migrate` subprocess AS THE APP ROLE, so every table,
                      function and trigger is owned by it (--skip-migrate to skip)
-    9. seed          default workspace + reserved public collection (--skip-seed)
-   10. verify        connect as the app role (doubles as a credential check):
-                     alembic head, extensions, triggers, dedup function, seed rows
+   10. seed          default workspace + reserved public collection (--skip-seed)
+   11. verify        connect as the app role (doubles as a credential check):
+                     alembic head, extensions, triggers, dedup function, recipe
+                     stamp (migration 0005's dedup_recipe_stamp), seed rows
 
 Env:
     GEOID_BOOTSTRAP_ADMIN_DSN     required — admin (`postgres`) libpq DSN/URL to the
@@ -377,6 +382,51 @@ def check_postgis_parity(conn: psycopg.Connection) -> list[str]:
     return problems
 
 
+def _load_dedup_vectors():
+    """Load scripts/dedup_vectors.py as a module (scripts/ is not a package)."""
+    import importlib.util
+
+    path = Path(__file__).resolve().parent / "dedup_vectors.py"
+    spec = importlib.util.spec_from_file_location("dedup_vectors", path)
+    module = importlib.util.module_from_spec(spec)
+    # Register before exec: the dataclass decorator resolves the module's string
+    # annotations through sys.modules[cls.__module__].
+    sys.modules["dedup_vectors"] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+def check_hash_vectors(conn: psycopg.Connection) -> list[str]:
+    """Recompute the pinned golden-vector corpus with an inline copy of the dedup
+    recipe (it must work pre-migrate, when geoid_geom_hash() may not exist yet).
+    Strict drift joins the exit-3 path; advisory (ST_MakeValid-leg) drift only
+    warns — stored rows are always valid, so it can never change a stored hash."""
+    print("→ dedup golden vectors")
+    vectors = _load_dedup_vectors()
+    run_sql = vectors._psycopg_run_sql(conn)
+    try:
+        fixture = vectors.load_fixture()
+        report = vectors.check_vectors(run_sql, fixture)
+    except vectors.StepError as exc:
+        raise StepError(str(exc)) from exc
+    for failure in report.advisory_failures:
+        print(f"  ⚠ advisory vector {failure.name!r} drifted "
+              f"(expected {failure.expected}, got {failure.actual}) — "
+              "ST_MakeValid leg only; stored hashes are unaffected")
+    problems = [
+        f"golden vector {failure.name!r} drifted — expected {failure.expected}, got "
+        f"{failure.actual}; stored hashes are stale on this stack: freeze writes and "
+        "run scripts/rehash_geom_hashes.py (runbook: docs/DEPLOYMENT.md §14)"
+        for failure in report.strict_failures
+    ]
+    for problem in problems:
+        print(f"  ⚠ {problem}")
+    if not problems:
+        print(f"  ✓ {report.passed}/{len(fixture['vectors'])} golden vectors match "
+              f"({vectors.FIXTURE_PATH.name})")
+    return problems
+
+
 def check_owner_privileges(conn: psycopg.Connection, cfg: BootstrapConfig) -> None:
     print("→ owner privileges")
     connect_ok, create_ok = conn.execute(
@@ -477,6 +527,9 @@ def verify(cfg: BootstrapConfig) -> list[str]:
             WHERE NOT t.tgisinternal AND n.nspname = 'public'
         """)
         hash_fn = _scalar(conn, "SELECT count(*) FROM pg_proc WHERE proname = 'geoid_geom_hash'")
+        recipe_version = _scalar(
+            conn, "SELECT recipe_version FROM dedup_recipe_stamp ORDER BY id DESC LIMIT 1"
+        )
         workspaces = _scalar(conn, "SELECT count(*) FROM workspace")
         collections = _scalar(conn, "SELECT count(*) FROM collection")
         create_ok = _scalar(conn, "SELECT has_schema_privilege('public', 'CREATE')")
@@ -493,6 +546,10 @@ def verify(cfg: BootstrapConfig) -> list[str]:
          f"only {triggers} user triggers — migration 0001 creates {EXPECTED_USER_TRIGGERS}"),
         ("geoid_geom_hash()", "present" if hash_fn else "missing", bool(hash_fn),
          "dedup function geoid_geom_hash is missing"),
+        ("recipe stamp", recipe_version or "<absent>", recipe_version == "v1",
+         f"latest dedup_recipe_stamp.recipe_version is {recipe_version!r}, expected 'v1' "
+         "— migrate to 0005+ (and re-stamp via scripts/rehash_geom_hashes.py if the "
+         "recipe ever changed)"),
         ("workspaces / collections", f"{workspaces} / {collections}",
          (workspaces or 0) >= 1 and (collections or 0) >= 1,
          "seed rows missing — re-run without --skip-seed"),
@@ -552,6 +609,8 @@ def main(argv: list[str] | None = None) -> int:
             ensure_extensions(conn, cfg)
             if _has_extension(conn, "postgis"):
                 drift += check_postgis_parity(conn)
+                if _has_extension(conn, "pgcrypto"):
+                    drift += check_hash_vectors(conn)
             if role_existed or not cfg.dry_run:
                 check_owner_privileges(conn, cfg)
 

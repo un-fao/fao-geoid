@@ -116,6 +116,16 @@ The grid size is the team's "coordinate precision" knob.
   would re-hash existing geometries and could silently mint a second geoid for an
   already-registered place, so it is locked once a collection is non-empty.
 
+The hashing recipe itself is **versioned** (currently `v1`), and every instance
+records which geometry-engine stack (PostGIS/GEOS versions) its stored hashes were
+computed under. Because part of the recipe runs inside the database's geometry
+engine, an engine upgrade can change hash output; this never affects geoids
+themselves (a geoid, once minted, is permanent), only the dedup comparison. A
+pinned set of reference geometries ("golden vectors") detects such drift before
+any data is loaded, and an audited re-hash procedure recomputes the stored hashes
+on the new stack — any newly discovered duplicates are reported for human review,
+never silently merged or deleted.
+
 ### The honest caveat (why dedup is de-prioritized)
 
 The grid is an **absolute grid**, not a "merge anything within 1 cm" radius. It
