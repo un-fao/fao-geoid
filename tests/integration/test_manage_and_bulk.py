@@ -41,12 +41,8 @@ async def test_create_collection_in_unknown_catalog_404(client, admin_headers):
 
 async def test_list_collections_in_catalog_slice(client, admin_headers):
     await client.post("/manage/catalogs", headers=admin_headers, json={"slug": "ws"})
-    await client.post(
-        "/manage/catalogs/ws/collections", headers=admin_headers, json={"slug": "a"}
-    )
-    await client.post(
-        "/manage/catalogs/ws/collections", headers=admin_headers, json={"slug": "b"}
-    )
+    await client.post("/manage/catalogs/ws/collections", headers=admin_headers, json={"slug": "a"})
+    await client.post("/manage/catalogs/ws/collections", headers=admin_headers, json={"slug": "b"})
 
     body = (await client.get("/manage/catalogs/ws/collections", headers=admin_headers)).json()
     assert {c["slug"] for c in body} == {"a", "b"}
