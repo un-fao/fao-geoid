@@ -56,7 +56,7 @@ async def test_queryables_is_a_json_schema_of_the_cql2_fields(client):
     assert body["$id"].endswith("/collections/public/queryables")
     assert body["additionalProperties"] is False
     advertised = set(body["properties"])
-    assert {"geoid", "external_id", "data_quality_status", "created_at", "geometry"} == advertised
+    assert {"geoid", "external_id", "created_at", "geometry"} == advertised
     # An advertised queryable must be accepted by the live filter path.
     resp = await client.get("/collections/public/items?filter=external_id='nope'")
     assert resp.status_code == 200

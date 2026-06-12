@@ -117,5 +117,4 @@ async def create_place(
         item_url=ids["item_url"],
         collection=collection.slug,
         external_id=external_id,
-        data_quality_status="unverified",
     )

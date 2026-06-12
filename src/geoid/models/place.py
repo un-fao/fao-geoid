@@ -55,9 +55,6 @@ class Place(Base):
     provenance: Mapped[dict[str, Any]] = mapped_column(
         JSONB, nullable=False, server_default=text("'{}'::jsonb")
     )
-    data_quality_status: Mapped[str] = mapped_column(
-        String, nullable=False, server_default=text("'unverified'")
-    )
     predecessor_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("place.id"), nullable=True
     )

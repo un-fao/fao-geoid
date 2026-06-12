@@ -36,7 +36,6 @@ def _export_feature(row: dict) -> dict:
             **submitted,
             "geoid": str(row["geoid"]),
             "external_id": row.get("external_id"),
-            "data_quality_status": row.get("data_quality_status"),
             "created_at": created_iso,
         },
     }

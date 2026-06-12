@@ -71,7 +71,6 @@ class MintResponse(BaseModel):
     item_url: str = Field(description="Collection-scoped OGC API Features item URL.")
     collection: str = Field(description="Collection slug the place was minted into.")
     external_id: str | None = Field(default=None)
-    data_quality_status: str = Field(default="unverified")
 
 
 class GeometryConflictResponse(BaseModel):
