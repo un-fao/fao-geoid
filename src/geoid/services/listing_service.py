@@ -23,9 +23,7 @@ def _collection_out(collection: Collection) -> CollectionOut:
 
 async def list_catalogs(session: AsyncSession) -> list[CatalogOut]:
     catalogs = await catalog_repo.list_all(session)
-    return [
-        CatalogOut(id=str(c.id), slug=c.slug, title=c.title, metadata=c.meta) for c in catalogs
-    ]
+    return [CatalogOut(id=str(c.id), slug=c.slug, title=c.title, metadata=c.meta) for c in catalogs]
 
 
 async def list_collections_in_catalog(

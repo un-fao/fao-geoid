@@ -14,9 +14,7 @@ from geoid.db import Base
 
 class Collection(Base):
     __tablename__ = "collection"
-    __table_args__ = (
-        UniqueConstraint("catalog_id", "slug", name="uq_collection_catalog_slug"),
-    )
+    __table_args__ = (UniqueConstraint("catalog_id", "slug", name="uq_collection_catalog_slug"),)
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
     catalog_id: Mapped[uuid.UUID] = mapped_column(
