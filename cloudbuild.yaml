@@ -1,0 +1,17 @@
+# Cloud Build config for the GeoID image. Runs the docker builder with BuildKit
+# enabled (DOCKER_BUILDKIT=1) so the Dockerfile's `RUN --mount=type=cache,...` /
+# `--mount=type=bind,...` lines work. The `gcloud builds submit --tag` shortcut
+# generates an implicit build that runs legacy Docker with BuildKit OFF, which
+# rejects those mounts ("the --mount option requires BuildKit") — hence this
+# explicit config. _IMAGE is passed via --substitutions from deploy.yml.
+steps:
+  - name: gcr.io/cloud-builders/docker
+    env:
+      - DOCKER_BUILDKIT=1
+    args:
+      - build
+      - --tag
+      - ${_IMAGE}
+      - .
+images:
+  - ${_IMAGE}
