@@ -8,22 +8,22 @@ pytestmark = pytest.mark.integration
 
 
 async def test_manage_requires_admin_token(client):
-    assert (await client.get("/manage/workspaces")).status_code == 401
+    assert (await client.get("/manage/catalogs")).status_code == 401
 
 
 async def test_manage_rejects_wrong_token(client):
-    resp = await client.get("/manage/workspaces", headers={"Authorization": "Bearer nope"})
+    resp = await client.get("/manage/catalogs", headers={"Authorization": "Bearer nope"})
     assert resp.status_code == 401
 
 
-async def test_create_workspace_and_collection(client, admin_headers):
+async def test_create_catalog_and_collection(client, admin_headers):
     ws = await client.post(
-        "/manage/workspaces", headers=admin_headers, json={"slug": "forestry", "title": "Forestry"}
+        "/manage/catalogs", headers=admin_headers, json={"slug": "forestry", "title": "Forestry"}
     )
     assert ws.status_code == 201
 
     coll = await client.post(
-        "/manage/workspaces/forestry/collections",
+        "/manage/catalogs/forestry/collections",
         headers=admin_headers,
         json={"slug": "eudr", "title": "EUDR plots", "writable_anon": False},
     )
@@ -32,23 +32,23 @@ async def test_create_workspace_and_collection(client, admin_headers):
     assert coll.json()["writable_anon"] is False
 
 
-async def test_create_collection_in_unknown_workspace_404(client, admin_headers):
+async def test_create_collection_in_unknown_catalog_404(client, admin_headers):
     resp = await client.post(
-        "/manage/workspaces/ghost/collections", headers=admin_headers, json={"slug": "c"}
+        "/manage/catalogs/ghost/collections", headers=admin_headers, json={"slug": "c"}
     )
     assert resp.status_code == 404
 
 
-async def test_list_collections_in_workspace_slice(client, admin_headers):
-    await client.post("/manage/workspaces", headers=admin_headers, json={"slug": "ws"})
+async def test_list_collections_in_catalog_slice(client, admin_headers):
+    await client.post("/manage/catalogs", headers=admin_headers, json={"slug": "ws"})
     await client.post(
-        "/manage/workspaces/ws/collections", headers=admin_headers, json={"slug": "a"}
+        "/manage/catalogs/ws/collections", headers=admin_headers, json={"slug": "a"}
     )
     await client.post(
-        "/manage/workspaces/ws/collections", headers=admin_headers, json={"slug": "b"}
+        "/manage/catalogs/ws/collections", headers=admin_headers, json={"slug": "b"}
     )
 
-    body = (await client.get("/manage/workspaces/ws/collections", headers=admin_headers)).json()
+    body = (await client.get("/manage/catalogs/ws/collections", headers=admin_headers)).json()
     assert {c["slug"] for c in body} == {"a", "b"}
 
 
@@ -74,10 +74,10 @@ async def test_collection_create_rejects_any_dedup_grid(client, admin_headers):
     # Geometry dedup is global: there is no per-collection grid, so the key is
     # rejected outright (422) rather than silently ignored — silently dropping
     # it would let an admin believe an override took.
-    await client.post("/manage/workspaces", headers=admin_headers, json={"slug": "wsv"})
+    await client.post("/manage/catalogs", headers=admin_headers, json={"slug": "wsv"})
     for bad in ("10m", None, True, [0.0001], 0, -1e-7, 1e-7, 1e-6):
         resp = await client.post(
-            "/manage/workspaces/wsv/collections",
+            "/manage/catalogs/wsv/collections",
             headers=admin_headers,
             json={"slug": "v", "metadata": {"dedup_grid": bad}},
         )

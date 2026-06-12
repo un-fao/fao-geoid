@@ -15,12 +15,12 @@ from geoid.db import Base
 class Collection(Base):
     __tablename__ = "collection"
     __table_args__ = (
-        UniqueConstraint("workspace_id", "slug", name="uq_collection_workspace_slug"),
+        UniqueConstraint("catalog_id", "slug", name="uq_collection_catalog_slug"),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
-    workspace_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("workspace.id"), nullable=False
+    catalog_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("catalog.id"), nullable=False
     )
     slug: Mapped[str] = mapped_column(String, nullable=False)
     title: Mapped[str | None] = mapped_column(String, nullable=True)

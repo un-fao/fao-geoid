@@ -10,15 +10,15 @@ Constraint names here MUST match the migration — ``api/errors.py`` switches on
 them to map SQLSTATE 23505 to the right HTTP status.
 """
 
+from geoid.models.catalog import Catalog
 from geoid.models.change_log import ChangeLog
 from geoid.models.collection import Collection
 from geoid.models.geoid_registry import GeoidRegistry
 from geoid.models.place import Place
 from geoid.models.stubs import ApiKey, AuthorityAssertion
-from geoid.models.workspace import Workspace
 
 __all__ = [
-    "Workspace",
+    "Catalog",
     "Collection",
     "Place",
     "GeoidRegistry",

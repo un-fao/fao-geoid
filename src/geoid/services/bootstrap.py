@@ -11,26 +11,26 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from geoid.config import Settings
 from geoid.models import Collection
-from geoid.repositories import collection_repo, workspace_repo
+from geoid.repositories import catalog_repo, collection_repo
 
-_DEFAULT_WORKSPACE_SLUG = "default"
+_DEFAULT_CATALOG_SLUG = "default"
 
 
 async def ensure_public_collection(session: AsyncSession, settings: Settings) -> Collection:
-    """Create the default workspace + reserved public collection if missing."""
-    workspace = await workspace_repo.get_by_slug(session, _DEFAULT_WORKSPACE_SLUG)
-    if workspace is None:
-        workspace = await workspace_repo.create(
-            session, slug=_DEFAULT_WORKSPACE_SLUG, title="Default workspace"
+    """Create the default catalog + reserved public collection if missing."""
+    catalog = await catalog_repo.get_by_slug(session, _DEFAULT_CATALOG_SLUG)
+    if catalog is None:
+        catalog = await catalog_repo.create(
+            session, slug=_DEFAULT_CATALOG_SLUG, title="Default catalog"
         )
 
     collection = await collection_repo.get_by_slug(
-        session, settings.public_collection, workspace_id=workspace.id
+        session, settings.public_collection, catalog_id=catalog.id
     )
     if collection is None:
         collection = await collection_repo.create(
             session,
-            workspace_id=workspace.id,
+            catalog_id=catalog.id,
             slug=settings.public_collection,
             title="Public (anonymous contributions)",
             writable_anon=True,

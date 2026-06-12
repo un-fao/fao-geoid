@@ -67,7 +67,7 @@ def db(_migrated):
     with psycopg.connect(dsn, autocommit=True) as conn:
         conn.execute("SET session_replication_role = replica")
         conn.execute(
-            "TRUNCATE place, geoid_registry, change_log, collection, workspace "
+            "TRUNCATE place, geoid_registry, change_log, collection, catalog "
             "RESTART IDENTITY CASCADE"
         )
         conn.execute("SET session_replication_role = origin")
@@ -79,11 +79,11 @@ def db(_migrated):
 
 
 def _make_collection(db, slug: str) -> str:
-    workspace_id, collection_id = str(uuid.uuid4()), str(uuid.uuid4())
-    db.execute("INSERT INTO workspace (id, slug) VALUES (%s, %s)", (workspace_id, f"ws-{slug}"))
+    catalog_id, collection_id = str(uuid.uuid4()), str(uuid.uuid4())
+    db.execute("INSERT INTO catalog (id, slug) VALUES (%s, %s)", (catalog_id, f"cat-{slug}"))
     db.execute(
-        "INSERT INTO collection (id, workspace_id, slug) VALUES (%s, %s, %s)",
-        (collection_id, workspace_id, slug),
+        "INSERT INTO collection (id, catalog_id, slug) VALUES (%s, %s, %s)",
+        (collection_id, catalog_id, slug),
     )
     return collection_id
 

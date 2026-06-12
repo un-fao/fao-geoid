@@ -53,11 +53,11 @@ catalog ─< collection ─< place (each place carries one geoid)
 
 > **Terminology note.** The shipped default vocabulary is the OGC/STAC-aligned
 > **catalog / collection / item** (`GEOID_VOCAB=stac`): the top-level container
-> is surfaced as a "catalog" (the STAC term) and each place as an "item" (the
-> OGC API Features term). Internally the container is stored under the
-> label-agnostic name "workspace" and "place" names the same concept as "item";
-> the surface vocabulary is a configuration choice (`GEOID_VOCAB`, with `fao` =
-> workspace/collection/item still available), not a data-model difference.
+> is a "catalog" (the STAC term — also the internal table name) and each place
+> is surfaced as an "item" (the OGC API Features term; the table is `place`).
+> The surface vocabulary is a configuration choice (`GEOID_VOCAB`, with `fao` =
+> workspace/collection/item still available as a label-only alias), not a
+> data-model difference.
 
 ---
 

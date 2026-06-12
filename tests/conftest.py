@@ -33,7 +33,7 @@ if "DOCKER_HOST" not in os.environ:
 os.environ.setdefault("TESTCONTAINERS_RYUK_DISABLED", "true")
 
 _TRUNCATE = (
-    "TRUNCATE place, geoid_registry, change_log, collection, workspace RESTART IDENTITY CASCADE"
+    "TRUNCATE place, geoid_registry, change_log, collection, catalog RESTART IDENTITY CASCADE"
 )
 
 

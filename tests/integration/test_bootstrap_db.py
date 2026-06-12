@@ -108,7 +108,7 @@ def _snapshot(pg, role: str, db: str, password: str = APP_PASSWORD) -> dict:
         recipe_stamp = conn.execute(
             "SELECT recipe_version FROM dedup_recipe_stamp ORDER BY id DESC LIMIT 1"
         ).fetchone()[0]
-        workspaces = conn.execute("SELECT count(*) FROM workspace").fetchone()[0]
+        catalogs = conn.execute("SELECT count(*) FROM catalog").fetchone()[0]
         collections = conn.execute("SELECT count(*) FROM collection").fetchone()[0]
     owner = _admin_scalar(
         pg, "SELECT pg_get_userbyid(datdba) FROM pg_database WHERE datname = %s", (db,)
@@ -119,7 +119,7 @@ def _snapshot(pg, role: str, db: str, password: str = APP_PASSWORD) -> dict:
         "triggers": triggers,
         "hash_fn": hash_fn,
         "recipe_stamp": recipe_stamp,
-        "workspaces": workspaces,
+        "catalogs": catalogs,
         "collections": collections,
         "owner": owner,
     }
@@ -140,7 +140,7 @@ def test_fresh_bootstrap_then_idempotent_rerun(_postgis):
     assert state["triggers"] >= 8
     assert state["hash_fn"] == 1
     assert state["recipe_stamp"] == "v1"
-    assert state["workspaces"] >= 1 and state["collections"] >= 1
+    assert state["catalogs"] >= 1 and state["collections"] >= 1
 
     rerun = _run_bootstrap(_postgis, role, db)
     assert rerun.returncode == 0, rerun.stdout + rerun.stderr

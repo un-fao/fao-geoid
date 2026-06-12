@@ -56,25 +56,26 @@ def test_stac_vocab_is_the_default_and_matches_ogc_terms():
     # OGC/STAC-aligned terminology: catalog / collection / item.
     assert vocab.DEFAULT_VOCAB == "stac"
     v = vocab.get_vocab("stac")
-    assert v.label("workspace") == "catalog"
+    assert v.label("catalog") == "catalog"
     assert v.label("collection") == "collection"
     assert v.label("place") == "item"
     assert v.item_type == "item"
     assert v.plural("place") == "items"
-    assert v.plural("workspace") == "catalogs"
+    assert v.plural("catalog") == "catalogs"
 
 
 def test_fao_vocab_labels():
     v = vocab.get_vocab("fao")
-    assert v.label("workspace") == "workspace"
+    assert v.label("catalog") == "workspace"
     assert v.label("place") == "item"
     assert v.item_type == "item"
     assert v.plural("place") == "items"
+    assert v.plural("catalog") == "workspaces"
 
 
 def test_neutral_vocab_labels():
     v = vocab.get_vocab("neutral")
-    assert v.label("workspace") == "workspace"
+    assert v.label("catalog") == "catalog"
     assert v.label("place") == "place"
     assert v.plural("place") == "places"
 
