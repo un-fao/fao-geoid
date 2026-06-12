@@ -221,8 +221,8 @@ def _load_config(argv: list[str] | None = None) -> BootstrapConfig:
 def _preflight_settings(cfg: BootstrapConfig):
     """Catch the production dev-token trap before anything mutates.
 
-    The same Settings construction happens inside `geoid migrate` (via env.py →
-    get_settings) and inside the seed step; failing here keeps the failure clean.
+    The seed step constructs full Settings; the migrate subprocess needs only
+    DatabaseSettings (no token). Failing here keeps the failure clean.
     """
     from pydantic import ValidationError
 

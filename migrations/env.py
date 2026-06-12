@@ -14,7 +14,7 @@ from sqlalchemy.ext.asyncio import create_async_engine
 
 # Import models so their tables register on Base.metadata (used for autogenerate).
 import geoid.models  # noqa: F401  (side-effect import)
-from geoid.config import get_settings
+from geoid.config import DatabaseSettings
 from geoid.db import Base
 
 config = context.config
@@ -22,7 +22,9 @@ target_metadata = Base.metadata
 
 
 def _url() -> str:
-    return get_settings().database_url
+    # DatabaseSettings, not Settings: migrations must not require app-level
+    # config (e.g. a real GEOID_ADMIN_TOKEN) to reach the database.
+    return DatabaseSettings().database_url
 
 
 def run_migrations_offline() -> None:
