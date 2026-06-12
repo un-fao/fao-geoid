@@ -10,6 +10,7 @@ on:
       - "src/**"
       - "migrations/**"
       - "Dockerfile"
+      - "cloudbuild.yaml"
       - "pyproject.toml"
       - "uv.lock"
       - ".github/workflows/deploy.yml"
@@ -51,10 +52,16 @@ jobs:
         run: |
           echo "IMAGE=${REGION}-docker.pkg.dev/${PROJECT}/${ARTIFACT_REGISTRY}/${SERVICE}:${{ github.sha }}" >> "$GITHUB_ENV"
 
-      # Cloud Build honours the Dockerfile's buildkit cache mounts; matches the
-      # team's other repos and keeps build creds off the runner.
+      # cloudbuild.yaml runs the docker builder with DOCKER_BUILDKIT=1 so the
+      # Dockerfile's `RUN --mount=...` cache/bind mounts work. The `--tag` shortcut
+      # would run legacy Docker (BuildKit off) and reject them. Keeps build creds
+      # off the runner and matches the team's other repos.
       - name: Build and push image (Cloud Build)
-        run: gcloud builds submit --tag "$IMAGE" --project "$PROJECT"
+        run: |
+          gcloud builds submit \
+            --config cloudbuild.yaml \
+            --substitutions _IMAGE="$IMAGE" \
+            --project "$PROJECT"
 
       # Idempotent `alembic upgrade head`, blocking: --wait fails the step (and the
       # deploy) if the migration job exits non-zero. --max-retries 0 = no silent retry.
