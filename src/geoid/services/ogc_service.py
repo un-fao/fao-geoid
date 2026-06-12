@@ -47,7 +47,6 @@ _QUERYABLES_REL = "http://www.opengis.net/def/rel/ogc/1.0/queryables"
 _QUERYABLE_SCHEMAS: dict[str, dict[str, Any]] = {
     "geoid": {"type": "string", "format": "uuid", "title": "geoid (UUIDv7)"},
     "external_id": {"type": "string", "title": "Caller-supplied external id"},
-    "data_quality_status": {"type": "string", "title": "Data quality status"},
     "created_at": {"type": "string", "format": "date-time", "title": "Creation time"},
     "geometry": {"format": "geometry-any", "title": "Place geometry (Polygon/MultiPolygon)"},
 }
@@ -61,7 +60,6 @@ class ItemRow(TypedDict, total=False):
     geometry: str | None
     external_id: str | None
     provenance: dict[str, Any]
-    data_quality_status: str
     created_at: datetime
     predecessor_id: uuid.UUID | None
     originating_instance: str | None
@@ -217,7 +215,6 @@ def build_feature(settings: Settings, row: ItemRow) -> FeatureModel:
         "did": did_for(geoid, settings.did_host or ""),
         "uri": uri_for(geoid, settings.base_url_clean),
         "external_id": row.get("external_id"),
-        "data_quality_status": row.get("data_quality_status"),
         "created_at": created_iso,
         "originating_instance": row.get("originating_instance"),
         "_geoid_provenance": provenance,

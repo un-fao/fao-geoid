@@ -65,7 +65,6 @@ async def insert_place(
     provenance: dict[str, Any],
     originating_instance: str | None,
     dedup_grid_default: float,
-    data_quality_status: str = "unverified",
 ) -> InsertResult:
     """Insert a place; an identical geometry ANYWHERE in the catalog conflicts.
 
@@ -86,11 +85,11 @@ async def insert_place(
         f"""
         INSERT INTO place (
             id, collection_id, geom, external_id, provenance,
-            originating_instance, data_quality_status
+            originating_instance
         )
         VALUES (
             :geoid, :collection_id, {_GEOM_EXPR}, :external_id,
-            CAST(:provenance AS jsonb), :originating_instance, :data_quality_status
+            CAST(:provenance AS jsonb), :originating_instance
         )
         ON CONFLICT ON CONSTRAINT uq_place_geom_hash DO NOTHING
         RETURNING id
@@ -103,7 +102,6 @@ async def insert_place(
         "external_id": external_id,
         "provenance": json.dumps(provenance),
         "originating_instance": originating_instance,
-        "data_quality_status": data_quality_status,
     }
     row = (await session.execute(insert_stmt, params)).first()
     if row is not None:
@@ -137,7 +135,6 @@ _READ_COLUMNS = """
     ST_AsGeoJSON(p.geom) AS geometry,
     p.external_id,
     p.provenance,
-    p.data_quality_status,
     p.created_at,
     p.predecessor_id,
     p.originating_instance
@@ -179,7 +176,6 @@ def _base_item_query(collection_id: uuid.UUID) -> Select[Any]:
         Place.id.label("geoid"),
         Place.external_id,
         Place.provenance,
-        Place.data_quality_status,
         Place.created_at,
         Place.predecessor_id,
         Place.originating_instance,
@@ -212,7 +208,6 @@ def queryable_field_mapping() -> dict[str, Any]:
     return {
         "geoid": Place.id,
         "external_id": Place.external_id,
-        "data_quality_status": Place.data_quality_status,
         "created_at": Place.created_at,
         "geometry": Place.geom,
     }
@@ -321,7 +316,6 @@ async def iter_collection_geojson(
                ST_AsGeoJSON(p.geom) AS geometry,
                p.external_id,
                p.provenance,
-               p.data_quality_status,
                p.created_at
         FROM place p
         WHERE p.collection_id = :collection_id

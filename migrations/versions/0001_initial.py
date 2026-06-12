@@ -63,7 +63,6 @@ def upgrade() -> None:
             geom_hash             bytea NOT NULL,
             external_id           text,
             provenance            jsonb NOT NULL DEFAULT '{}'::jsonb,
-            data_quality_status   text NOT NULL DEFAULT 'unverified',
             predecessor_id        uuid REFERENCES place(id),
             created_at            timestamptz NOT NULL DEFAULT now(),
             originating_instance  text,
