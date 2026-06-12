@@ -27,6 +27,7 @@ permissions:
 jobs:
   deploy:
     runs-on: ubuntu-latest
+    environment: review
     env:
       PROJECT: ${{ vars.GCP_PROJECT_ID }}
       REGION: ${{ vars.GCP_REGION }}
