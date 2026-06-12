@@ -98,7 +98,7 @@ jobs:
             --cpu-boost
 
       - name: Install uv (for the smoke script)
-        uses: astral-sh/setup-uv@v8
+        uses: astral-sh/setup-uv@v8.2.0
 
       - name: Smoke test new revision
         env:
