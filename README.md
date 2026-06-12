@@ -18,7 +18,7 @@ QGIS / ogr / Whisp / Ground ──►  GeoID FastAPI (one image)
                                           │
                                           ▼
                           PostgreSQL 17 + PostGIS 3.5.2
-                          workspace ─< collection ─< place  (+ geoid_registry, change_log)
+                          catalog ─< collection ─< place  (+ geoid_registry, change_log)
 ```
 
 ## Documentation

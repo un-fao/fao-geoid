@@ -1,4 +1,4 @@
-"""initial schema: workspace/collection/place + geoid_registry + change_log,
+"""initial schema: catalog/collection/place + geoid_registry + change_log,
 the canonical geom_hash function, and the dedup / hinge-population / immutability triggers.
 
 Revision ID: 0001_initial
@@ -24,10 +24,10 @@ def upgrade() -> None:
     op.execute("CREATE EXTENSION IF NOT EXISTS postgis;")
     op.execute("CREATE EXTENSION IF NOT EXISTS pgcrypto;")
 
-    # --- workspace (≈ STAC catalog) ---------------------------------------
+    # --- catalog (STAC catalog) --------------------------------------------
     op.execute(
         """
-        CREATE TABLE workspace (
+        CREATE TABLE catalog (
             id        uuid PRIMARY KEY,
             slug      text UNIQUE NOT NULL,
             title     text,
@@ -41,12 +41,12 @@ def upgrade() -> None:
         """
         CREATE TABLE collection (
             id             uuid PRIMARY KEY,
-            workspace_id   uuid NOT NULL REFERENCES workspace(id),
+            catalog_id     uuid NOT NULL REFERENCES catalog(id),
             slug           text NOT NULL,
             title          text,
             writable_anon  boolean NOT NULL DEFAULT false,
             metadata       jsonb NOT NULL DEFAULT '{}'::jsonb,
-            CONSTRAINT uq_collection_workspace_slug UNIQUE (workspace_id, slug)
+            CONSTRAINT uq_collection_catalog_slug UNIQUE (catalog_id, slug)
         );
         """
     )
@@ -314,4 +314,4 @@ def downgrade() -> None:
     op.execute("DROP TABLE IF EXISTS geoid_registry;")
     op.execute("DROP TABLE IF EXISTS place;")
     op.execute("DROP TABLE IF EXISTS collection;")
-    op.execute("DROP TABLE IF EXISTS workspace;")
+    op.execute("DROP TABLE IF EXISTS catalog;")

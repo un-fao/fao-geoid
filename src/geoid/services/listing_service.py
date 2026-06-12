@@ -5,15 +5,15 @@ from __future__ import annotations
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from geoid.models import Collection
-from geoid.repositories import collection_repo, place_repo, workspace_repo
-from geoid.schemas.collection import CollectionOut, ItemIdList, WorkspaceOut
-from geoid.services.exceptions import CollectionNotFoundError, WorkspaceNotFoundError
+from geoid.repositories import catalog_repo, collection_repo, place_repo
+from geoid.schemas.collection import CatalogOut, CollectionOut, ItemIdList
+from geoid.services.exceptions import CatalogNotFoundError, CollectionNotFoundError
 
 
 def _collection_out(collection: Collection) -> CollectionOut:
     return CollectionOut(
         id=str(collection.id),
-        workspace_id=str(collection.workspace_id),
+        catalog_id=str(collection.catalog_id),
         slug=collection.slug,
         title=collection.title,
         writable_anon=collection.writable_anon,
@@ -21,20 +21,20 @@ def _collection_out(collection: Collection) -> CollectionOut:
     )
 
 
-async def list_workspaces(session: AsyncSession) -> list[WorkspaceOut]:
-    workspaces = await workspace_repo.list_all(session)
+async def list_catalogs(session: AsyncSession) -> list[CatalogOut]:
+    catalogs = await catalog_repo.list_all(session)
     return [
-        WorkspaceOut(id=str(w.id), slug=w.slug, title=w.title, metadata=w.meta) for w in workspaces
+        CatalogOut(id=str(c.id), slug=c.slug, title=c.title, metadata=c.meta) for c in catalogs
     ]
 
 
-async def list_collections_in_workspace(
-    session: AsyncSession, workspace_slug: str
+async def list_collections_in_catalog(
+    session: AsyncSession, catalog_slug: str
 ) -> list[CollectionOut]:
-    workspace = await workspace_repo.get_by_slug(session, workspace_slug)
-    if workspace is None:
-        raise WorkspaceNotFoundError(workspace_slug)
-    collections = await collection_repo.list_by_workspace(session, workspace.id)
+    catalog = await catalog_repo.get_by_slug(session, catalog_slug)
+    if catalog is None:
+        raise CatalogNotFoundError(catalog_slug)
+    collections = await collection_repo.list_by_catalog(session, catalog.id)
     return [_collection_out(c) for c in collections]
 
 

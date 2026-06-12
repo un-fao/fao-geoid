@@ -1,4 +1,4 @@
-"""Workspace ORM model (≈ STAC catalog) — the top container."""
+"""Catalog ORM model (STAC catalog) — the top container."""
 
 from __future__ import annotations
 
@@ -12,8 +12,8 @@ from sqlalchemy.orm import Mapped, mapped_column
 from geoid.db import Base
 
 
-class Workspace(Base):
-    __tablename__ = "workspace"
+class Catalog(Base):
+    __tablename__ = "catalog"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
     slug: Mapped[str] = mapped_column(String, unique=True, nullable=False)

@@ -124,9 +124,9 @@ async def test_resolve_unknown_geoid_returns_404(client):
 async def test_anonymous_write_to_managed_collection_forbidden(
     client, admin_headers, unit_square_ccw
 ):
-    await client.post("/manage/workspaces", headers=admin_headers, json={"slug": "ws1"})
+    await client.post("/manage/catalogs", headers=admin_headers, json={"slug": "ws1"})
     await client.post(
-        "/manage/workspaces/ws1/collections",
+        "/manage/catalogs/ws1/collections",
         headers=admin_headers,
         json={"slug": "managed", "writable_anon": False},
     )

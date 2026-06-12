@@ -32,7 +32,7 @@ Steps (each idempotent):
                      grants these via pg_database_owner when ownership is right)
     9. migrate       `geoid migrate` subprocess AS THE APP ROLE, so every table,
                      function and trigger is owned by it (--skip-migrate to skip)
-   10. seed          default workspace + reserved public collection (--skip-seed)
+   10. seed          default catalog + reserved public collection (--skip-seed)
    11. verify        connect as the app role (doubles as a credential check):
                      alembic head, extensions, triggers, dedup function, recipe
                      stamp (migration 0003's dedup_recipe_stamp), seed rows
@@ -179,7 +179,7 @@ def _load_config(argv: list[str] | None = None) -> BootstrapConfig:
     parser.add_argument(
         "--skip-seed",
         action="store_true",
-        help="skip seeding the default workspace + public collection",
+        help="skip seeding the default catalog + public collection",
     )
     parser.add_argument(
         "--reset-app-password",
@@ -510,7 +510,7 @@ async def _seed_async(cfg: BootstrapConfig, settings) -> None:
 
 
 def seed(cfg: BootstrapConfig, settings) -> None:
-    print("→ seed (default workspace + reserved public collection)")
+    print("→ seed (default catalog + reserved public collection)")
     asyncio.run(_seed_async(cfg, settings))
     print(f"  ✓ collection {settings.public_collection!r} ensured")
 
@@ -569,7 +569,7 @@ def verify(cfg: BootstrapConfig) -> list[str]:
         recipe_version = _scalar(
             conn, "SELECT recipe_version FROM dedup_recipe_stamp ORDER BY id DESC LIMIT 1"
         )
-        workspaces = _scalar(conn, "SELECT count(*) FROM workspace")
+        catalogs = _scalar(conn, "SELECT count(*) FROM catalog")
         collections = _scalar(conn, "SELECT count(*) FROM collection")
         create_ok = _scalar(conn, "SELECT has_schema_privilege('public', 'CREATE')")
 
@@ -613,9 +613,9 @@ def verify(cfg: BootstrapConfig) -> list[str]:
             "recipe ever changed)",
         ),
         (
-            "workspaces / collections",
-            f"{workspaces} / {collections}",
-            (workspaces or 0) >= 1 and (collections or 0) >= 1,
+            "catalogs / collections",
+            f"{catalogs} / {collections}",
+            (catalogs or 0) >= 1 and (collections or 0) >= 1,
             "seed rows missing — re-run without --skip-seed",
         ),
         (

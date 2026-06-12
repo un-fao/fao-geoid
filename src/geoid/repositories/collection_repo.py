@@ -1,10 +1,10 @@
 """Collection data access.
 
 OGC API Features addresses collections by a flat ``{collectionId}``; we treat the
-collection ``slug`` as that id. Slug uniqueness is per-workspace (the DB
-constraint), so a multi-workspace deployment could in principle have a slug
+collection ``slug`` as that id. Slug uniqueness is per-catalog (the DB
+constraint), so a multi-catalog deployment could in principle have a slug
 collision — :func:`get_by_slug` resolves the first match and the single default
-workspace makes this unambiguous in Phase 1. Pass ``workspace_id`` to scope it.
+catalog makes this unambiguous in Phase 1. Pass ``catalog_id`` to scope it.
 """
 
 from __future__ import annotations
@@ -20,11 +20,11 @@ from geoid.models import Collection
 
 
 async def get_by_slug(
-    session: AsyncSession, slug: str, *, workspace_id: uuid.UUID | None = None
+    session: AsyncSession, slug: str, *, catalog_id: uuid.UUID | None = None
 ) -> Collection | None:
     stmt = select(Collection).where(Collection.slug == slug)
-    if workspace_id is not None:
-        stmt = stmt.where(Collection.workspace_id == workspace_id)
+    if catalog_id is not None:
+        stmt = stmt.where(Collection.catalog_id == catalog_id)
     stmt = stmt.order_by(Collection.slug.asc()).limit(1)
     return (await session.execute(stmt)).scalar_one_or_none()
 
@@ -38,10 +38,10 @@ async def list_all(session: AsyncSession) -> list[Collection]:
     return list((await session.execute(stmt)).scalars().all())
 
 
-async def list_by_workspace(session: AsyncSession, workspace_id: uuid.UUID) -> list[Collection]:
+async def list_by_catalog(session: AsyncSession, catalog_id: uuid.UUID) -> list[Collection]:
     stmt = (
         select(Collection)
-        .where(Collection.workspace_id == workspace_id)
+        .where(Collection.catalog_id == catalog_id)
         .order_by(Collection.slug.asc())
     )
     return list((await session.execute(stmt)).scalars().all())
@@ -50,7 +50,7 @@ async def list_by_workspace(session: AsyncSession, workspace_id: uuid.UUID) -> l
 async def create(
     session: AsyncSession,
     *,
-    workspace_id: uuid.UUID,
+    catalog_id: uuid.UUID,
     slug: str,
     title: str | None = None,
     writable_anon: bool = False,
@@ -58,7 +58,7 @@ async def create(
 ) -> Collection:
     collection = Collection(
         id=uuid7(),
-        workspace_id=workspace_id,
+        catalog_id=catalog_id,
         slug=slug,
         title=title,
         writable_anon=writable_anon,

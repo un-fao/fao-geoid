@@ -1,10 +1,11 @@
 """Vocabulary aliasing — surface terminology is config-driven, storage is neutral.
 
-Physical table names are label-agnostic (``workspace`` / ``collection`` / ``place``).
-The API surfaces a vocabulary chosen at deploy time (``GEOID_VOCAB``); the
-OGC/STAC-aligned terms — **catalog / collection / item** — ship as the ``stac``
+Physical table names follow the OGC/STAC terms (``catalog`` / ``collection`` /
+``place``). The API surfaces a vocabulary chosen at deploy time (``GEOID_VOCAB``);
+the OGC/STAC-aligned terms — **catalog / collection / item** — ship as the ``stac``
 preset and are the default. The earlier ``fao`` preset (workspace/collection/item)
-remains available. Switching presets is a config flip, not a migration.
+remains available as a label-only alias. Switching presets is a config flip, not
+a migration.
 
 OGC API Features path segments (``/collections``, ``/items``) are fixed by the
 standard regardless of vocabulary; the alias only affects human-facing ``type``
@@ -18,7 +19,7 @@ from dataclasses import dataclass
 # concept -> {vocab_name: singular label}
 # "stac" (catalog/collection/item, OGC/STAC-aligned) is the shipped default.
 _LABELS: dict[str, dict[str, str]] = {
-    "workspace": {"fao": "workspace", "stac": "catalog", "neutral": "workspace"},
+    "catalog": {"fao": "workspace", "stac": "catalog", "neutral": "catalog"},
     "collection": {"fao": "collection", "stac": "collection", "neutral": "collection"},
     "place": {"fao": "item", "stac": "item", "neutral": "place"},
 }
@@ -42,7 +43,7 @@ class Vocab:
     name: str
 
     def label(self, concept: str) -> str:
-        """Singular surface label for a neutral concept (``workspace``/``collection``/``place``)."""
+        """Singular surface label for an internal concept (``catalog``/``collection``/``place``)."""
         mapping = _LABELS.get(concept)
         if mapping is None:
             return concept

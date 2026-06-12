@@ -15,10 +15,10 @@ class CollectionNotFoundError(GeoidServiceError):
         super().__init__(f"collection not found: {slug!r}")
 
 
-class WorkspaceNotFoundError(GeoidServiceError):
+class CatalogNotFoundError(GeoidServiceError):
     def __init__(self, slug: str) -> None:
         self.slug = slug
-        super().__init__(f"workspace not found: {slug!r}")
+        super().__init__(f"catalog not found: {slug!r}")
 
 
 class GeometryInvalidError(GeoidServiceError):

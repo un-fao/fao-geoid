@@ -28,11 +28,11 @@ from geoid.models import (
 )
 from geoid.services.exceptions import (
     AnonymousWriteForbiddenError,
+    CatalogNotFoundError,
     CollectionNotFoundError,
     GeometryConflictError,
     GeometryInvalidError,
     PlaceNotFoundError,
-    WorkspaceNotFoundError,
 )
 
 # PostgreSQL SQLSTATEs we care about.
@@ -65,9 +65,9 @@ def register_exception_handlers(app: FastAPI) -> None:
     async def _collection_not_found(_: Request, exc: CollectionNotFoundError) -> JSONResponse:
         return _error(status.HTTP_404_NOT_FOUND, str(exc), collection=exc.slug)
 
-    @app.exception_handler(WorkspaceNotFoundError)
-    async def _workspace_not_found(_: Request, exc: WorkspaceNotFoundError) -> JSONResponse:
-        return _error(status.HTTP_404_NOT_FOUND, str(exc), workspace=exc.slug)
+    @app.exception_handler(CatalogNotFoundError)
+    async def _catalog_not_found(_: Request, exc: CatalogNotFoundError) -> JSONResponse:
+        return _error(status.HTTP_404_NOT_FOUND, str(exc), catalog=exc.slug)
 
     @app.exception_handler(PlaceNotFoundError)
     async def _place_not_found(_: Request, exc: PlaceNotFoundError) -> JSONResponse:

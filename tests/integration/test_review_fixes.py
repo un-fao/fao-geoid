@@ -126,9 +126,9 @@ async def test_collection_extent_reflects_data(client):
 
 
 async def test_empty_collection_extent_is_world(client, admin_headers):
-    await client.post("/manage/workspaces", headers=admin_headers, json={"slug": "wsw"})
+    await client.post("/manage/catalogs", headers=admin_headers, json={"slug": "wsw"})
     await client.post(
-        "/manage/workspaces/wsw/collections", headers=admin_headers, json={"slug": "emptyc"}
+        "/manage/catalogs/wsw/collections", headers=admin_headers, json={"slug": "emptyc"}
     )
     desc = (await client.get("/collections/emptyc")).json()
     assert desc["extent"]["spatial"]["bbox"] == [[-180.0, -90.0, 180.0, 90.0]]

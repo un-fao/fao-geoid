@@ -1,4 +1,4 @@
-"""Workspace + collection schemas (management surface)."""
+"""Catalog + collection schemas (management surface)."""
 
 from __future__ import annotations
 
@@ -7,13 +7,13 @@ from typing import Any
 from pydantic import BaseModel, Field, field_validator
 
 
-class WorkspaceCreate(BaseModel):
+class CatalogCreate(BaseModel):
     slug: str = Field(min_length=1, max_length=128, pattern=r"^[a-z0-9][a-z0-9_-]*$")
     title: str | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
-class WorkspaceOut(BaseModel):
+class CatalogOut(BaseModel):
     id: str
     slug: str
     title: str | None = None
@@ -43,7 +43,7 @@ class CollectionCreate(BaseModel):
 
 class CollectionOut(BaseModel):
     id: str
-    workspace_id: str
+    catalog_id: str
     slug: str
     title: str | None = None
     writable_anon: bool = False
