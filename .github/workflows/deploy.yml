@@ -65,6 +65,9 @@ jobs:
             --project "$PROJECT" \
             --service-account "$RUN_SERVICE_ACCOUNT" \
             --set-cloudsql-instances "$CLOUD_SQL_INSTANCE" \
+            --network "${{ vars.VPC_NETWORK }}" \
+            --subnet "${{ vars.VPC_SUBNET }}" \
+            --vpc-egress private-ranges-only \
             --set-secrets GEOID_DATABASE_URL=geoid-database-url:latest \
             --set-env-vars GEOID_ENVIRONMENT=review \
             --command geoid --args migrate \
@@ -82,6 +85,9 @@ jobs:
             --project "$PROJECT" \
             --service-account "$RUN_SERVICE_ACCOUNT" \
             --set-cloudsql-instances "$CLOUD_SQL_INSTANCE" \
+            --network "${{ vars.VPC_NETWORK }}" \
+            --subnet "${{ vars.VPC_SUBNET }}" \
+            --vpc-egress private-ranges-only \
             --set-secrets GEOID_DATABASE_URL=geoid-database-url:latest,GEOID_ADMIN_TOKEN=geoid-admin-token:latest \
             --set-env-vars "^@^GEOID_ENVIRONMENT=review@GEOID_BASE_URL=${{ vars.GEOID_BASE_URL }}@GEOID_ROOT_PATH=${{ vars.GEOID_ROOT_PATH }}@GEOID_DID_HOST=${{ vars.GEOID_DID_HOST }}@GEOID_INSTANCE_ID=${{ vars.GEOID_INSTANCE_ID }}@GEOID_PUBLIC_COLLECTION=${{ vars.GEOID_PUBLIC_COLLECTION }}@GEOID_VOCAB=${{ vars.GEOID_VOCAB }}@GEOID_STORAGE_BACKEND=${{ vars.GEOID_STORAGE_BACKEND }}@GEOID_STORAGE_GCS_BUCKET=${{ vars.GEOID_STORAGE_GCS_BUCKET }}" \
             --port 8000 \
