@@ -32,6 +32,10 @@ in a browser — an interactive primer on every geospatial idea GeoID relies on 
 GeoJSON↔WKB, polygon validity, the dedup hash, spatial indexing, the antimeridian, OGC API Features
 & CQL2, UUIDv7), with live widgets and per-section self-tests grounded in the real code.
 
+📋 **Stakeholder contract (shareable):** open [`docs/contract.html`](docs/contract.html) in a
+browser — definitions & rules, the team's decisions with rationale, the API contract, a fully
+offline interactive playground that simulates mint → dedup → validation, and the release roadmap.
+
 Prose: this file + [`PERFORMANCE.md`](PERFORMANCE.md) + [`docs/DEFINITIONS.md`](docs/DEFINITIONS.md).
 
 ## The identifier

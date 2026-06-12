@@ -36,7 +36,7 @@ Steps:
     6. report       skipped pairs printed as discovered duplicates for follow-up
 
 ``place`` is INSERT-only by design; the trigger toggle takes an ACCESS EXCLUSIVE
-lock on it, so the runbook (docs/DEPLOYMENT.md §14) mandates a write freeze and a
+lock on it, so the runbook (local-docs/DEPLOYMENT.md §14) mandates a write freeze and a
 PITR point before a live run. A failure rolls the whole transaction back —
 including the trigger state.
 
@@ -327,7 +327,7 @@ def main(argv: list[str] | None = None) -> int:
     if not cfg.dry_run and not cfg.assume_yes:
         answer = input(
             "place gets an ACCESS EXCLUSIVE lock — writes must be frozen "
-            "(docs/DEPLOYMENT.md §14). proceed? [y/N] "
+            "(local-docs/DEPLOYMENT.md §14). proceed? [y/N] "
         )
         if answer.strip().lower() not in ("y", "yes"):
             print("aborted")

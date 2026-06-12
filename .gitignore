@@ -102,8 +102,7 @@ graphify-out/
 # docs/ stay tracked — docs/DEFINITIONS.md is the stakeholder-facing spec.
 docs/*.html
 
-# Internal DevOps sizing/cost runbook — intentionally untracked (not a repo deliverable).
-docs/DEPLOYMENT.md
+local-docs/
 
 # Deploy-time bundle (shared modules copied into Cloud Function build context by CI)
 services/dwh-upload-trigger-cf/common/

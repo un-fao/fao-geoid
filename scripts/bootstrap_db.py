@@ -450,7 +450,7 @@ def check_hash_vectors(conn: psycopg.Connection) -> list[str]:
     problems = [
         f"golden vector {failure.name!r} drifted — expected {failure.expected}, got "
         f"{failure.actual}; stored hashes are stale on this stack: freeze writes and "
-        "run scripts/rehash_geom_hashes.py (runbook: docs/DEPLOYMENT.md §14)"
+        "run scripts/rehash_geom_hashes.py (runbook: local-docs/DEPLOYMENT.md §14)"
         for failure in report.strict_failures
     ]
     for problem in problems:
