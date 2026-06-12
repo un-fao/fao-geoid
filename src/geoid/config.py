@@ -18,15 +18,34 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 _DEV_ADMIN_TOKEN = "change-me-dev-only"
 
 
-class Settings(BaseSettings):
-    """All runtime configuration. Read once and cached via :func:`get_settings`."""
+class DatabaseSettings(BaseSettings):
+    """DB-layer configuration — the full surface the migrate job needs."""
 
+    # extra="ignore" is load-bearing: a full .env with app-level GEOID_* keys
+    # must not trip extra-field validation here.
     model_config = SettingsConfigDict(
         env_prefix="GEOID_",
         env_file=".env",
         env_file_encoding="utf-8",
         extra="ignore",
     )
+
+    database_url: str = Field(
+        default="postgresql+asyncpg://geoid:geoid@localhost:5432/geoid",
+        description="Async SQLAlchemy URL (asyncpg driver).",
+    )
+
+    # --- Connection pool + server-side timeouts (bound the blast radius of a
+    #     slow client on the public streaming bulk-export endpoint) ----------
+    db_pool_size: int = Field(default=10, ge=1)
+    db_max_overflow: int = Field(default=20, ge=0)
+    db_pool_timeout: int = Field(default=30, ge=1, description="seconds to wait for a pooled conn")
+    db_statement_timeout_ms: int = Field(default=30_000, ge=0, description="0 disables")
+    db_idle_in_tx_timeout_ms: int = Field(default=60_000, ge=0, description="0 disables")
+
+
+class Settings(DatabaseSettings):
+    """All runtime configuration. Read once and cached via :func:`get_settings`."""
 
     # --- Deployment ---------------------------------------------------------
     environment: Literal["development", "review", "production"] = Field(
@@ -37,12 +56,6 @@ class Settings(BaseSettings):
             "'review' is a deployed pre-production env: it enforces the real-token "
             "guard exactly like 'production'."
         ),
-    )
-
-    # --- Database -----------------------------------------------------------
-    database_url: str = Field(
-        default="postgresql+asyncpg://geoid:geoid@localhost:5432/geoid",
-        description="Async SQLAlchemy URL (asyncpg driver).",
     )
 
     # --- Identity / resolvability ------------------------------------------
@@ -123,14 +136,6 @@ class Settings(BaseSettings):
             "the cap, so 0 cleanly disables deep paging."
         ),
     )
-
-    # --- Connection pool + server-side timeouts (bound the blast radius of a
-    #     slow client on the public streaming bulk-export endpoint) ----------
-    db_pool_size: int = Field(default=10, ge=1)
-    db_max_overflow: int = Field(default=20, ge=0)
-    db_pool_timeout: int = Field(default=30, ge=1, description="seconds to wait for a pooled conn")
-    db_statement_timeout_ms: int = Field(default=30_000, ge=0, description="0 disables")
-    db_idle_in_tx_timeout_ms: int = Field(default=60_000, ge=0, description="0 disables")
 
     # --- Unified auth service seam (Release-1 stretch goal; Eduardo's team,
     #     expected to be OIDC — confirm before wiring). Inert until enabled;

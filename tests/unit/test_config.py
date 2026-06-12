@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError
 
-from geoid.config import Settings
+from geoid.config import DatabaseSettings, Settings
 
 pytestmark = pytest.mark.unit
 
@@ -15,6 +15,7 @@ def _isolate_env(monkeypatch):
     # Integration fixtures export GEOID_* into os.environ; clear the ones these
     # derivation tests assert on so unit tests are order-independent.
     for key in (
+        "GEOID_DATABASE_URL",
         "GEOID_DID_HOST",
         "GEOID_BASE_URL",
         "GEOID_OIDC_ISSUER",
@@ -109,9 +110,10 @@ def test_max_offset_default_and_rejects_negative():
         _settings(max_offset=-1)
 
 
-def test_default_admin_token_in_production_is_rejected():
+@pytest.mark.parametrize("environment", ["review", "production"])
+def test_default_admin_token_outside_development_is_rejected(environment):
     with pytest.raises(ValidationError):
-        _settings(environment="production")
+        _settings(environment=environment)
 
 
 def test_default_admin_token_in_development_is_allowed():
@@ -134,3 +136,32 @@ def test_invalid_vocab_is_rejected():
 def test_invalid_storage_backend_is_rejected():
     with pytest.raises(ValidationError):
         _settings(storage_backend="bogus")
+
+
+@pytest.mark.parametrize("environment", ["review", "production"])
+def test_database_settings_needs_no_admin_token_outside_development(monkeypatch, environment):
+    # The regression pin: the migrate job constructs DatabaseSettings with no
+    # admin token mounted; that must never trip the dev-token guard.
+    monkeypatch.setenv("GEOID_ENVIRONMENT", environment)
+
+    settings = DatabaseSettings(_env_file=None)
+
+    assert settings.database_url
+
+
+def test_database_settings_reads_database_url_from_env(monkeypatch):
+    monkeypatch.setenv("GEOID_DATABASE_URL", "postgresql+asyncpg://u:p@db:5432/geoid")
+
+    settings = DatabaseSettings(_env_file=None)
+
+    assert settings.database_url == "postgresql+asyncpg://u:p@db:5432/geoid"
+
+
+def test_database_settings_excludes_app_level_fields():
+    # Structural pin: app-layer config must not creep onto the DB-layer surface.
+    for field in ("admin_token", "environment", "base_url", "vocab", "storage_backend"):
+        assert field not in DatabaseSettings.model_fields
+
+
+def test_settings_inherits_database_fields():
+    assert _settings().db_pool_size == 10

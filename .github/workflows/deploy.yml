@@ -52,10 +52,7 @@ jobs:
         run: |
           echo "IMAGE=${REGION}-docker.pkg.dev/${PROJECT}/${ARTIFACT_REGISTRY}/${SERVICE}:${{ github.sha }}" >> "$GITHUB_ENV"
 
-      # cloudbuild.yaml runs the docker builder with DOCKER_BUILDKIT=1 so the
-      # Dockerfile's `RUN --mount=...` cache/bind mounts work. The `--tag` shortcut
-      # would run legacy Docker (BuildKit off) and reject them. Keeps build creds
-      # off the runner and matches the team's other repos.
+      # cloudbuild.yaml enables BuildKit; the `--tag` shortcut can't (see that file).
       - name: Build and push image (Cloud Build)
         run: |
           gcloud builds submit \
