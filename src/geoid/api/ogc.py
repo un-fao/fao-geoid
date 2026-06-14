@@ -1,6 +1,6 @@
 """OGC API Features read router — landing, conformance, collections, items.
 
-Core + GeoJSON + CQL2 (Part 3 filtering) + bbox + offset paging + HATEOAS, with
+Core + GeoJSON + CQL2 (Part 3 filtering) + offset paging + HATEOAS, with
 DynaStore-shaped envelopes (``numberMatched`` / ``numberReturned`` / ``timeStamp``).
 """
 
@@ -14,7 +14,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from sqlalchemy.exc import IntegrityError, OperationalError, StatementError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from geoid.api.cql import build_cql_clause, parse_bbox
+from geoid.api.cql import build_cql_clause
 from geoid.api.paging import enforce_max_offset
 from geoid.api.responses import GeoJSONResponse, SchemaJSONResponse
 from geoid.config import Settings, get_settings
@@ -88,12 +88,11 @@ async def describe_collection(
     "/collections/{collection_id}/items",
     response_model=FeatureCollectionModel,
     response_class=GeoJSONResponse,
-    summary="Features (bbox + CQL2 + paging)",
+    summary="Features (CQL2 + paging)",
 )
 async def get_items(
     collection_id: str,
     request: Request,
-    bbox: str | None = Query(default=None, description="minx,miny,maxx,maxy in CRS84"),
     cql_filter: str | None = Query(
         default=None, alias="filter", description="CQL2 filter expression"
     ),
@@ -109,7 +108,6 @@ async def get_items(
     # so cap-vs-404 precedence is identical on both surfaces).
     enforce_max_offset(offset, settings)
     effective_limit = min(limit or settings.default_limit, settings.max_limit)
-    bbox_tuple = parse_bbox(bbox)
     cql_clause = build_cql_clause(cql_filter, filter_lang, place_repo.queryable_field_mapping())
 
     collection = await collection_repo.get_by_slug(session, collection_id)
@@ -120,7 +118,6 @@ async def get_items(
         rows, number_matched = await place_repo.list_items(
             session,
             collection.id,
-            bbox=bbox_tuple,
             cql_clause=cql_clause,
             limit=effective_limit,
             offset=offset,

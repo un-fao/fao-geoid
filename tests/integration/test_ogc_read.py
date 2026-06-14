@@ -113,14 +113,6 @@ async def test_items_paging_with_next_and_prev_links(client):
     assert not any(link["rel"] == "next" for link in page2["links"])
 
 
-async def test_bbox_filters_features(client):
-    await _seed(client, 3)  # squares at (0,0),(2,2),(4,4)
-    inside = (await client.get("/collections/public/items?bbox=-1,-1,1.5,1.5")).json()
-    assert inside["numberMatched"] == 1
-    none = (await client.get("/collections/public/items?bbox=100,100,101,101")).json()
-    assert none["numberMatched"] == 0
-
-
 async def test_cql2_text_filter_on_external_id(client):
     await _seed(client, 3)
     body = (await client.get("/collections/public/items?filter=external_id='f1'")).json()
@@ -166,11 +158,6 @@ async def test_filter_value_type_mismatch_returns_400_not_500(client):
     resp = await client.get(
         "/collections/public/items", params={"filter": "created_at > 'lastweek'"}
     )
-    assert resp.status_code == 400
-
-
-async def test_invalid_bbox_returns_400(client):
-    resp = await client.get("/collections/public/items?bbox=1,2,3")
     assert resp.status_code == 400
 
 

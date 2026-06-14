@@ -29,7 +29,7 @@ per-module reference for all 47 modules.
 
 🎓 **Geospatial concepts & standards tutorial:** open [`docs/tutorial.html`](docs/tutorial.html)
 in a browser — an interactive primer on every geospatial idea GeoID relies on (CRS & axis order,
-GeoJSON↔WKB, polygon validity, the dedup hash, spatial indexing, the antimeridian, OGC API Features
+GeoJSON↔WKB, polygon validity, the dedup hash, spatial indexing, OGC API Features
 & CQL2, UUIDv7), with live widgets and per-section self-tests grounded in the real code.
 
 📋 **Stakeholder contract (shareable):** open [`docs/contract.html`](docs/contract.html) in a
@@ -103,7 +103,7 @@ uv run python scripts/seed_samples.py
 ```
 
 Expected: 5 plots minted, a reversed-winding duplicate rejected with 409 + the incumbent geoid, a
-self-intersecting polygon rejected (422), bbox/CQL2 queries, and a 5-feature bulk export.
+self-intersecting polygon rejected (422), CQL2 queries, and a 5-feature bulk export.
 See `samples/README.md` for details.
 
 ## Tests
