@@ -12,7 +12,7 @@ from datetime import UTC, datetime
 from typing import Any, TypedDict
 
 from geoid.config import Settings
-from geoid.domain.identifiers import did_for, uri_for
+from geoid.domain.identifiers import uri_for
 from geoid.schemas.ogc import (
     CollectionDesc,
     ConformanceDeclaration,
@@ -212,7 +212,6 @@ def build_feature(settings: Settings, row: ItemRow) -> FeatureModel:
     properties: dict[str, Any] = {
         **submitted,
         "geoid": str(geoid),
-        "did": did_for(geoid, settings.did_host or ""),
         "uri": uri_for(geoid, settings.base_url_clean),
         "external_id": row.get("external_id"),
         "created_at": created_iso,

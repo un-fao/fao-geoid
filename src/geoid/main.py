@@ -19,11 +19,11 @@ logger = logging.getLogger("geoid")
 
 _DESCRIPTION = """\
 **GeoID** mints a globally unique, secure, **immutable** identifier (a *geoid*,
-UUIDv7, framed as a `did:web` Decentralized Identifier) for every geospatial place,
-deduplicates by canonical geometry, tracks provenance, and accepts **anonymous
-contributions** — served over **OGC API Features**.
+UUIDv7) for every geospatial place, deduplicates by canonical geometry, tracks
+provenance, and accepts **anonymous contributions** — served over **OGC API
+Features**.
 
-* **Write / registry** — `POST /collections/{id}/items` → `{geoid, did, uri}`
+* **Write / registry** — `POST /collections/{id}/items` → `{geoid, uri}`
 * **Resolve** — `GET /geoid/{uuid}`, `GET /collections/{id}/external/{external_id}`
 * **OGC API Features read** — landing, `/conformance`, `/collections`, items (bbox + CQL2 + paging)
 * **Bulk** — `GET /collections/{id}/bulk` (public GeoJSON export)

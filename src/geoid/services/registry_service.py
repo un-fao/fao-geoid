@@ -107,12 +107,10 @@ async def create_place(
     ids = derive_identifiers(
         result.geoid,
         base_url=settings.base_url_clean,
-        did_host=settings.did_host or "",
         collection=collection.slug,
     )
     return MintResponse(
         geoid=ids["geoid"],
-        did=ids["did"],
         uri=ids["uri"],
         item_url=ids["item_url"],
         collection=collection.slug,

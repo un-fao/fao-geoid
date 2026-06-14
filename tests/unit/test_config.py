@@ -16,7 +16,6 @@ def _isolate_env(monkeypatch):
     # derivation tests assert on so unit tests are order-independent.
     for key in (
         "GEOID_DATABASE_URL",
-        "GEOID_DID_HOST",
         "GEOID_BASE_URL",
         "GEOID_OIDC_ISSUER",
         "GEOID_OIDC_JWKS_URL",
@@ -32,16 +31,6 @@ def _isolate_env(monkeypatch):
 def _settings(**overrides) -> Settings:
     # _env_file=None so a developer's local .env never leaks into the assertions.
     return Settings(_env_file=None, **overrides)
-
-
-def test_did_host_defaults_to_base_url_host():
-    settings = _settings(base_url="https://data.fao.org")
-    assert settings.did_host == "data.fao.org"
-
-
-def test_explicit_did_host_is_respected():
-    settings = _settings(base_url="http://localhost:8000", did_host="data.fao.org")
-    assert settings.did_host == "data.fao.org"
 
 
 def test_base_url_clean_strips_trailing_slash():
@@ -64,23 +53,6 @@ def test_base_url_clean_includes_root_path():
     # The minted URI/OGC-link prefix must carry the proxy sub-path to stay resolvable.
     settings = _settings(base_url="https://data.example.org", root_path="/geoid/v1")
     assert settings.base_url_clean == "https://data.example.org/geoid/v1"
-
-
-def test_root_path_does_not_leak_into_did_host():
-    # did:web authority is host-only; the sub-path must never appear in the DID.
-    settings = _settings(base_url="https://data.example.org", root_path="/geoid/v1")
-    assert settings.did_host == "data.example.org"
-
-
-def test_did_host_percent_encodes_non_default_port():
-    # did:web encodes the port into the authority so the DID stays resolvable.
-    settings = _settings(base_url="http://localhost:8000")
-    assert settings.did_host == "localhost%3A8000"
-
-
-def test_did_host_omits_default_ports():
-    assert _settings(base_url="https://data.fao.org:443").did_host == "data.fao.org"
-    assert _settings(base_url="http://data.fao.org:80").did_host == "data.fao.org"
 
 
 def test_oidc_disabled_without_issuer():

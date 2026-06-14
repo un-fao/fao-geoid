@@ -93,7 +93,6 @@ def main() -> int:
         if first_geoid:
             props = client.get(f"{BASE}/geoid/{first_geoid}").json()["properties"]
             print(f"\n== Resolve {first_geoid} ==")
-            print(f"  did:         {props['did']}")
             print(f"  uri:         {props['uri']}")
             print(f"  external_id: {props['external_id']}   commodity: {props.get('commodity')}")
             print(f"  provenance:  {props['_geoid_provenance']['client']}")

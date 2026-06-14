@@ -42,16 +42,15 @@ Prose: this file + [`docs/DEFINITIONS.md`](docs/DEFINITIONS.md).
 
 Every place is minted a **UUIDv7** (RFC 9562), stored bare as the item id. On read we derive:
 
-- a DID — `did:web:data.fao.org:geoid:<uuid>`
 - a URI — `https://data.fao.org/geoid/<uuid>`
 - a collection-scoped OGC item URL — `…/collections/{coll}/items/<uuid>`
 
-`POST` returns all three. The geoid is **immutable**: `place` is INSERT-only (enforced by a DB trigger);
+`POST` returns both. The geoid is **immutable**: `place` is INSERT-only (enforced by a DB trigger);
 corrections mint a *new* geoid linked via `predecessor_id`, and the original resolves forever.
 
 Deduplication is a **separate** concern from identity: a **global** canonical `geom_hash` (see below),
 never the id. One geometry → one geoid across the whole catalog — POSTing an identical geometry fails
-with **409** and the body carries the **incumbent geoid** (plus its did/uri and collection).
+with **409** and the body carries the **incumbent geoid** (plus its uri and collection).
 
 ## The dedup recipe (load-bearing correctness)
 

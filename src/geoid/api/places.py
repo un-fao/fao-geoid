@@ -1,6 +1,6 @@
 """Write / registry router — the product surface.
 
-POST a polygon → ``{geoid, did, uri}``; resolve durably by geoid; resolve by
+POST a polygon → ``{geoid, uri}``; resolve durably by geoid; resolve by
 ``(external_id, collection)``. Anonymous POSTs are allowed into ``writable_anon``
 collections via the shared registry service (no special code path).
 """

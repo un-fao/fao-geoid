@@ -12,12 +12,10 @@ the incumbent geoid in the body — at most one permanent row per catalog, ever.
 
 Env:
     GEOID_BASE_URL     default http://localhost:8000 — the public URL under test;
-                       every returned link/did/uri must carry its host (catches
-                       the BASE_URL / did:web misconfiguration, the #1 launch risk)
+                       every returned link/uri must carry its host (catches the
+                       BASE_URL misconfiguration, the #1 launch risk)
     GEOID_COLLECTION   default public
     GEOID_ADMIN_TOKEN  required only when minting into a managed (non-anon) collection
-    GEOID_DID_HOST     expected did:web authority, when deployed different from the
-                       GEOID_BASE_URL host (mirrors the server-side default)
 
 Exit codes: 0 all checks passed · 1 one or more failed (CI / Cloud Run job friendly)
 """
@@ -55,18 +53,6 @@ def _headers() -> dict[str, str]:
 
 def _expected_netloc() -> str:
     return urlsplit(BASE).netloc
-
-
-def _expected_did_host() -> str:
-    override = os.environ.get("GEOID_DID_HOST")
-    if override:
-        return override
-    # Mirror config.Settings._default_did_host: non-default port is percent-encoded.
-    parts = urlsplit(BASE)
-    host = parts.hostname or "localhost"
-    if parts.port and parts.port not in (80, 443):
-        host = f"{host}%3A{parts.port}"
-    return host
 
 
 def _get_json(client: httpx.Client, path: str, *, expect_type: str | None = None) -> dict:
@@ -167,16 +153,12 @@ def run_mint_probe(client: httpx.Client) -> list[bool]:
 
     def probe_resolve_geoid() -> str:
         props = _get_json(client, f"/geoid/{minted['geoid']}").get("properties") or {}
-        did, uri = props.get("did"), props.get("uri")
-        did_host = did.split(":")[2] if did and did.count(":") >= 3 else None
-        assert did_host == _expected_did_host(), (
-            f"did host {did_host!r} != expected {_expected_did_host()!r} (did={did!r})"
-        )
+        uri = props.get("uri")
         uri_netloc = urlsplit(uri or "").netloc
         assert uri_netloc == _expected_netloc(), (
             f"uri host {uri_netloc!r} != expected {_expected_netloc()!r} (uri={uri!r})"
         )
-        return f"resolved; did on {did_host!r}, uri on {uri_netloc!r}"
+        return f"resolved; uri on {uri_netloc!r}"
 
     def probe_resolve_external() -> str:
         # The incumbent's collection (from the 201/409 body) — with global dedup
