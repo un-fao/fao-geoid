@@ -66,7 +66,6 @@ class MintResponse(BaseModel):
     """
 
     geoid: str = Field(description="The bare UUIDv7 — the canonical, immutable identifier.")
-    did: str = Field(description="did:web form, e.g. did:web:data.fao.org:geoid:<uuid>.")
     uri: str = Field(description="Durable resolver URI, e.g. https://data.fao.org/geoid/<uuid>.")
     item_url: str = Field(description="Collection-scoped OGC API Features item URL.")
     collection: str = Field(description="Collection slug the place was minted into.")
@@ -83,7 +82,6 @@ class GeometryConflictResponse(BaseModel):
     code: int = Field(description="HTTP status code (409).")
     message: str = Field(description="Human-readable conflict description.")
     geoid: str = Field(description="The INCUMBENT geoid the geometry is already registered under.")
-    did: str = Field(description="did:web form of the incumbent geoid.")
     uri: str = Field(description="Durable resolver URI of the incumbent geoid.")
     collection: str = Field(description="Collection slug the incumbent belongs to.")
     constraint: str = Field(description='Always "uq_place_geom_hash" for this conflict.')

@@ -94,7 +94,7 @@ jobs:
             --subnet "${{ vars.VPC_SUBNET }}" \
             --vpc-egress private-ranges-only \
             --set-secrets GEOID_DATABASE_URL=geoid-database-url:latest,GEOID_ADMIN_TOKEN=geoid-admin-token:latest \
-            --set-env-vars "^@^GEOID_ENVIRONMENT=review@GEOID_BASE_URL=${{ vars.GEOID_BASE_URL }}@GEOID_ROOT_PATH=${{ vars.GEOID_ROOT_PATH }}@GEOID_DID_HOST=${{ vars.GEOID_DID_HOST }}@GEOID_INSTANCE_ID=${{ vars.GEOID_INSTANCE_ID }}@GEOID_PUBLIC_COLLECTION=${{ vars.GEOID_PUBLIC_COLLECTION }}@GEOID_VOCAB=${{ vars.GEOID_VOCAB }}@GEOID_STORAGE_BACKEND=${{ vars.GEOID_STORAGE_BACKEND }}@GEOID_STORAGE_GCS_BUCKET=${{ vars.GEOID_STORAGE_GCS_BUCKET }}" \
+            --set-env-vars "^@^GEOID_ENVIRONMENT=review@GEOID_BASE_URL=${{ vars.GEOID_BASE_URL }}@GEOID_ROOT_PATH=${{ vars.GEOID_ROOT_PATH }}@GEOID_INSTANCE_ID=${{ vars.GEOID_INSTANCE_ID }}@GEOID_PUBLIC_COLLECTION=${{ vars.GEOID_PUBLIC_COLLECTION }}@GEOID_VOCAB=${{ vars.GEOID_VOCAB }}@GEOID_STORAGE_BACKEND=${{ vars.GEOID_STORAGE_BACKEND }}@GEOID_STORAGE_GCS_BUCKET=${{ vars.GEOID_STORAGE_GCS_BUCKET }}" \
             --port 8000 \
             --allow-unauthenticated \
             --execution-environment gen2 \
@@ -107,7 +107,6 @@ jobs:
 
       - name: Smoke test new revision
         env:
-          GEOID_DID_HOST: ${{ vars.GEOID_DID_HOST }}
           GEOID_PUBLIC_COLLECTION: ${{ vars.GEOID_PUBLIC_COLLECTION }}
           # Public base the service mints links under (origin + sub-path). smoke_test.py
           # asserts returned links carry THIS host, so it must hit the public URL — not

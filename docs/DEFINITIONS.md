@@ -12,8 +12,8 @@ describes *what the system guarantees*, not how the code is written.
 
 The **identifier GeoID mints for a geospatial place** — one globally unique,
 immutable UUID (UUIDv7) per place. It is the product's output. On read it is also
-surfaced as a Decentralized Identifier (`did:web:…`) and as a resolvable URI, but
-those are derived views of the *same* underlying geoid.
+surfaced as a resolvable URI, but that is a derived view of the *same* underlying
+geoid.
 
 - **Immutable.** A geoid never changes and is never reused or deleted. A
   correction does not edit a place; it mints a *new* geoid that points back to the
@@ -97,7 +97,7 @@ Important scope of this rule, as the team agreed:
   ring/part/hole order, coordinate precision) and hashed; an equal hash means a
   duplicate, enforced by a database unique constraint on the hash.
 - The error response names the incumbent: clients receive the existing geoid
-  (plus its resolvable did/uri forms and collection), so "already registered"
+  (plus its resolvable uri form and collection), so "already registered"
   is actionable, not a dead end.
 - Near-identical shapes that differ by more than float jitter mint distinct
   geoids by design (see the precision caveat below).

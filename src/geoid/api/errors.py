@@ -88,18 +88,15 @@ def register_exception_handlers(app: FastAPI) -> None:
     @app.exception_handler(GeometryConflictError)
     async def _geometry_conflict(_: Request, exc: GeometryConflictError) -> JSONResponse:
         # The ruling: the insert fails AND the body names the existing geoid.
-        # did/uri are derived purely (domain.identifiers) so the client can
-        # resolve the incumbent without a second request; ``constraint`` lets
-        # clients discriminate this 409 from the external_id one.
+        # uri is derived purely (domain.identifiers) so the client can resolve
+        # the incumbent without a second request; ``constraint`` lets clients
+        # discriminate this 409 from the external_id one.
         settings = get_settings()
-        ids = derive_identifiers(
-            exc.geoid, base_url=settings.base_url_clean, did_host=settings.did_host or ""
-        )
+        ids = derive_identifiers(exc.geoid, base_url=settings.base_url_clean)
         return _error(
             status.HTTP_409_CONFLICT,
             str(exc),
             geoid=ids["geoid"],
-            did=ids["did"],
             uri=ids["uri"],
             collection=exc.collection,
             constraint=UQ_PLACE_GEOM_HASH,

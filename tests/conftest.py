@@ -78,7 +78,6 @@ def _migrated(_postgis):
     os.environ["GEOID_DATABASE_URL"] = url
     os.environ["GEOID_ADMIN_TOKEN"] = "test-admin-token"
     os.environ["GEOID_BASE_URL"] = "http://testserver"
-    os.environ["GEOID_DID_HOST"] = "data.fao.org"
     os.environ["GEOID_INSTANCE_ID"] = "test-instance"
     os.environ["GEOID_PUBLIC_COLLECTION"] = "public"
     get_settings.cache_clear()

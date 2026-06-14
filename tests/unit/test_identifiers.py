@@ -1,4 +1,4 @@
-"""Unit tests for geoid identifier minting + did:web/URI derivation."""
+"""Unit tests for geoid identifier minting + URI derivation."""
 
 from __future__ import annotations
 
@@ -41,14 +41,6 @@ def test_minting_is_unique_in_bulk():
     assert len(minted) == 2000
 
 
-def test_did_web_derivation():
-    value = uuid.UUID("019e9976-974c-7d01-b2b6-299f41d9d29c")
-    assert (
-        identifiers.did_for(value, "data.fao.org")
-        == "did:web:data.fao.org:geoid:019e9976-974c-7d01-b2b6-299f41d9d29c"
-    )
-
-
 def test_uri_derivation_strips_trailing_slash():
     value = uuid.UUID("019e9976-974c-7d01-b2b6-299f41d9d29c")
     assert (
@@ -66,19 +58,16 @@ def test_item_url_is_collection_scoped():
 def test_derive_identifiers_bundle_includes_item_url_when_collection_given():
     value = identifiers.new_geoid()
     bundle = identifiers.derive_identifiers(
-        value, base_url="https://data.fao.org", did_host="data.fao.org", collection="public"
+        value, base_url="https://data.fao.org", collection="public"
     )
     assert bundle["geoid"] == str(value)
-    assert bundle["did"].startswith("did:web:data.fao.org:geoid:")
     assert bundle["uri"].endswith(str(value))
     assert bundle["item_url"].endswith(f"/collections/public/items/{value}")
 
 
 def test_derive_identifiers_omits_item_url_without_collection():
     value = identifiers.new_geoid()
-    bundle = identifiers.derive_identifiers(
-        value, base_url="https://data.fao.org", did_host="data.fao.org"
-    )
+    bundle = identifiers.derive_identifiers(value, base_url="https://data.fao.org")
     assert "item_url" not in bundle
 
 

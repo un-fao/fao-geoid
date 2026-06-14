@@ -9,7 +9,6 @@ from __future__ import annotations
 
 from functools import lru_cache
 from typing import Literal
-from urllib.parse import urlsplit
 
 from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -63,10 +62,6 @@ class Settings(DatabaseSettings):
         default="http://localhost:8000",
         description="Public base URL used to derive URIs and OGC links on read.",
     )
-    did_host: str | None = Field(
-        default=None,
-        description="did:web host authority. Defaults to the BASE_URL host if unset.",
-    )
     root_path: str = Field(
         default="",
         description=(
@@ -74,7 +69,7 @@ class Settings(DatabaseSettings):
             "GEOID_ROOT_PATH), e.g. '/geoid/v1'. Passed to FastAPI(root_path=...) so "
             "Swagger/OpenAPI resolve behind the proxy, and prepended to BASE_URL when "
             "deriving public URIs/OGC links. The proxy is expected to strip this prefix "
-            "before forwarding. did_host is unaffected (authority only, never a path)."
+            "before forwarding."
         ),
     )
 
@@ -143,18 +138,6 @@ class Settings(DatabaseSettings):
     oidc_issuer: str | None = Field(default=None)
     oidc_jwks_url: str | None = Field(default=None)
     oidc_audience: str | None = Field(default=None)
-
-    @model_validator(mode="after")
-    def _default_did_host(self) -> Settings:
-        if not self.did_host:
-            parts = urlsplit(self.base_url)
-            host = parts.hostname or "localhost"
-            # did:web percent-encodes a non-default port into the authority so the
-            # DID stays resolvable (e.g. localhost:8000 -> localhost%3A8000).
-            if parts.port and parts.port not in (80, 443):
-                host = f"{host}%3A{parts.port}"
-            object.__setattr__(self, "did_host", host)
-        return self
 
     @model_validator(mode="after")
     def _normalize_root_path(self) -> Settings:

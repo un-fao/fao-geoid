@@ -7,13 +7,12 @@ import pytest
 pytestmark = pytest.mark.integration
 
 
-async def test_post_polygon_mints_geoid_did_uri(client, unit_square_ccw):
+async def test_post_polygon_mints_geoid_uri(client, unit_square_ccw):
     resp = await client.post("/collections/public/items", json=unit_square_ccw)
     assert resp.status_code == 201
     body = resp.json()
     assert body["collection"] == "public"
     geoid = body["geoid"]
-    assert body["did"] == f"did:web:data.fao.org:geoid:{geoid}"
     assert body["uri"] == f"http://testserver/geoid/{geoid}"
     assert body["item_url"] == f"http://testserver/collections/public/items/{geoid}"
 
@@ -54,7 +53,6 @@ async def test_identical_geometry_returns_409_with_incumbent_geoid(
     assert body["geoid"] == original_geoid
     assert body["collection"] == "public"
     assert body["constraint"] == "uq_place_geom_hash"
-    assert body["did"] == f"did:web:data.fao.org:geoid:{original_geoid}"
     assert body["uri"] == f"http://testserver/geoid/{original_geoid}"
     assert "message" in body
 

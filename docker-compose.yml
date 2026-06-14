@@ -42,7 +42,6 @@ services:
     environment:
       GEOID_DATABASE_URL: postgresql+asyncpg://geoid:geoid@db:5432/geoid
       GEOID_BASE_URL: http://localhost:8000
-      GEOID_DID_HOST: data.fao.org
       GEOID_ADMIN_TOKEN: change-me-dev-only
       GEOID_INSTANCE_ID: fao-central
       GEOID_STORAGE_BACKEND: local
