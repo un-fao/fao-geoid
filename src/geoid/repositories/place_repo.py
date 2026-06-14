@@ -17,7 +17,7 @@ from collections.abc import AsyncGenerator
 from dataclasses import dataclass
 from typing import Any
 
-from sqlalchemy import ColumnElement, Select, func, or_, select, text
+from sqlalchemy import Select, func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from geoid.models import Place
@@ -183,21 +183,6 @@ def _base_item_query(collection_id: uuid.UUID) -> Select[Any]:
     ).where(Place.collection_id == collection_id)
 
 
-def _bbox_predicate(bbox: tuple[float, float, float, float]) -> ColumnElement[bool]:
-    """ST_Intersects predicate for a CRS84 bbox, handling antimeridian crossing.
-
-    A normal bbox is one envelope. A crossing bbox (west minx > east maxx) is the
-    union of [minx,180] and [-180,maxx], since a single ST_MakeEnvelope cannot
-    wrap the antimeridian.
-    """
-    minx, miny, maxx, maxy = bbox
-    if minx <= maxx:
-        return func.ST_Intersects(Place.geom, func.ST_MakeEnvelope(minx, miny, maxx, maxy, 4326))
-    west = func.ST_Intersects(Place.geom, func.ST_MakeEnvelope(minx, miny, 180.0, maxy, 4326))
-    east = func.ST_Intersects(Place.geom, func.ST_MakeEnvelope(-180.0, miny, maxx, maxy, 4326))
-    return or_(west, east)
-
-
 def queryable_field_mapping() -> dict[str, Any]:
     """Map CQL2 queryable names to ORM columns (incl. geometry for spatial ops).
 
@@ -217,16 +202,12 @@ async def list_items(
     session: AsyncSession,
     collection_id: uuid.UUID,
     *,
-    bbox: tuple[float, float, float, float] | None = None,
     cql_clause: Any | None = None,
     limit: int = 100,
     offset: int = 0,
 ) -> tuple[list[dict[str, Any]], int]:
-    """Return (rows, number_matched) for a collection with optional bbox + CQL2."""
+    """Return (rows, number_matched) for a collection with an optional CQL2 filter."""
     query = _base_item_query(collection_id)
-
-    if bbox is not None:
-        query = query.where(_bbox_predicate(bbox))
 
     if cql_clause is not None:
         query = query.where(cql_clause)

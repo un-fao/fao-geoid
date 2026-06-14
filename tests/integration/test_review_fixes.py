@@ -69,9 +69,6 @@ async def test_change_log_update_is_blocked(client, session, unit_square_ccw):
         await session.flush()
 
 
-# --- #2 antimeridian bbox ----------------------------------------------------
-
-
 def _square_at(x, y, s=0.5):
     return {
         "type": "Feature",
@@ -81,22 +78,6 @@ def _square_at(x, y, s=0.5):
         },
         "properties": {},
     }
-
-
-async def test_antimeridian_bbox_returns_both_sides(client):
-    await client.post("/collections/public/items", json=_square_at(179.0, 0.0))  # near +180
-    await client.post("/collections/public/items", json=_square_at(-179.5, 0.0))  # near -180
-    await client.post("/collections/public/items", json=_square_at(0.0, 0.0))  # far away
-
-    crossing = (await client.get("/collections/public/items?bbox=178,-1,-178,1")).json()
-    assert crossing["numberMatched"] == 2  # both antimeridian-adjacent, not the one at 0
-
-
-async def test_non_crossing_bbox_still_works(client):
-    await client.post("/collections/public/items", json=_square_at(179.0, 0.0))
-    await client.post("/collections/public/items", json=_square_at(-179.5, 0.0))
-    only_east = (await client.get("/collections/public/items?bbox=178,-1,180,1")).json()
-    assert only_east["numberMatched"] == 1
 
 
 # --- #6 GeoJSON content type -------------------------------------------------

@@ -80,8 +80,6 @@ def main() -> int:
         print("\n== OGC read ==")
         items = client.get(f"{BASE}/collections/{COLLECTION}/items?limit=100").json()
         print(f"  all items                 → numberMatched={items['numberMatched']}")
-        wa = client.get(f"{BASE}/collections/{COLLECTION}/items?bbox=-6,5,-1,7").json()
-        print(f"  bbox=-6,5,-1,7 (W. Africa)→ numberMatched={wa['numberMatched']}")
         cql = client.get(
             f"{BASE}/collections/{COLLECTION}/items?filter=external_id='GH-COCOA-001'"
         ).json()

@@ -1,4 +1,4 @@
-"""CQL2 + bbox parsing for the items endpoint.
+"""CQL2 parsing for the items endpoint.
 
 CQL2 (text or JSON) is parsed by pygeofilter and translated to a SQLAlchemy
 clause over the place columns / geometry. Invalid filters fail fast with 400.
@@ -19,34 +19,6 @@ from pygeofilter.parsers.cql2_text import parse as parse_cql2_text
 FILTER_LANG_TEXT = "cql2-text"
 FILTER_LANG_JSON = "cql2-json"
 SUPPORTED_FILTER_LANGS = (FILTER_LANG_TEXT, FILTER_LANG_JSON)
-
-
-def parse_bbox(raw: str | None) -> tuple[float, float, float, float] | None:
-    """Parse an OGC ``bbox`` query value (minx,miny,maxx,maxy[,minz,maxz])."""
-    if not raw:
-        return None
-    parts = [p.strip() for p in raw.split(",") if p.strip() != ""]
-    try:
-        nums = [float(p) for p in parts]
-    except ValueError as exc:
-        raise HTTPException(
-            status.HTTP_400_BAD_REQUEST, f"invalid bbox (non-numeric): {raw!r}"
-        ) from exc
-    if len(nums) == 4:
-        minx, miny, maxx, maxy = nums
-    elif len(nums) == 6:  # 3D bbox: drop z
-        minx, miny, _, maxx, maxy, _ = nums
-    else:
-        raise HTTPException(
-            status.HTTP_400_BAD_REQUEST,
-            "bbox must have 4 (or 6) comma-separated numbers",
-        )
-    # Longitude is cyclic: a bbox that crosses the antimeridian has minx (west)
-    # GREATER than maxx (east), which is valid per OGC API Features (17-069r4)
-    # — e.g. bbox=170,-10,-170,10. Latitude is not cyclic, so miny>maxy is an error.
-    if miny > maxy:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, "bbox miny must be <= maxy")
-    return (minx, miny, maxx, maxy)
 
 
 def _iter_nodes(node: Any) -> Iterator[Any]:
