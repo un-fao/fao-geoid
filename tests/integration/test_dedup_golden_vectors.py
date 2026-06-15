@@ -1,12 +1,16 @@
 """The golden-vector corpus against a real PostGIS — pins ``geoid_geom_hash``
 output to exact digests.
 
-The committed fixture (scripts/data/dedup_golden_vectors_v1.json) was generated
-on the validated stack (amd64 postgis/postgis:17-3.5 → PostGIS 3.5.x/GEOS 3.9.x);
-the test container is pinned to the same image, so every strict digest must
-match bit-for-bit. This is the only place engine-build hash drift becomes
-visible before data is loaded — the relational suite (test_dedup_recipe.py)
-would pass on a drifted engine as long as it drifts consistently.
+The committed fixture (scripts/data/dedup_golden_vectors_v1.json) is pinned to the
+Cloud SQL production stack (PostGIS 3.6.x / GEOS 3.11.x) — the system of record.
+The CI container is postgis/postgis:17-3.5 (GEOS 3.9.0), a DIFFERENT GEOS build
+(no stock image ships Google's GEOS 3.11.4), so it reproduces every STRICT
+(GEOS-stable) digest bit-for-bit but NOT the advisory GEOS-build-sensitive vectors
+(cell_straddle_high, grid9e5_*); those are validated against the real target via
+scripts/dedup_vectors.py --check at bootstrap. This is the only place engine-build
+hash drift on the STABLE vectors becomes visible before data is loaded — the
+relational suite (test_dedup_recipe.py) would pass on a drifted engine as long as
+it drifts consistently.
 """
 
 from __future__ import annotations
@@ -78,12 +82,17 @@ async def test_inline_recipe_matches_deployed_function_for_every_vector(session)
         assert inline == deployed, vector["name"]
 
 
-def test_check_vectors_passes_against_the_validated_container(sync_conn):
+def test_check_vectors_strict_pass_advisory_may_drift_on_ci_container(sync_conn):
+    # The corpus is pinned to the Cloud SQL production stack (GEOS 3.11.x); this CI
+    # container is GEOS 3.9.0. STRICT (GEOS-stable) vectors must still match
+    # bit-for-bit; the GEOS-build-sensitive advisory vectors are allowed to drift
+    # here (they are validated against the real target via --check at bootstrap).
     run_sql = dedup_vectors._psycopg_run_sql(sync_conn)
     report = dedup_vectors.check_vectors(run_sql, dedup_vectors.load_fixture())
     assert report.strict_failures == ()
-    assert report.advisory_failures == ()
-    assert report.passed == len(_VECTORS)
+    assert report.passed >= len(_STRICT)
+    drifted = {failure.name for failure in report.advisory_failures}
+    assert drifted <= {"cell_straddle_high", "grid9e5_baseline", "grid9e5_jitter"}
 
 
 def test_advisory_drift_is_never_classified_strict(sync_conn):

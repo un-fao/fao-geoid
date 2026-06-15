@@ -2,9 +2,11 @@
 
 > **Two honesty caveats up front.**
 > 1. **Numbers here are a pessimistic lower bound.** The local stack runs PostGIS
->    under **amd64 emulation on Apple Silicon** (pinned for GEOS hash parity with
->    Cloud SQL). Emulated Postgres is several times slower than native — run the
->    harness on the target infra (Cloud Run + Cloud SQL) for representative figures.
+>    under **amd64 emulation on Apple Silicon** (the official postgis image is
+>    amd64-only; its GEOS 3.9.0 differs from Cloud SQL's GEOS 3.11.4 — that only
+>    shifts edge-case dedup hashes, not these RPS figures). Emulated Postgres is
+>    several times slower than native — run the harness on the target infra
+>    (Cloud Run + Cloud SQL) for representative figures.
 > 2. **The demo target is already met.** A single emulated instance sustains
 >    **~530–590 RPS** on the write paths and **~330 RPS** on reads at p50 ≈ 12–43 ms
 >    — well past the plan's "a few hundred RPS on one instance" goal. So the work
@@ -48,6 +50,27 @@ it stayed at ~73 ms p95 despite an 8× data increase — see the index result be
 > is fresh-cache warmup, not the relocation. The `read` row is retained from the
 > 34,289-row measurement — the relocation does not touch the read path, and this
 > run's read was against a near-empty collection.
+
+## Live review environment (network-bound) — 2026-06-15
+
+Heavy run against the **deployed review service** (`https://data.review.fao.org/geoid/v1`;
+Cloud Run gen2 min-0 / max-4 + Cloud SQL `db-custom-2-4096`, PostGIS 3.6.0 / GEOS 3.11.4),
+**concurrency=64, 60 s/scenario**, order read→dedup→mint (read warms the min-0 instances):
+
+| Path  | RPS   | p50 ms | p95 ms | p99 ms | max ms  | errors |
+|-------|------:|-------:|-------:|-------:|--------:|-------:|
+| read  | 148.2 |  315.0 |  897.1 | 1714.3 |  2698.6 |      0 |
+| dedup | 145.2 |  373.3 |  567.4 |  876.2 | 15198.7 |      0 |
+| mint  | 190.4 |  308.6 |  454.5 |  800.1 |  2225.9 |      0 |
+
+This is a **separate baseline from the emulated local numbers above** — it includes real
+internet RTT, Cloud Run request-concurrency + autoscale (max 4), and Cloud SQL, so the two
+are **not comparable**. **Zero errors** at c=64 despite c > max-instances (no saturation
+failures, no cold-start 5xx). **mint p95 454 ms meets the <500 ms demo target even live.**
+`read`/`dedup` p95 exceed the *local* 300 ms targets — expected over the network: the `read`
+phase absorbed the min-0 cold-start (its inflated p90/p99 tail), and the lone 15 s `dedup`
+max is a single autoscale outlier (p99 only 876 ms). Treat these as the live reference and
+re-run after any infra change.
 
 ## Correctness under load (a stress test, not just throughput)
 

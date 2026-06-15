@@ -1,11 +1,14 @@
 """Shared test fixtures.
 
-Integration tests run against an ephemeral PostGIS container (testcontainers).
-The image is pinned to ``postgis/postgis:17-3.5`` on ``linux/amd64`` so the GEOS
-build — and therefore ``ST_Normalize`` output, the load-bearing part of the dedup
-recipe — matches Cloud SQL on every host (native on amd64 CI, emulated on arm64
-dev machines). If Docker is unavailable, integration tests skip cleanly so
-``pytest -m unit`` still runs anywhere.
+Integration tests run against an ephemeral PostGIS container (testcontainers),
+pinned to ``postgis/postgis:17-3.5`` (GEOS 3.9.0) on ``linux/amd64`` (the official
+image has no arm64 manifest; native on amd64 CI, emulated on arm64 dev machines).
+NOTE: this is NOT Cloud SQL's GEOS build — production runs GEOS 3.11.4 and no stock
+image ships Google's build, so dedup hashes can differ at edge cases. The golden
+vectors are pinned to the Cloud SQL stack; the GEOS-stable strict vectors match
+here while the GEOS-build-sensitive ones are advisory (see
+tests/integration/test_dedup_golden_vectors.py). If Docker is unavailable,
+integration tests skip cleanly so ``pytest -m unit`` still runs anywhere.
 """
 
 from __future__ import annotations

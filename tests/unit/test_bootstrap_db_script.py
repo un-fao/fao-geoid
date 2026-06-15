@@ -102,5 +102,5 @@ def test_psycopg_dsn_strips_the_async_driver_and_keeps_credentials():
 
 
 def test_series_truncates_to_major_minor():
-    assert bootstrap_db._series("3.5.2") == "3.5"
-    assert bootstrap_db._series("3.9.0") == "3.9"
+    assert bootstrap_db._series("3.6.0") == "3.6"
+    assert bootstrap_db._series("3.11.4") == "3.11"
