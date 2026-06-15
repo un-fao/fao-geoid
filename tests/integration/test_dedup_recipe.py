@@ -1,7 +1,8 @@
 """The dedup-recipe permutation suite — the one place dedup can silently fail.
 
 Tests the authoritative ``geoid_geom_hash`` SQL function directly (the same
-function the BEFORE INSERT trigger and the incumbent-lookup use), across the
+function the arbiter insert and the incumbent-lookup use, via the
+``geoid_geom_hash_default`` wrapper), across the
 canonicalization permutations called out in the plan: ring-start rotation,
 winding direction, hole order, part order, and sub-grid float jitter must all
 collapse to the SAME hash; genuinely different geometry must NOT.
@@ -98,4 +99,4 @@ async def test_dedup_is_global_across_collections(client, admin_headers, unit_sq
     body = b.json()
     assert body["geoid"] == a.json()["geoid"]
     assert body["collection"] == "public"  # the INCUMBENT's collection, not the target
-    assert body["constraint"] == "uq_place_geom_hash"
+    assert body["constraint"] == "uq_geoid_registry_geom_hash"

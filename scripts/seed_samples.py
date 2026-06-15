@@ -53,7 +53,9 @@ def main() -> int:
             ext = str(feature.get("id"))
             if resp.status_code == 201:
                 print(f"  [201] {ext:<22} {'minted':<18} geoid={body['geoid']}")
-            elif resp.status_code == 409 and body.get("constraint") == "uq_place_geom_hash":
+            elif (
+                resp.status_code == 409 and body.get("constraint") == "uq_geoid_registry_geom_hash"
+            ):
                 # Re-running the seed: the geometry is already registered.
                 print(f"  [409] {ext:<22} {'duplicate→existing':<18} geoid={body['geoid']}")
             else:

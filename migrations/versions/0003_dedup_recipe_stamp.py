@@ -2,8 +2,9 @@
 
 ``geoid_geom_hash`` is GEOS-bound (``ST_ReducePrecision`` + ``ST_Normalize``), so
 its output can drift across PostGIS/GEOS builds. Drift is survivable — the hash is
-operational dedup, not identity (the geoid is UUIDv7; the hash never reaches the
-``geoid_registry``/``change_log`` hinges) — but an operator must be able to answer
+operational dedup, not identity (the geoid is UUIDv7, independent of the hash), and
+``scripts/rehash_geom_hashes.py`` can recompute the stored ``geoid_registry.geom_hash``
+under a new stack — but an operator must be able to answer
 "which stack were the stored hashes computed under?" after an engine upgrade.
 ``dedup_recipe_stamp`` is that record:
 
@@ -19,17 +20,17 @@ operational dedup, not identity (the geoid is UUIDv7; the hash never reaches the
   rows appended by ``scripts/rehash_geom_hashes.py`` after a re-hash (or a
   verified no-op) on a new stack.
 
-Reading the table: the LATEST row is the stack the current ``place.geom_hash``
+Reading the table: the LATEST row is the stack the current ``geoid_registry.geom_hash``
 values are valid under. If the live ``postgis_geos_version()`` series differs from
 it, run the golden-vector check (``scripts/dedup_vectors.py --check``) and, on
 drift, the audited re-hash procedure (``scripts/rehash_geom_hashes.py``,
 runbook: local-docs/DEPLOYMENT.md §14).
 
 Design note (D1): this table is ops bookkeeping, not a data-integrity hinge — it
-deliberately gets NO triggers (the global user-trigger inventory stays at 8, as
+deliberately gets NO triggers (the global user-trigger inventory stays at 7, as
 ``scripts/bootstrap_db.py`` asserts) and NO ORM model. The migration-time INSERT
-captures the live stack, asserting that every place row existing at upgrade time
-was hashed under it.
+captures the live stack, asserting that every geoid_registry row existing at
+upgrade time was hashed under it.
 
 Revision ID: 0003_dedup_recipe_stamp
 Revises: 0002_paging_index
@@ -70,7 +71,7 @@ def upgrade() -> None:
              stamped_by, note)
         SELECT 'v1', postgis_lib_version(), postgis_geos_version(),
                postgis_full_version(), 'migration:0003',
-               'initial stamp: every existing place.geom_hash was computed under this stack';
+               'initial stamp: every existing geoid_registry.geom_hash was computed under this stack';
         """
     )
 

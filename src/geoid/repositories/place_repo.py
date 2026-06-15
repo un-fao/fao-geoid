@@ -1,12 +1,16 @@
-"""Place data access — the conflict-aware insert and the OGC read queries.
+"""Place data access — the arbiter-CTE insert and the OGC read queries.
 
-The insert is the product's hot path. ``geom_hash`` is computed by the BEFORE
-INSERT trigger; ``ON CONFLICT ON CONSTRAINT uq_place_geom_hash DO NOTHING``
-swallows ONLY an identical-geometry clash (catalog-wide) — an external_id or
-geoid clash still raises 23505 and is mapped to 409 by constraint name. When
-the insert is swallowed we look up the incumbent geoid using the SAME
-``geoid_geom_hash`` SQL function the trigger uses, so the two can never drift;
-the service then raises ``GeometryConflictError`` (→ 409 + incumbent geoid).
+The insert is the product's hot path. ``geoid_registry`` is the global
+geometry-dedup arbiter: a single-statement CTE inserts the registry row
+(``geom_hash`` via ``geoid_geom_hash_default``) with ``ON CONFLICT ... DO
+NOTHING`` on ``uq_geoid_registry_geom_hash``, then inserts the ``place`` row ONLY
+if the registry arbiter won. So an identical-geometry clash (catalog-wide) writes
+no row and never aborts the transaction, while an external_id or geoid clash on
+the ``place`` leg still raises 23505 (mapped to 409 by constraint name) and rolls
+the whole statement — including the registry row — back. When the place row is
+not written we look up the incumbent geoid in ``geoid_registry`` using the SAME
+``geoid_geom_hash_default`` wrapper, so the stored and recomputed hashes can never
+drift; the service then raises ``GeometryConflictError`` (→ 409 + incumbent geoid).
 """
 
 from __future__ import annotations
@@ -64,34 +68,49 @@ async def insert_place(
     external_id: str | None,
     provenance: dict[str, Any],
     originating_instance: str | None,
-    dedup_grid_default: float,
 ) -> InsertResult:
     """Insert a place; an identical geometry ANYWHERE in the catalog conflicts.
+
+    Single-statement arbiter CTE: the ``arb`` leg inserts into ``geoid_registry``
+    (the global dedup arbiter) ``ON CONFLICT ... DO NOTHING`` on the geom_hash
+    UNIQUE, and the ``place`` leg inserts ``FROM arb`` — so the place row is
+    written ONLY if the registry arbiter won. Both inserts are one statement /
+    one transaction, so an external_id or CHECK failure on the place leg rolls the
+    registry row back too (no orphan), and the AFTER INSERT trigger then appends
+    change_log. A duplicate geometry returns no row (DO NOTHING, not a raised
+    exception) — the hot dedup path never aborts the transaction.
 
     Race safety: Postgres speculative insertion makes a concurrent loser block on
     the winner's XID with its own transaction still healthy, and under READ
     COMMITTED the follow-up incumbent lookup takes a fresh snapshot that sees the
-    winner's committed row — so every conflict resolves to a real incumbent
-    geoid. This breaks if the isolation level is ever raised to REPEATABLE READ.
+    winner's committed registry row — so every conflict resolves to a real
+    incumbent geoid. This breaks if the isolation level is raised to REPEATABLE READ.
 
     Dual-violation precedence: when a submission duplicates BOTH the geometry and
-    an existing external_id, the geometry arbiter wins — Postgres prechecks the
-    ON CONFLICT arbiter constraint before inserting into any other unique index,
-    so the request yields the geometry 409 (incumbent geoid attached) rather than
-    the external_id 409. Pinned by
+    an existing external_id, the geometry arbiter wins — the registry leg runs
+    first and DOES NOTHING, so the place leg inserts no row and its external_id
+    index is never touched; the request yields the geometry 409 (incumbent geoid
+    attached) rather than the external_id 409. Pinned by
     ``test_review_fixes.py::test_dual_geometry_and_external_id_duplicate_yields_geometry_409``.
     """
     insert_stmt = text(
         f"""
+        WITH arb AS (
+            INSERT INTO geoid_registry (geoid, place_id, collection_id, geom_hash)
+            VALUES (
+                :geoid, :geoid, :collection_id, geoid_geom_hash_default({_GEOM_EXPR})
+            )
+            ON CONFLICT ON CONSTRAINT uq_geoid_registry_geom_hash DO NOTHING
+            RETURNING geoid
+        )
         INSERT INTO place (
             id, collection_id, geom, external_id, provenance,
             originating_instance
         )
-        VALUES (
+        SELECT
             :geoid, :collection_id, {_GEOM_EXPR}, :external_id,
             CAST(:provenance AS jsonb), :originating_instance
-        )
-        ON CONFLICT ON CONSTRAINT uq_place_geom_hash DO NOTHING
+        FROM arb
         RETURNING id
         """
     )
@@ -107,21 +126,17 @@ async def insert_place(
     if row is not None:
         return InsertResult(geoid=row[0], created=True)
 
-    # Swallowed by the geom_hash arbiter -> resolve the incumbent (catalog-wide)
-    # via the SAME recipe. The grid (:grid_default = GEOID_DEDUP_GRID_DEFAULT)
-    # must match the BEFORE-INSERT trigger's pinned literal (migration 0001) so
-    # the recomputed hash can't drift from the stored one — retunes are
-    # migration events, never a config-only change.
+    # The registry arbiter swallowed the insert -> resolve the incumbent
+    # (catalog-wide) via the SAME geoid_geom_hash_default wrapper that computed
+    # the stored hash, so the recomputed and stored hashes can't drift.
     lookup_stmt = text(
         f"""
-        SELECT p.id, c.slug
-          FROM place p JOIN collection c ON c.id = p.collection_id
-         WHERE p.geom_hash = geoid_geom_hash({_GEOM_EXPR}, :grid_default)
+        SELECT r.geoid, c.slug
+          FROM geoid_registry r JOIN collection c ON c.id = r.collection_id
+         WHERE r.geom_hash = geoid_geom_hash_default({_GEOM_EXPR})
         """
     )
-    incumbent = (
-        await session.execute(lookup_stmt, {"geojson": geojson, "grid_default": dedup_grid_default})
-    ).first()
+    incumbent = (await session.execute(lookup_stmt, {"geojson": geojson})).first()
     if incumbent is None:
         raise RuntimeError("dedup conflict but incumbent geoid not found (recipe drift?)")
     return InsertResult(geoid=incumbent[0], created=False, collection_slug=incumbent[1])

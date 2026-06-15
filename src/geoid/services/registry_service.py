@@ -83,7 +83,6 @@ async def create_place(
             external_id=external_id,
             provenance=provenance,
             originating_instance=settings.instance_id,
-            dedup_grid_default=settings.dedup_grid_default,
         )
     except IntegrityError as exc:
         if _sqlstate(exc) == _SQLSTATE_CHECK_VIOLATION:

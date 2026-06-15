@@ -84,4 +84,4 @@ class GeometryConflictResponse(BaseModel):
     geoid: str = Field(description="The INCUMBENT geoid the geometry is already registered under.")
     uri: str = Field(description="Durable resolver URI of the incumbent geoid.")
     collection: str = Field(description="Collection slug the incumbent belongs to.")
-    constraint: str = Field(description='Always "uq_place_geom_hash" for this conflict.')
+    constraint: str = Field(description='Always "uq_geoid_registry_geom_hash" for this conflict.')

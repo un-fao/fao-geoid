@@ -50,7 +50,7 @@ async def test_within_cell_conflicts_across_cell_mints(client):
     assert same_cell.status_code == 409
     body = same_cell.json()
     assert body["geoid"] == base["geoid"]
-    assert body["constraint"] == "uq_place_geom_hash"
+    assert body["constraint"] == "uq_geoid_registry_geom_hash"
 
     # +3e-7 deg (3 cells, ~3cm): a clearly different cell -> a distinct geoid.
     other_cell = await client.post("/collections/public/items", json=_square(3e-7))

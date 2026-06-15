@@ -1,12 +1,19 @@
 """scripts/rehash_geom_hashes.py against a real PostGIS — the recovery rehearsal.
 
+The dedup ``geom_hash`` + its global UNIQUE live on ``geoid_registry`` (the
+geometry they hash lives on ``place``), and the registry row is written by the
+app's arbiter CTE — not a trigger. So these helpers stand in for that CTE: they
+insert a ``place`` row and seed its ``geoid_registry`` row with ``geom_hash``
+computed under whatever ``geoid_geom_hash`` body is installed at the time.
+
 Engine drift cannot be produced inside one container, so the helpers simulate it
 the other way around: doctor ``geoid_geom_hash`` to a "drifted" variant (raw WKB
-digest — no MakeValid/ReducePrecision/Normalize), insert places so their stored
+digest — no MakeValid/ReducePrecision/Normalize), seed registry rows whose stored
 hashes are computed under the doctored recipe, then restore the canonical body
 (from migration 0001) and run the script as an operator would (subprocess with
 GEOID_DATABASE_URL). The stored hashes now LOOK like hashes from a different
-engine build, which is exactly the state the script exists to repair.
+engine build, which is exactly the state the script exists to repair (it recomputes
+``geoid_registry.geom_hash`` from ``place.geom``).
 """
 
 from __future__ import annotations
@@ -75,7 +82,7 @@ def db(_migrated):
             yield conn
         finally:
             conn.execute(CANONICAL_FN)
-            conn.execute("ALTER TABLE place ENABLE TRIGGER place_block_mutation_bud")
+            conn.execute("ALTER TABLE geoid_registry ENABLE TRIGGER geoid_registry_append_only_bud")
 
 
 def _make_collection(db, slug: str) -> str:
@@ -89,17 +96,25 @@ def _make_collection(db, slug: str) -> str:
 
 
 def _insert_place(db, place_id: str, collection_id: str, wkt: str) -> None:
-    # geom_hash is computed by the BEFORE INSERT trigger — under whatever
-    # geoid_geom_hash body is currently installed.
+    # Stand in for the arbiter CTE: insert the place row (its AFTER INSERT trigger
+    # appends change_log), then seed the geoid_registry row whose geom_hash is
+    # computed under whatever geoid_geom_hash body is currently installed (so the
+    # "drifted" recipe yields a drifted stored hash, exactly as in production).
     db.execute(
         "INSERT INTO place (id, collection_id, geom) VALUES (%s, %s, ST_GeomFromText(%s, 4326))",
         (place_id, collection_id, wkt),
     )
+    db.execute(
+        "INSERT INTO geoid_registry (geoid, place_id, collection_id, geom_hash) "
+        "VALUES (%s, %s, %s, geoid_geom_hash(ST_GeomFromText(%s, 4326), 1e-7))",
+        (place_id, place_id, collection_id, wkt),
+    )
 
 
 def _stored_hash(db, place_id: str) -> str:
+    # The registry geoid == the place id (the CTE writes geoid := place id).
     return db.execute(
-        "SELECT encode(geom_hash, 'hex') FROM place WHERE id = %s", (place_id,)
+        "SELECT encode(geom_hash, 'hex') FROM geoid_registry WHERE geoid = %s", (place_id,)
     ).fetchone()[0]
 
 
@@ -224,21 +239,23 @@ def test_cross_collection_collision_is_global_exit_3_both_rows_survive(db, _migr
     assert db.execute("SELECT count(*) FROM place").fetchone()[0] == 2  # never delete
 
 
-def test_place_is_still_immutable_after_rehash(db, _migrated):
+def test_geoid_registry_append_only_restored_after_rehash(db, _migrated):
     import psycopg
 
     db.execute(DRIFTED_FN)
-    collection_id = _make_collection(db, "immutable")
+    collection_id = _make_collection(db, "appendonly")
     _insert_place(db, _place_id(1), collection_id, SQUARE)
     db.execute(CANONICAL_FN)
     assert _run_rehash(_migrated).returncode == 0
 
+    # The script toggles geoid_registry's append-only guard to UPDATE the hash and
+    # must restore it (place's immutability trigger is never touched).
     enabled = db.execute(
-        "SELECT tgenabled FROM pg_trigger WHERE tgname = 'place_block_mutation_bud'"
+        "SELECT tgenabled FROM pg_trigger WHERE tgname = 'geoid_registry_append_only_bud'"
     ).fetchone()[0]
     assert enabled == "O"  # 'O' = enabled (origin)
-    with pytest.raises(psycopg.errors.RestrictViolation, match="immutable"):
-        db.execute("UPDATE place SET external_id = 'nope' WHERE id = %s", (_place_id(1),))
+    with pytest.raises(psycopg.errors.RestrictViolation, match="append-only"):
+        db.execute("DELETE FROM geoid_registry WHERE geoid = %s", (_place_id(1),))
 
 
 def test_noop_run_still_appends_a_stamp(db, _migrated):

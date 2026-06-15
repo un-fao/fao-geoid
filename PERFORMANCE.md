@@ -33,20 +33,29 @@ this scenario — it IS the measured path: arbiter conflict + incumbent lookup),
 
 | Path  | RPS  | p50 ms | p95 ms | p99 ms |
 |-------|-----:|-------:|-------:|-------:|
-| mint  | ~554 |   11.4 |  100.0 |  294   |
-| dedup | ~590 |   11.8 |  101.9 |  236   |
+| mint  | ~579 |   11.4 |  103.6 |  221   |
+| dedup | ~550 |   14.7 |   97.7 |  251   |
 | read  | ~327 |   42.9 |   73.3 |  160   |
 
 `read` is measured against **34,289 rows in one collection** (after bulk-seeding);
 it stayed at ~73 ms p95 despite an 8× data increase — see the index result below.
 
+> **mint / dedup re-measured 2026-06-15** after the global geometry-dedup UNIQUE
+> moved to `geoid_registry` (the write is now a one-statement arbiter CTE). Warm-run
+> numbers match the prior baseline (~554 / ~590) within emulated run-to-run
+> variance — **no write-path regression** (same three tables written, same one
+> round-trip). A cold *first* run on the fresh volume dipped to ~370 mint RPS; that
+> is fresh-cache warmup, not the relocation. The `read` row is retained from the
+> 34,289-row measurement — the relocation does not touch the read path, and this
+> run's read was against a near-empty collection.
+
 ## Correctness under load (a stress test, not just throughput)
 
 `tests/integration/test_concurrency.py` fires **16 simultaneous identical POSTs**
 and asserts they converge to **exactly one geoid and one `place` row** (one 201,
-fifteen 409s — each 409 body carrying the winner's geoid). This proves the
-`ON CONFLICT … DO NOTHING` + incumbent-lookup race is conflict-free under
-concurrency — the load-bearing dedup guarantee. A companion test fires 16
+fifteen 409s — each 409 body carrying the winner's geoid). This proves the arbiter
+CTE (registry `ON CONFLICT … DO NOTHING` + incumbent-lookup) race is conflict-free
+under concurrency — the load-bearing dedup guarantee. A companion test fires 16
 *distinct* POSTs and asserts all mint.
 
 ## Optimizations applied (with evidence)
@@ -93,6 +102,14 @@ round-trips to 2. Effect at demo scale is a modest constant-factor win (mint p99
 384→294 ms, dedup p50 14→11.8 ms) — the 422-with-reason and reject-don't-repair
 contracts are unchanged (all geometry-validation tests stay green).
 
+Since the global geometry-dedup UNIQUE moved onto `geoid_registry`, the write is now
+a **single-statement arbiter CTE**: one statement inserts the `geoid_registry` row
+(`ON CONFLICT … DO NOTHING` on `uq_geoid_registry_geom_hash`) and the `place` row
+only if the arbiter won. It is **still one round-trip** for the happy path (the
+registry + place inserts ride in the same statement), so the structural cost is
+unchanged — and a **re-measurement on 2026-06-15 confirmed** mint/dedup hold within
+emulated run-to-run variance of the prior baseline (see the Baseline table above).
+
 ### 5. Explicit uvloop + httptools
 
 `geoid web` now runs uvicorn with `loop="uvloop", http="httptools"` (fail-loud if
@@ -113,6 +130,11 @@ processes.
 
 ## Deferred — the post-demo scaling roadmap
 
+> The **tooling verdict** (Postgres vs. +DuckDB / +Redis / +parallelism), the
+> **billion-row scaling ladder**, and the **dedup-under-sharding crux** live in
+> [`docs/SCALING.md`](docs/SCALING.md) (recorded ADR-style). The bullets below are
+> the measured-baseline view of that roadmap; `SCALING.md` cross-references each.
+
 Intentionally **not** built now (YAGNI; the plan defers scaling):
 
 - **Keyset/cursor paging** to replace OFFSET (OFFSET cost grows with depth; the
@@ -129,9 +151,11 @@ Intentionally **not** built now (YAGNI; the plan defers scaling):
 - **A vertex-count guard** (`ST_NPoints`) to reject or async-queue pathological
   geometries.
 - **Partition `place` by `collection_id` → Citus shard** (the `geoid_registry`
-  hinge holds global uniqueness separately, as a Citus *reference table*, which is
-  exactly why this stays additive — Citus requires unique keys to include the
-  distribution column).
+  hinge already holds **both** global-uniqueness invariants separately — geoid (PK)
+  *and* geometry (`uq_geoid_registry_geom_hash`, relocated there in `0001`) — so
+  `place` carries no global UNIQUE and this stays additive: under Citus
+  `geoid_registry` becomes a *reference table*, since Citus requires unique keys to
+  include the distribution column).
 - **Read replicas** for the OGC read path (the write path needs the primary; the
   read path is replica-safe).
 - **Federation pull-feed** over the monotonic `change_log.seq` cursor.

@@ -113,9 +113,10 @@ class Settings(DatabaseSettings):
             "The ONE global coordinate-precision grid (ST_ReducePrecision gridsize, "
             "decimal degrees) for geometry dedup. 1e-7 ≈ 1cm/vertex — exact-match "
             "semantics (float-jitter immunity only), per Remi's security ruling. "
-            "Effectively migration-pinned: it must equal the BEFORE-INSERT trigger's "
-            "literal (migration 0001) or the incumbent lookup misses on conflicts — "
-            "retunes are migration events, never a config-only change."
+            "Documented canonical value: the app never passes it to the DB (the grid "
+            "is pinned inside the geoid_geom_hash_default() wrapper, migration 0001); "
+            "a unit test pins this equal to that wrapper literal, so retunes are "
+            "migration events, never a config-only change."
         ),
     )
 

@@ -52,7 +52,7 @@ async def test_identical_geometry_returns_409_with_incumbent_geoid(
     body = second.json()
     assert body["geoid"] == original_geoid
     assert body["collection"] == "public"
-    assert body["constraint"] == "uq_place_geom_hash"
+    assert body["constraint"] == "uq_geoid_registry_geom_hash"
     assert body["uri"] == f"http://testserver/geoid/{original_geoid}"
     assert "message" in body
 

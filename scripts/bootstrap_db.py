@@ -72,10 +72,11 @@ REQUIRED_EXTENSIONS = ("postgis", "pgcrypto")
 # a different GEOS series can canonicalize geometries differently → hash drift.
 EXPECTED_POSTGIS_SERIES = "3.5"
 EXPECTED_GEOS_SERIES = "3.9"
-# Migration 0001's user-trigger inventory: 4 on place (set_geom_hash,
-# after_insert, block_mutation, block_truncate) + 2×2 append-only guards on
-# geoid_registry and change_log.
-EXPECTED_USER_TRIGGERS = 8
+# Migration 0001's user-trigger inventory: 3 on place (after_insert,
+# block_mutation, block_truncate) + 2×2 append-only guards on geoid_registry and
+# change_log. (No BEFORE INSERT hash trigger: the dedup geom_hash lives on
+# geoid_registry, written by the app's arbiter CTE — not a trigger.)
+EXPECTED_USER_TRIGGERS = 7
 
 
 class ConfigError(Exception):

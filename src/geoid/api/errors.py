@@ -23,8 +23,8 @@ from geoid.domain.identifiers import derive_identifiers
 from geoid.models import (
     PK_GEOID_REGISTRY,
     PK_PLACE,
+    UQ_GEOID_REGISTRY_GEOM_HASH,
     UQ_PLACE_EXTERNAL_ID,
-    UQ_PLACE_GEOM_HASH,
 )
 from geoid.services.exceptions import (
     AnonymousWriteForbiddenError,
@@ -99,7 +99,7 @@ def register_exception_handlers(app: FastAPI) -> None:
             geoid=ids["geoid"],
             uri=ids["uri"],
             collection=exc.collection,
-            constraint=UQ_PLACE_GEOM_HASH,
+            constraint=UQ_GEOID_REGISTRY_GEOM_HASH,
         )
 
     @app.exception_handler(IntegrityError)
@@ -114,7 +114,7 @@ def register_exception_handlers(app: FastAPI) -> None:
             )
         if constraint in (PK_GEOID_REGISTRY, PK_PLACE):
             return _error(status.HTTP_409_CONFLICT, "geoid already exists", constraint=constraint)
-        if constraint == UQ_PLACE_GEOM_HASH:
+        if constraint == UQ_GEOID_REGISTRY_GEOM_HASH:
             # Backstop only: the service normally raises GeometryConflictError
             # (whose body carries the incumbent geoid — there is no session
             # here to look it up). Surfacing this branch is unexpected.

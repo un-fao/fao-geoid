@@ -4,7 +4,7 @@
 Read-only by default, so it is safe against production (places are append-only;
 nothing is minted unless asked). ``--mint`` adds a write probe that mints ONE
 fixed sentinel feature; global exact-match dedup makes it idempotent — first
-run 201, every later run 409 with ``constraint == "uq_place_geom_hash"`` and
+run 201, every later run 409 with ``constraint == "uq_geoid_registry_geom_hash"`` and
 the incumbent geoid in the body — at most one permanent row per catalog, ever.
 
     uv run python scripts/smoke_test.py            # read-only checks
@@ -137,7 +137,7 @@ def run_mint_probe(client: httpx.Client) -> list[bool]:
         )
         if resp.status_code == 409:
             body = resp.json()
-            if body.get("constraint") == "uq_place_geom_hash":
+            if body.get("constraint") == "uq_geoid_registry_geom_hash":
                 # Expected on every run after the first: global dedup rejects the
                 # duplicate and hands back the incumbent — continue with it.
                 minted.update(body)

@@ -103,7 +103,7 @@ def test_plan_collision_earliest_id_wins_later_skipped():
 
 
 def test_plan_incumbent_unchanged_row_beats_earlier_drifted_row():
-    # Updating the drifted row would itself violate uq_place_geom_hash:
+    # Updating the drifted row would itself violate uq_geoid_registry_geom_hash:
     # the later row already HOLDS the hash. It must win despite the later id.
     rows = [
         _row(1, COLL_A, old_hash="aa", new_hash="HH"),
