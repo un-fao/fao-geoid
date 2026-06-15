@@ -17,7 +17,7 @@ QGIS / ogr / Whisp / Ground ──►  GeoID FastAPI (one image)
                                   └─ /docs (Swagger)
                                           │
                                           ▼
-                          PostgreSQL 17 + PostGIS 3.5.2
+                          PostgreSQL 17 + PostGIS 3.6.0 (Cloud SQL)
                           catalog ─< collection ─< place  (+ geoid_registry, change_log)
 ```
 

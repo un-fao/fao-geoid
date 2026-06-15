@@ -22,8 +22,8 @@ Steps (each idempotent):
     5. extensions    CREATE EXTENSION postgis, pgcrypto as the admin — on Cloud SQL
                      only `cloudsqlsuperuser` members may CREATE EXTENSION, so
                      migration 0001's IF NOT EXISTS then no-ops under the app role
-    6. parity        PostGIS 3.5.x / GEOS 3.9.x check (the dedup hash is validated
-                     against PostGIS 3.5.2 / GEOS 3.9.0)
+    6. parity        PostGIS 3.6.x / GEOS 3.11.x heads-up vs the Cloud SQL stack
+                     (informational only — step 7's digest check is the gate)
     7. golden vectors  recompute the pinned dedup-hash corpus
                      (scripts/data/dedup_golden_vectors_v1.json) with an inline
                      copy of the recipe — works pre-migrate; strict digest drift
@@ -70,8 +70,8 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 REQUIRED_EXTENSIONS = ("postgis", "pgcrypto")
 # The dedup hash (geoid_geom_hash → ST_Normalize) is validated against this stack;
 # a different GEOS series can canonicalize geometries differently → hash drift.
-EXPECTED_POSTGIS_SERIES = "3.5"
-EXPECTED_GEOS_SERIES = "3.9"
+EXPECTED_POSTGIS_SERIES = "3.6"
+EXPECTED_GEOS_SERIES = "3.11"
 # Migration 0001's user-trigger inventory: 3 on place (after_insert,
 # block_mutation, block_truncate) + 2×2 append-only guards on geoid_registry and
 # change_log. (No BEFORE INSERT hash trigger: the dedup geom_hash lives on
@@ -387,8 +387,11 @@ def _series(version: str) -> str:
 
 
 def check_postgis_parity(conn: psycopg.Connection) -> list[str]:
-    """Warn (exit-code-3 drift) when the PostGIS/GEOS series differs from the
-    stack the dedup hash was validated on."""
+    """Print an informational heads-up when the PostGIS/GEOS series differs from
+    the Cloud SQL production stack. NOT a gate — the golden-vector digest check
+    (check_hash_vectors) is authoritative. Returns the problems for callers that
+    want them, but main() no longer routes these to the exit-3 path (a version
+    string differs harmlessly when the STABLE hashes still match, e.g. GEOS 3.9.0)."""
     print("→ PostGIS parity")
     lib = conn.execute("SELECT postgis_lib_version()").fetchone()[0]
     geos = conn.execute("SELECT postgis_geos_version()").fetchone()[0]
@@ -398,7 +401,7 @@ def check_postgis_parity(conn: psycopg.Connection) -> list[str]:
     if _series(lib) != EXPECTED_POSTGIS_SERIES:
         problems.append(
             f"PostGIS {lib} is not {EXPECTED_POSTGIS_SERIES}.x — the dedup hash is "
-            "validated on 3.5.2; confirm hash parity before loading any data"
+            "validated on the Cloud SQL stack 3.6.0; confirm hash parity before loading any data"
         )
     if _series(geos.split("-")[0]) != EXPECTED_GEOS_SERIES:
         problems.append(
@@ -679,7 +682,11 @@ def main(argv: list[str] | None = None) -> int:
         with _connect(cfg, dbname=cfg.app_db) as conn:
             ensure_extensions(conn, cfg)
             if _has_extension(conn, "postgis"):
-                drift += check_postgis_parity(conn)
+                # Informational only: a version-string mismatch is a coarse proxy.
+                # The golden-vector digest check below is the authoritative gate
+                # (strict drift → exit 3), so a non-production engine whose STABLE
+                # hashes still match (e.g. the local GEOS-3.9.0 stack) is not flagged.
+                check_postgis_parity(conn)
                 if _has_extension(conn, "pgcrypto"):
                     drift += check_hash_vectors(conn)
             if role_existed or not cfg.dry_run:

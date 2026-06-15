@@ -66,7 +66,7 @@ def test_same_as_references_resolve():
 def test_corpus_coverage():
     strict = [vector for vector in VECTORS if vector["strict"]]
     advisory = [vector for vector in VECTORS if not vector["strict"]]
-    assert len(strict) >= 14
+    assert len(strict) >= 13  # 13 GEOS-stable; cell_straddle_high + grid9e5_* are advisory
     assert len(advisory) >= 1
     assert {vector["grid"] for vector in VECTORS} >= {1e-7, 9e-5}
 
@@ -171,22 +171,22 @@ def _fake_run_sql(lib: str, geos: str):
 
 def test_generate_refuses_wrong_postgis_series():
     with pytest.raises(dedup_vectors.StepError, match="refusing"):
-        dedup_vectors.generate_fixture(_fake_run_sql("3.6.0", "3.13.0"))
+        dedup_vectors.generate_fixture(_fake_run_sql("3.4.0", "3.11.4-CAPI-1.17.4"))
 
 
 def test_generate_refuses_wrong_geos_series():
     with pytest.raises(dedup_vectors.StepError, match="refusing"):
-        dedup_vectors.generate_fixture(_fake_run_sql("3.5.2", "3.13.0-CAPI-1.19.0"))
+        dedup_vectors.generate_fixture(_fake_run_sql("3.6.0", "3.13.0-CAPI-1.19.0"))
 
 
 def test_generate_force_overrides_series_refusal():
-    fixture = dedup_vectors.generate_fixture(_fake_run_sql("3.6.0", "3.13.0"), force=True)
+    fixture = dedup_vectors.generate_fixture(_fake_run_sql("3.4.0", "3.13.0"), force=True)
     assert fixture["recipe_version"] == "v1"
     assert len(fixture["vectors"]) == len(dedup_vectors.VECTOR_CASES)
 
 
 def test_generate_on_validated_series_cross_checks_same_as():
-    fixture = dedup_vectors.generate_fixture(_fake_run_sql("3.5.2", "3.9.0-CAPI-1.16.2"))
+    fixture = dedup_vectors.generate_fixture(_fake_run_sql("3.6.0", "3.11.4-CAPI-1.17.4"))
     by_name = {vector["name"]: vector for vector in fixture["vectors"]}
     for vector in fixture["vectors"]:
         if vector["same_as"] is not None:
@@ -197,7 +197,7 @@ def test_generate_self_check_rejects_inconsistent_engine():
     # An engine where same_as pairs do NOT collapse must be refused.
     def run_sql(query: str, params: dict | None = None) -> str:
         if "version" in query:
-            return "3.5.2" if "lib" in query else "3.9.0"
+            return "3.6.0" if "lib" in query else "3.11.4"
         return hashlib.sha256(params["wkt"].encode()).hexdigest()
 
     with pytest.raises(dedup_vectors.StepError, match="self-check"):

@@ -1,14 +1,14 @@
-# On-prem / local stack — the SAME image as Cloud Run.
-# `migrate` runs once to head, then `api` serves. Use postgis/postgis:17 to match
-# Cloud SQL's PostGIS 3.5.x.
+# On-prem / local stack — the SAME app image as Cloud Run.
+# `migrate` runs once to head, then `api` serves. NOTE: postgis/postgis:17-3.5 ships
+# GEOS 3.9.0, which is NOT Cloud SQL's GEOS 3.11.4 — dedup hashes can differ at edge
+# cases across GEOS builds (the golden vectors are pinned to the Cloud SQL stack).
 
 services:
   db:
     image: postgis/postgis:17-3.5
     # The official postgis image has no arm64 manifest; pin amd64 so it runs on
-    # Apple Silicon dev hosts (emulated) and amd64 servers (native) alike. This
-    # also keeps the GEOS build — and thus ST_Normalize / the dedup hash — in
-    # parity with Cloud SQL.
+    # Apple Silicon dev hosts (emulated) and amd64 servers (native) alike. (GEOS
+    # build here is 3.9.0, not Cloud SQL's 3.11.4 — see the note above.)
     platform: linux/amd64
     environment:
       POSTGRES_USER: geoid
