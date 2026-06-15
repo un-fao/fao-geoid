@@ -1,8 +1,8 @@
 """Place ORM model (≈ STAC item) — INSERT-only; ``id`` IS the geoid (UUIDv7).
 
 Immutability is enforced in the database (a ``BEFORE UPDATE OR DELETE`` trigger
-raises), not in Python. ``geom_hash`` is set by a ``BEFORE INSERT`` trigger from
-the canonical dedup recipe, so it is read-only from the ORM's perspective.
+raises), not in Python. The dedup ``geom_hash`` and its global UNIQUE live on
+``geoid_registry`` (sharding-ready), not here.
 """
 
 from __future__ import annotations
@@ -17,7 +17,6 @@ from sqlalchemy import (
     CheckConstraint,
     DateTime,
     ForeignKey,
-    LargeBinary,
     String,
     UniqueConstraint,
     text,
@@ -32,7 +31,6 @@ class Place(Base):
     __tablename__ = "place"
     __table_args__ = (
         UniqueConstraint("collection_id", "external_id", name="uq_place_collection_external_id"),
-        UniqueConstraint("geom_hash", name="uq_place_geom_hash"),
         CheckConstraint(
             "GeometryType(geom) IN ('POLYGON', 'MULTIPOLYGON')",
             name="ck_place_geom_is_polygonal",
@@ -49,8 +47,6 @@ class Place(Base):
         Geometry(geometry_type="GEOMETRY", srid=4326, spatial_index=False),
         nullable=False,
     )
-    # Set by the BEFORE INSERT trigger from the canonical recipe; never written by app code.
-    geom_hash: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
     external_id: Mapped[str | None] = mapped_column(String, nullable=True)
     provenance: Mapped[dict[str, Any]] = mapped_column(
         JSONB, nullable=False, server_default=text("'{}'::jsonb")

@@ -13,10 +13,10 @@ pytestmark = pytest.mark.integration
 async def test_concurrent_identical_posts_converge_to_one_geoid(client, session, unit_square_ccw):
     """K simultaneous POSTs of the SAME geometry → exactly one mint, one row.
 
-    Exercises the ON CONFLICT ON CONSTRAINT ... DO NOTHING + incumbent-lookup race:
-    one INSERT wins (201); the rest block on the unique index, see the conflict,
-    and fail with a 409 that carries the winner's geoid. The invariant is one
-    place row total.
+    Exercises the arbiter CTE (registry ON CONFLICT DO NOTHING + incumbent-lookup)
+    race: one arbiter insert wins (201); the rest block on the registry's geom_hash
+    UNIQUE, see the conflict, and fail with a 409 that carries the winner's geoid.
+    The invariant is one place row total.
     """
     k = 16
     responses = await asyncio.gather(
@@ -33,7 +33,7 @@ async def test_concurrent_identical_posts_converge_to_one_geoid(client, session,
     assert len(geoids) == 1, f"expected a single geoid, got {geoids}"
     for resp in responses:
         if resp.status_code == 409:
-            assert resp.json()["constraint"] == "uq_place_geom_hash"
+            assert resp.json()["constraint"] == "uq_geoid_registry_geom_hash"
 
     place_count = (await session.execute(text("SELECT count(*) FROM place"))).scalar_one()
     registry_count = (

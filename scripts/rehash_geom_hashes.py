@@ -1,44 +1,47 @@
 #!/usr/bin/env python3
-"""Re-hash every ``place.geom_hash`` under the live engine (audited, one transaction).
+"""Re-hash every ``geoid_registry.geom_hash`` under the live engine (audited, one tx).
 
 Run this when the dedup hash has drifted out from under the stored rows — the
 golden-vector check (``scripts/dedup_vectors.py --check``, also bootstrap's exit-3
 path) failing after a PostGIS/GEOS upgrade is the trigger. Drift never corrupts
 identity (geoids are UUIDv7; the hash is operational dedup only), but stale hashes
-stop deduplicating new submissions against old rows until they are recomputed.
+stop deduplicating new submissions against old rows until they are recomputed. The
+dedup hash + its global UNIQUE live on ``geoid_registry`` (sharding-ready); the
+geometry they hash lives on ``place``, so the recompute joins the two.
 
     GEOID_DATABASE_URL='postgresql+asyncpg://geoid:...@127.0.0.1:5432/geoid' \\
     uv run python scripts/rehash_geom_hashes.py [--dry-run] [--yes]
 
 Steps:
-    1. config       GEOID_DATABASE_URL only — the APP role: it owns ``place``, so
-                    it may DISABLE TRIGGER (Cloud SQL's ``postgres`` may not)
+    1. config       GEOID_DATABASE_URL only — the APP role: it owns
+                    ``geoid_registry``, so it may DISABLE TRIGGER (Cloud SQL's
+                    ``postgres`` may not)
     2. pre-flight   latest dedup_recipe_stamp row (absent → migrate to 0003 first),
                     live PostGIS/GEOS versions, golden-vector check (informational:
                     all vectors passing means this run will likely be a no-op)
-    3. scan         read-only SELECT recomputing every place's hash under the ONE
-                    global grid (migration 0001 pins the trigger literal — if it
-                    is ever retuned, DEFAULT_GRID_FALLBACK below must move with it)
+    3. scan         read-only SELECT recomputing every registry row's hash from
+                    ``place.geom`` via ``geoid_geom_hash_default`` (migration 0001
+                    pins the ONE global grid inside that wrapper)
     4. plan         pure collision resolution (decision D5; scope is GLOBAL —
                     geometry uniqueness is catalog-wide): within a new_hash
                     group a row already
                     holding the hash unchanged wins (updating past it would
-                    violate uq_place_geom_hash); otherwise the earliest id
-                    (UUIDv7 = mint-time order) wins; losers keep their old hash
+                    violate uq_geoid_registry_geom_hash); otherwise the earliest
+                    id (UUIDv7 = mint-time order) wins; losers keep their old hash
                     and are reported as discovered duplicates; planned updates
                     targeting a skipped row's retained hash are cascade-demoted
                     to a fixed point. Rows are never deleted. --dry-run stops here.
-    5. apply        one transaction: DISABLE TRIGGER place_block_mutation_bud →
-                    batched UPDATEs (1000/chunk) → ENABLE TRIGGER → append a
+    5. apply        one transaction: DISABLE TRIGGER geoid_registry_append_only_bud
+                    → batched UPDATEs (1000/chunk) → ENABLE TRIGGER → append a
                     dedup_recipe_stamp row ('rehash-script'). The stamp is
                     appended even when nothing changed — a no-op run is the
                     record "verified clean under this stack".
     6. report       skipped pairs printed as discovered duplicates for follow-up
 
-``place`` is INSERT-only by design; the trigger toggle takes an ACCESS EXCLUSIVE
-lock on it, so the runbook (local-docs/DEPLOYMENT.md §14) mandates a write freeze and a
-PITR point before a live run. A failure rolls the whole transaction back —
-including the trigger state.
+``geoid_registry`` is append-only by design; the trigger toggle takes an ACCESS
+EXCLUSIVE lock on it, so the runbook (local-docs/DEPLOYMENT.md §14) mandates a write
+freeze and a PITR point before a live run. A failure rolls the whole transaction
+back — including the trigger state.
 
 Env:
     GEOID_DATABASE_URL   required — the canonical app URL (app-role credentials)
@@ -65,11 +68,12 @@ from sqlalchemy.engine.url import make_url
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
 RECIPE_VERSION = "v1"
-MUTATION_TRIGGER = "place_block_mutation_bud"
+# The recompute updates geoid_registry.geom_hash, so it toggles that table's
+# append-only guard (not place's immutability trigger). The ONE global grid is
+# pinned inside geoid_geom_hash_default (migration 0001) — no grid literal here.
+APPEND_ONLY_TABLE = "geoid_registry"
+APPEND_ONLY_TRIGGER = "geoid_registry_append_only_bud"
 UPDATE_CHUNK_SIZE = 1000
-# Mirrors the 0001 trigger literal (the ONE global grid). A future retune is a
-# migration event and must move this value too.
-DEFAULT_GRID_FALLBACK = "1e-7"
 
 
 class ConfigError(Exception):
@@ -128,7 +132,7 @@ def _redact(url: str) -> str:
 
 def _load_config(argv: list[str] | None = None) -> RehashConfig:
     parser = argparse.ArgumentParser(
-        description="Recompute place.geom_hash under the live engine (one transaction)."
+        description="Recompute geoid_registry.geom_hash under the live engine (one transaction)."
     )
     parser.add_argument("--dry-run", action="store_true", help="scan + plan only; mutate nothing")
     parser.add_argument("--yes", action="store_true", help="skip the confirmation prompt")
@@ -138,7 +142,7 @@ def _load_config(argv: list[str] | None = None) -> RehashConfig:
     if not raw_url:
         raise ConfigError(
             "GEOID_DATABASE_URL is required — the canonical app URL; the app role "
-            "owns place and so may toggle its triggers"
+            "owns geoid_registry and so may toggle its triggers"
         )
     try:
         url = make_url(raw_url)
@@ -198,12 +202,13 @@ def preflight(conn: psycopg.Connection) -> None:
         print("  ✓ all golden vectors match — this run will likely be a no-op")
 
 
-_SCAN_SQL = f"""
-    SELECT p.id, p.collection_id,
-           encode(p.geom_hash, 'hex') AS old_hash,
-           encode(geoid_geom_hash(p.geom, {DEFAULT_GRID_FALLBACK}), 'hex') AS new_hash
-      FROM place p
-     ORDER BY p.id
+_SCAN_SQL = """
+    SELECT r.geoid, r.collection_id,
+           encode(r.geom_hash, 'hex') AS old_hash,
+           encode(geoid_geom_hash_default(p.geom), 'hex') AS new_hash
+      FROM geoid_registry r
+      JOIN place p ON p.id = r.place_id
+     ORDER BY r.geoid
 """
 
 
@@ -213,7 +218,7 @@ def scan(conn: psycopg.Connection) -> tuple[ScanRow, ...]:
         ScanRow(id=row[0], collection_id=row[1], old_hash=row[2], new_hash=row[3])
         for row in conn.execute(_SCAN_SQL)
     )
-    print(f"  {len(rows)} places scanned")
+    print(f"  {len(rows)} registry rows scanned")
     return rows
 
 
@@ -227,7 +232,7 @@ def plan_rehash(rows: Sequence[ScanRow]) -> RehashPlan:
 
     # Group winner per new_hash — catalog-wide: an incumbent already holding the
     # hash unchanged beats everyone (the UPDATE itself would violate
-    # uq_place_geom_hash); otherwise the earliest id (= mint time).
+    # uq_geoid_registry_geom_hash); otherwise the earliest id (= mint time).
     winners: dict[str, ScanRow] = {}
     for row in rows:
         incumbent = winners.get(row.new_hash)
@@ -274,18 +279,18 @@ def apply_updates(conn: psycopg.Connection, plan: RehashPlan) -> None:
         f"unchanged {plan.unchanged_count}"
     )
     with conn.transaction():
-        # ACCESS EXCLUSIVE on place — the runbook mandates a write freeze.
-        conn.execute(f"ALTER TABLE place DISABLE TRIGGER {MUTATION_TRIGGER}")
+        # ACCESS EXCLUSIVE on geoid_registry — the runbook mandates a write freeze.
+        conn.execute(f"ALTER TABLE {APPEND_ONLY_TABLE} DISABLE TRIGGER {APPEND_ONLY_TRIGGER}")
         for start in range(0, len(plan.updates), UPDATE_CHUNK_SIZE):
             chunk = plan.updates[start : start + UPDATE_CHUNK_SIZE]
             values = ", ".join(["(%s::uuid, %s)"] * len(chunk))
             params = [param for row in chunk for param in (str(row.id), row.new_hash)]
             conn.execute(
-                f"UPDATE place SET geom_hash = decode(v.new_hash, 'hex') "
-                f"FROM (VALUES {values}) AS v(id, new_hash) WHERE place.id = v.id",
+                f"UPDATE geoid_registry SET geom_hash = decode(v.new_hash, 'hex') "
+                f"FROM (VALUES {values}) AS v(id, new_hash) WHERE geoid_registry.geoid = v.id",
                 params,
             )
-        conn.execute(f"ALTER TABLE place ENABLE TRIGGER {MUTATION_TRIGGER}")
+        conn.execute(f"ALTER TABLE {APPEND_ONLY_TABLE} ENABLE TRIGGER {APPEND_ONLY_TRIGGER}")
         # Appended even when 0 updated: a no-op run is the record "verified
         # clean under this stack".
         conn.execute(
@@ -326,7 +331,7 @@ def main(argv: list[str] | None = None) -> int:
     print(f"  app URL : {_redact(cfg.app_url)}")
     if not cfg.dry_run and not cfg.assume_yes:
         answer = input(
-            "place gets an ACCESS EXCLUSIVE lock — writes must be frozen "
+            "geoid_registry gets an ACCESS EXCLUSIVE lock — writes must be frozen "
             "(local-docs/DEPLOYMENT.md §14). proceed? [y/N] "
         )
         if answer.strip().lower() not in ("y", "yes"):

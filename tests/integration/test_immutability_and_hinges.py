@@ -34,13 +34,49 @@ async def test_delete_on_place_is_blocked_by_trigger(client, session, unit_squar
 async def test_geoid_registry_hinge_populated_on_mint(client, session, unit_square_ccw):
     geoid = await _mint(client, unit_square_ccw)
     row = (
-        await session.execute(
-            text("SELECT place_id, collection_id FROM geoid_registry WHERE geoid = :g"),
-            {"g": geoid},
+        (
+            await session.execute(
+                text(
+                    "SELECT r.place_id, "
+                    "       encode(r.geom_hash, 'hex') AS stored, "
+                    "       encode(geoid_geom_hash_default(p.geom), 'hex') AS recomputed "
+                    "FROM geoid_registry r JOIN place p ON p.id = r.place_id "
+                    "WHERE r.geoid = :g"
+                ),
+                {"g": geoid},
+            )
         )
-    ).first()
+        .mappings()
+        .first()
+    )
     assert row is not None
-    assert str(row[0]) == geoid
+    assert str(row["place_id"]) == geoid
+    # The relocation: the dedup geom_hash now lives on (and is enforced by)
+    # geoid_registry, written by the arbiter CTE via geoid_geom_hash_default —
+    # populated, 32-byte sha256, and equal to the canonical recipe over the geom.
+    assert len(row["stored"]) == 64
+    assert row["stored"] == row["recomputed"]
+
+
+async def test_global_geom_hash_unique_lives_on_geoid_registry(session):
+    # The relocated invariant: the GLOBAL geometry-dedup UNIQUE is on
+    # geoid_registry (sharding-ready), not place.
+    on_registry = (
+        await session.execute(
+            text(
+                "SELECT count(*) FROM pg_constraint "
+                "WHERE conname = 'uq_geoid_registry_geom_hash' "
+                "AND conrelid = 'geoid_registry'::regclass"
+            )
+        )
+    ).scalar_one()
+    assert on_registry == 1
+    gone_from_place = (
+        await session.execute(
+            text("SELECT count(*) FROM pg_constraint WHERE conname = 'uq_place_geom_hash'")
+        )
+    ).scalar_one()
+    assert gone_from_place == 0
 
 
 async def test_change_log_hinge_records_create(client, session, unit_square_ccw):

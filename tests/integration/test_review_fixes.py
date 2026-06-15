@@ -10,10 +10,11 @@ pytestmark = pytest.mark.integration
 
 
 # --- dual-violation precedence: the geometry 409 wins over external_id's -----
-# Postgres prechecks the ON CONFLICT arbiter (geom_hash) before touching any
-# other unique index, so a submission duplicating BOTH geometry and external_id
-# yields the GEOMETRY conflict (409 carrying the incumbent geoid), never the
-# external_id 409.
+# The arbiter CTE inserts the geoid_registry row first (ON CONFLICT DO NOTHING on
+# the geom_hash UNIQUE); the place row — and so its external_id index — is only
+# touched if the registry arbiter won. So a submission duplicating BOTH geometry
+# and external_id yields the GEOMETRY conflict (409 carrying the incumbent geoid),
+# never the external_id 409.
 
 
 async def test_dual_geometry_and_external_id_duplicate_yields_geometry_409(client, unit_square_ccw):
@@ -23,7 +24,7 @@ async def test_dual_geometry_and_external_id_duplicate_yields_geometry_409(clien
 
     resub = await client.post("/collections/public/items", json=feature)
     assert resub.status_code == 409
-    assert resub.json()["constraint"] == "uq_place_geom_hash"
+    assert resub.json()["constraint"] == "uq_geoid_registry_geom_hash"
     assert resub.json()["geoid"] == base.json()["geoid"]
 
 
@@ -38,7 +39,7 @@ async def test_geometry_dup_with_another_rows_external_id_yields_geometry_409(
     # the 409 carries A's geoid; the conflicting external_id is never reached.
     resub = await client.post("/collections/public/items", json=dict(unit_square_ccw, id="ext-b"))
     assert resub.status_code == 409
-    assert resub.json()["constraint"] == "uq_place_geom_hash"
+    assert resub.json()["constraint"] == "uq_geoid_registry_geom_hash"
     assert resub.json()["geoid"] == a.json()["geoid"]
 
 

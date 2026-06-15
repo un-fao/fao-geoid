@@ -1,7 +1,7 @@
 """The dedup-recipe version stamp (migration 0003).
 
 ``dedup_recipe_stamp`` is ops bookkeeping — it records which recipe version and
-which PostGIS/GEOS stack every ``place.geom_hash`` was computed under, so an
+which PostGIS/GEOS stack every ``geoid_registry.geom_hash`` was computed under, so an
 operator can tell after an engine upgrade whether stored hashes predate the
 current stack. It is deliberately NOT a data-integrity hinge: no triggers, no
 ORM model, and the migration-time INSERT captures the live stack.
@@ -15,7 +15,10 @@ from sqlalchemy import text
 pytestmark = pytest.mark.integration
 
 # Migration 0001's inventory — the stamp table must not grow this number.
-EXPECTED_USER_TRIGGERS = 8
+# 7 = 3 on place (after_insert, block_mutation, block_truncate) + 2×2 append-only
+# guards on geoid_registry and change_log. (The BEFORE INSERT hash trigger is gone:
+# the dedup hash moved to geoid_registry, written by the app's arbiter CTE.)
+EXPECTED_USER_TRIGGERS = 7
 
 
 async def test_initial_stamp_row_exists_with_v1(session):
