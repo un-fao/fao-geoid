@@ -22,6 +22,9 @@ dependencies = [
     "geojson-pydantic>=2.1,<2.2",
     "pydantic>=2.9",
     "pydantic-settings>=2.6",
+    # HTTP client for the completion-notification seam (MS Graph sendMail + OGC
+    # callbacks); lazily used, so notify_backend=none never imports it.
+    "httpx>=0.27",
     # Geometry + CQL2 filtering
     "shapely>=2.0",
     "pyproj>=3.6",
@@ -32,8 +35,11 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-# FAO GCP object storage backend (kept optional so the core image imports no GCP SDK)
-gcs = ["gcsfs>=2024.9"]
+# FAO GCP integration (kept optional so the core image imports no GCP SDK): the GCS
+# object-storage backend + the Cloud Run jobs.run trigger seam for the async ingest
+# worker. Both are lazy-imported, so an on-prem deploy of the same image never loads
+# them. The image is built with --extra gcs.
+gcs = ["gcsfs>=2024.9", "google-cloud-run>=0.10"]
 # Post-demo OIDC resource-server auth (Keycloak / FAO IdP); MVP uses a static token
 oidc = ["authlib>=1.3", "httpx>=0.27"]
 
