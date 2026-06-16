@@ -7,8 +7,6 @@ are identical for both — anonymity is not a special case.
 
 from __future__ import annotations
 
-import json
-
 from sqlalchemy.exc import DBAPIError, IntegrityError, InterfaceError, OperationalError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -18,7 +16,7 @@ from geoid.domain.identifiers import derive_identifiers, new_geoid
 from geoid.domain.provenance import build_provenance, extract_client
 from geoid.models import Collection
 from geoid.repositories import place_repo
-from geoid.schemas.place import MintResponse, PlaceCreate
+from geoid.schemas.place import MintResponse, PlaceCreate, geometry_to_geojson
 from geoid.services.exceptions import (
     AnonymousWriteForbiddenError,
     GeometryConflictError,
@@ -29,12 +27,6 @@ from geoid.services.exceptions import (
 # on the INSERT (SQLSTATE 23514). Polygon-only + lon/lat bounds + RFC 7946 structure
 # are ALSO enforced earlier by the PlaceCreate pydantic schema (422 before the DB).
 _SQLSTATE_CHECK_VIOLATION = "23514"
-
-
-def _geometry_to_geojson(feature: PlaceCreate) -> str:
-    """Serialise the feature's geometry to a GeoJSON geometry string for PostGIS."""
-    geom = feature.geometry
-    return json.dumps({"type": geom.type, "coordinates": geom.coordinates})
 
 
 def _sqlstate(exc: DBAPIError) -> str | None:
@@ -60,7 +52,7 @@ async def create_place(
     if principal.is_anonymous and not collection.writable_anon:
         raise AnonymousWriteForbiddenError(collection.slug)
 
-    geojson = _geometry_to_geojson(feature)
+    geojson = geometry_to_geojson(feature)
     external_id = feature.external_id
     client = extract_client(feature.properties)
     provenance = build_provenance(

@@ -152,7 +152,8 @@ _READ_COLUMNS = """
     p.provenance,
     p.created_at,
     p.predecessor_id,
-    p.originating_instance
+    p.originating_instance,
+    p.ingest_batch_id
 """
 
 
@@ -194,6 +195,7 @@ def _base_item_query(collection_id: uuid.UUID) -> Select[Any]:
         Place.created_at,
         Place.predecessor_id,
         Place.originating_instance,
+        Place.ingest_batch_id,
         func.ST_AsGeoJSON(Place.geom).label("geometry"),
     ).where(Place.collection_id == collection_id)
 
@@ -210,6 +212,8 @@ def queryable_field_mapping() -> dict[str, Any]:
         "external_id": Place.external_id,
         "created_at": Place.created_at,
         "geometry": Place.geom,
+        # Set membership: filter by place-set with ?filter=ingest_batch_id='<uuid>'.
+        "ingest_batch_id": Place.ingest_batch_id,
     }
 
 
@@ -302,14 +306,20 @@ async def collection_extents(
     return out
 
 
+# Bulk export coordinate precision (RFC 7946 §11.2). 7 decimals ≈ 1cm — matched to
+# the dedup grid (1e-7), so trimming never drops dedup-relevant precision while it
+# does shrink the payload vs ST_AsGeoJSON's 9-decimal default.
+_EXPORT_MAX_DECIMALS = 7
+
+
 async def iter_collection_geojson(
-    session: AsyncSession, collection_id: uuid.UUID
+    session: AsyncSession, collection_id: uuid.UUID, *, max_decimals: int = _EXPORT_MAX_DECIMALS
 ) -> AsyncGenerator[dict[str, Any], None]:
     """Yield (geoid, geometry_geojson, external_id, provenance) rows for bulk export."""
     stmt = text(
         """
         SELECT p.id AS geoid,
-               ST_AsGeoJSON(p.geom) AS geometry,
+               ST_AsGeoJSON(p.geom, :max_decimals) AS geometry,
                p.external_id,
                p.provenance,
                p.created_at
@@ -322,6 +332,8 @@ async def iter_collection_geojson(
     # stays flat and bytes start flowing immediately instead of buffering the
     # whole collection first.
     streamed = stmt.execution_options(stream_results=True, max_row_buffer=500)
-    result = await session.stream(streamed, {"collection_id": collection_id})
+    result = await session.stream(
+        streamed, {"collection_id": collection_id, "max_decimals": max_decimals}
+    )
     async for row in result.mappings():
         yield dict(row)

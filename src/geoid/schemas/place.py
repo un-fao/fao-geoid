@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from collections.abc import Iterator
 from typing import Any
 
@@ -56,6 +57,18 @@ class PlaceCreate(Feature[PolygonalGeometry, dict[str, Any] | None]):
     @property
     def external_id(self) -> str | None:
         return None if self.id is None else str(self.id)
+
+
+def geometry_to_geojson(feature: PlaceCreate) -> str:
+    """Serialise a feature's geometry to a GeoJSON geometry string for PostGIS.
+
+    The SINGLE source for both the single-row (registry_service) and the bulk
+    (ingest_service) write paths, so they stage byte-identical geometry text into
+    ``ST_GeomFromGeoJSON`` — a divergence here would break the golden-vector hash
+    parity the two paths share.
+    """
+    geom = feature.geometry
+    return json.dumps({"type": geom.type, "coordinates": geom.coordinates})
 
 
 class MintResponse(BaseModel):
