@@ -9,7 +9,7 @@ from fastapi import FastAPI
 from sqlalchemy.exc import InterfaceError, OperationalError
 
 from geoid import __version__
-from geoid.api import bulk, health, manage, ogc, places
+from geoid.api import bulk, health, jobs, manage, ogc, places, processes
 from geoid.api.errors import register_exception_handlers
 from geoid.config import get_settings
 from geoid.db import dispose_engine, get_sessionmaker
@@ -25,8 +25,11 @@ Features**.
 
 * **Write / registry** — `POST /collections/{id}/items` → `{geoid, uri}`
 * **Resolve** — `GET /geoid/{uuid}`, `GET /collections/{id}/external/{external_id}`
-* **OGC API Features read** — landing, `/conformance`, `/collections`, items (bbox + CQL2 + paging)
-* **Bulk** — `GET /collections/{id}/bulk` (public GeoJSON export)
+* **OGC API Features read** — landing, `/conformance`, `/collections`, items (CQL2 + paging)
+* **OGC API Processes** — `bulk-ingest` (sync inline or `Prefer: respond-async`) and
+  `bulk-export` (async → signed download URL); `POST /processes/{id}/execution`,
+  poll `GET /jobs/{jobID}`, fetch `GET /jobs/{jobID}/results`, dismiss `DELETE /jobs/{jobID}`
+* **Bulk** — `GET /collections/{id}/bulk` (public GeoJSON / geo+json-seq stream)
 * **Health** — `GET /health` (DB connectivity probe)
 """
 
@@ -68,6 +71,8 @@ def create_app() -> FastAPI:
     app.include_router(ogc.router)
     app.include_router(places.router)
     app.include_router(manage.router)
+    app.include_router(processes.router)
+    app.include_router(jobs.router)
     app.include_router(bulk.router)
 
     app.state.settings = settings

@@ -45,7 +45,16 @@ def test_main_dispatches_migrate(monkeypatch):
     assert called["migrate"] is True
 
 
-def test_main_unknown_command_returns_2(monkeypatch, capsys):
+def test_main_dispatches_ingest_worker(monkeypatch):
+    called = {}
+    monkeypatch.setattr(cli, "run_ingest_worker", lambda: called.setdefault("worker", True))
+    monkeypatch.setattr(sys, "argv", ["geoid", "ingest-worker"])
+    assert cli.main() == 0
+    assert called["worker"] is True
+
+
+def test_main_unknown_command_returns_2(monkeypatch, caplog):
     monkeypatch.setattr(sys, "argv", ["geoid", "bogus"])
-    assert cli.main() == 2
-    assert "unknown command" in capsys.readouterr().err
+    with caplog.at_level("ERROR", logger="geoid.cli"):
+        assert cli.main() == 2
+    assert "unknown command" in caplog.text

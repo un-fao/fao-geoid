@@ -189,10 +189,18 @@ Intentionally **not** built now (YAGNI; the plan defers scaling):
   `numberRequested`/`numberReturned`/`invalid`/`notFound` foreign members.
   Mirroring DynaStore's request/response shapes keeps a future merge of the two
   products cheap, whichever direction it goes.
-- **Batch write + job-based bulk ingest/export** — `POST .../items` accepting a
-  whole FeatureCollection with per-row rejections and HTTP **207**
-  `IngestionReport{accepted_ids, rejections[], total}` partial-success semantics
-  (each rejection carries the matcher that fired: geometry-dedup vs external-id),
-  again mirroring DynaStore's shapes; larger file-based ingest/export runs as
-  async jobs on a `FOR UPDATE SKIP LOCKED` PostgreSQL queue (no new
-  infrastructure) and rides on the same milestone.
+- **Batch write + job-based bulk ingest/export — BUILT (milestone 1.3).** Shipped as
+  one conformant **OGC API - Processes Part 1** surface (see `docs/SCALING.md` §8):
+  `POST /processes/bulk-ingest/execution` runs **sync** (200 + `IngestionReport`) or
+  **async** (`Prefer: respond-async` → **201** + `Location: /jobs/{id}`; OGC Req 34 —
+  201, not 202). Partial success is the contract — the `IngestionReport` is
+  `{collection, batch_id, place_set_uri, total, accepted_count, rejected_count,
+  accepted[{row_no, geoid, uri, collection, external_id}], rejected[{row_no, reason,
+  detail, constraint, incumbent_geoid, external_id}]}`, each `reason` mapping 1:1 to
+  the single-row 4xx (the matcher that fired: `geometry_conflict` /
+  `external_id_conflict` / …). Mechanics: `COPY` (asyncpg `copy_records_to_table`,
+  text/jsonb) into TEMP staging → the single-row arbiter CTE reused set-wise. The
+  async path is a durable `ingest_job` queue (`0004`) drained by the `geoid
+  ingest-worker` CLI on `FOR UPDATE SKIP LOCKED` (no new infrastructure); `bulk-export`
+  is a second async process → a GCS V4 signed URL. *Still deferred on this path:*
+  Parquet/Arrow export content negotiation and keyset paging (below).

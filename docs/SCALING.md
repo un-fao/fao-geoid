@@ -9,8 +9,10 @@
 > roadmap rather than restating it.
 >
 > **Status.** The *decisions* below are recorded now. The bulk-ingest/fetch
-> **code** they motivate is specified build-ready (see §8) and lands on approval —
-> it is the "soon", not the "now".
+> **code** they motivate is **BUILT** (milestone 1.3 — see §8): a conformant
+> OGC API – Processes surface (`bulk-ingest` + `bulk-export`), the async
+> `ingest_job` queue (migration `0004`), and the `geoid ingest-worker`. The
+> *deferred* columnar/keyset items in §8 remain the "soon", not the "now".
 
 ---
 
@@ -297,47 +299,76 @@ Each **DEFERRED** decision names its trigger metric and links to the matching
 
 ---
 
-## 8. The bulk endpoints this verdict motivates (specified; lands on approval)
+## 8. The bulk endpoints this verdict motivates (BUILT — milestone 1.3)
 
-The verdict above exists to de-risk the **bulk ingest/fetch** work named in
-`PERFORMANCE.md`'s roadmap. The code is specified build-ready but is **not built in
-this pass** — it ships on approval. Summary so the decisions trace to an
-implementation:
+The verdict above existed to de-risk the **bulk ingest/fetch** work named in
+`PERFORMANCE.md`'s roadmap. That work is now **built** as one conformant
+**OGC API – Processes Part 1** surface (the FAO-valued OGC alignment; sync and async
+are *the same process*, selected by the `Prefer` header). Discovery is public
+(`GET /processes`, `GET /processes/{id}`); execution is admin-gated.
 
 **Ingest — Tier 1 (synchronous, bounded batch).**
-`POST /collections/{collection_id}/items:bulk` takes a GeoJSON FeatureCollection
-(cap `GEOID_BULK_MAX_FEATURES`, DynaStore uses 10k) and returns **HTTP 207** with an
-`IngestionReport{ total, accepted[], rejected[] }` — per-row partial success, so one
-bad geometry or duplicate never fails the batch. Mechanics: `COPY` into a
-per-transaction UNLOGGED/TEMP staging table → one set-based **arbiter CTE** mirroring
-the single-row write — an `INSERT INTO geoid_registry (geoid, place_id,
-collection_id, geom_hash) SELECT …, geoid_geom_hash_default(geom) FROM staging
-ON CONFLICT ON CONSTRAINT uq_geoid_registry_geom_hash DO NOTHING RETURNING …` whose
-returned rows drive the `INSERT INTO place SELECT … FROM staging` (place rows written
-only for arbiter winners) → one incumbent-resolution query against `geoid_registry`
-for the conflicted rows → build the report. The registry UNIQUE still enforces global
-dedup and the `place_after_insert` trigger still appends `change_log`, so dedup,
-provenance, and audit all hold. Finally **populates the `ingest_batch_id` column**
-(`place`, declared in 0001 but never yet written) for traceability.
+`POST /processes/bulk-ingest/execution` (no `Prefer`) takes a GeoJSON
+FeatureCollection in `inputs.items` (cap `GEOID_BULK_MAX_FEATURES`, default 10k — a
+write bound **errors 413**, never truncates) and returns **HTTP 200** with an
+`IngestionReport{ collection, batch_id, place_set_uri, total, accepted_count,
+rejected_count, accepted[{row_no, geoid, uri, collection, external_id}],
+rejected[{row_no, reason, detail, constraint, incumbent_geoid, external_id}] }` —
+per-row partial success, so one bad geometry or duplicate never fails the batch, and
+each reject's `reason` maps 1:1 to the single-row 4xx (`schema_invalid` /
+`geometry_invalid` 422, `external_id_conflict` / `geometry_conflict` /
+`geometry_conflict_in_batch` 409). Mechanics: per-row `PlaceCreate` validation →
+asyncpg `copy_records_to_table` (text/jsonb — **never** binary COPY) into a
+`CREATE TEMP TABLE … ON COMMIT DROP` staging table → classify-and-DELETE every
+per-row abort risk (invalid geometry, in-batch + existing `external_id` dups,
+in-batch geometry twins) **before** the set-based insert → one set-based **arbiter
+CTE** mirroring the single-row write — `INSERT INTO geoid_registry (…) SELECT …,
+geoid_geom_hash_default(ST_SetSRID(ST_GeomFromGeoJSON(geojson_text),4326)) FROM
+staging ON CONFLICT ON CONSTRAINT uq_geoid_registry_geom_hash DO NOTHING RETURNING …`
+whose returned rows drive the `INSERT INTO place (… ingest_batch_id) SELECT … FROM
+staging` (place rows written only for arbiter winners) → one incumbent-resolution
+query against `geoid_registry` for the conflicted rows → build the report from
+`RETURNING` + the anti-join (the wCTE single snapshot means you cannot re-query
+`place`). The registry UNIQUE still enforces global dedup and the `place_after_insert`
+trigger still appends `change_log`. Every row's `ingest_batch_id` (the place-set id,
+declared in `0001`) is now populated.
 
 **Ingest — Tier 2 (async, file-based — the millions/billions path).**
-`POST /collections/{collection_id}/ingest-jobs` takes a reference to an uploaded
-GeoJSON/Parquet blob (existing `BlobStore`/GCS), returns `202` + `job_id`;
-`GET /ingest-jobs/{job_id}` returns status + the `IngestionReport`. A new
-`geoid ingest-worker` CLI entrypoint claims jobs with `SELECT … FOR UPDATE SKIP
-LOCKED` (no double-claim, no new infrastructure), streams the blob, `COPY`s into
-staging, and runs the same set-based dedup pass. This is where billion-scale
-throughput comes from (`COPY` ≫ per-row `INSERT`).
+`POST /processes/bulk-ingest/execution` with `Prefer: respond-async` (RFC 7240)
+commits an `ingest_job` row, best-effort triggers the worker, and returns **HTTP 201
++ `Location: /jobs/{jobID}`** (OGC 18-062r2 Req 34: async is **201**, not 202). The
+source is `inputs.items` either by value (inline FeatureCollection) or by reference
+(`{"href": "<blob key>"}`, fetched via the `BlobStore`/GCS seam). Poll
+`GET /jobs/{jobID}` (OGC `StatusInfo`, status enum `accepted|running|successful|
+failed|dismissed`), fetch `GET /jobs/{jobID}/results` (the `IngestionReport`), cancel
+`DELETE /jobs/{jobID}` (`/conf/dismiss`). An optional `subscriber` element gives an
+OGC `/conf/callback` machine push; an optional `notifyEmail` plus
+`GEOID_NOTIFY_BACKEND=graph` sends an at-most-once completion email (MS Graph
+`sendMail`, guarded by `notified_at`). A client `Idempotency-Key` is a UNIQUE on the
+job row — a replay returns the existing job (200), so a lost 201 never double-loads.
+The `geoid ingest-worker` CLI **drains** the queue with `SELECT … FOR UPDATE SKIP
+LOCKED`, streaming the blob in `GEOID_INGEST_CHUNK_SIZE` chunks (one txn per chunk:
+unit-of-retry = unit-of-atomicity), running the same set-based dedup pass.
 
-**Fetch / export (second priority).** Keyset paging to retire OFFSET (ADR-010);
-Parquet/Arrow content negotiation on `/bulk` for analytical consumers (snapshots via
-`storage/gcs.py`, read by DuckDB off-primary); approximate `numberMatched` for huge
-collections (ADR-011).
+**Fetch / export.** `bulk-export` is a second OGC process (async-only — a large
+export must not stream inline under Cloud Run's 60-minute request cap):
+`POST /processes/bulk-export/execution` (`Prefer: respond-async`) writes the whole
+collection to one GeoJSON object in storage and returns an `ExportResult` whose `href`
+is a **GCS V4 signed URL** (≤7-day, capped by `GEOID_EXPORT_SIGNED_URL_TTL_SECONDS`) —
+a stable file URI on the local backend. The small public stream
+`GET /collections/{id}/bulk` stays, now content-negotiating `application/geo+json-seq`
+(RFC 8142) and trimming coordinates to 7 decimals (matched to the 1e-7 dedup grid).
+GeoParquet (1.1.0 / OGC 24-013) and FlatGeobuf are a **deferred** opt-in `format` on
+this same async path (lazy `pyogrio`/GDAL in the worker). Still deferred from §5/§7:
+keyset paging to retire OFFSET (ADR-010); DuckDB-off-primary Parquet snapshots
+(ADR-008); approximate `numberMatched` (ADR-011).
 
-A new migration (`0004_ingest_jobs`) adds an `ingest_job` table that is
-**operational / status-mutable** — deliberately *not* under the immutability
-triggers, the same posture as `dedup_recipe_stamp` (0003). Per-job staging tables
-are created TEMP/UNLOGGED in the worker transaction (no persistent DDL).
+Migration `0004_ingest_jobs` adds the `ingest_job` table — **operational /
+status-mutable**, deliberately *not* under the immutability triggers (a CHECK pins the
+status enum instead; same posture as `dedup_recipe_stamp` in `0003`), **no FK to
+`place`** (Citus posture) — plus the `place(ingest_batch_id)` index so set-membership
+filters don't full-scan. Per-job staging is TEMP `ON COMMIT DROP` in the worker
+transaction (no persistent DDL).
 
 ---
 

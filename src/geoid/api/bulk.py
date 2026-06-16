@@ -1,8 +1,18 @@
 """DPG down-payment — one public GeoJSON bulk-export route (1.3 seam).
 
-Streams a collection as a GeoJSON FeatureCollection so the open base data is
-copyable with a single GET (a Digital Public Good requirement). Full permissioned
-bulk download + place-set URIs come in milestone 1.3.
+Streams a collection as GeoJSON so the open base data is copyable with a single
+GET (a Digital Public Good requirement). Two output shapes are content-negotiated
+on ``Accept``: a single ``application/geo+json`` FeatureCollection (default), or an
+``application/geo+json-seq`` GeoJSON Text Sequence (RFC 8142 — one RS-delimited
+Feature per record, friendlier to line-oriented stream consumers).
+
+Session lifecycle: the streaming generator opens and owns its OWN session via
+``get_sessionmaker()`` rather than the request-scoped ``get_session`` dependency.
+``get_session`` commits and closes when the handler returns — i.e. *before*
+StreamingResponse iterates the cursor — so a server-side cursor read inside the
+body would run on a closed session. The collection 404 is resolved up front in a
+short-lived session so the client still gets a real 404 (not a 200 with an empty
+stream).
 """
 
 from __future__ import annotations
@@ -10,50 +20,52 @@ from __future__ import annotations
 import json
 import uuid
 from collections.abc import AsyncIterator
-from datetime import datetime
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from geoid.db import get_session
+from geoid.db import get_session, get_sessionmaker
 from geoid.repositories import collection_repo, place_repo
 from geoid.services.exceptions import CollectionNotFoundError
+from geoid.services.ogc_service import export_feature
 
 router = APIRouter(tags=["bulk"])
 
-
-def _export_feature(row: dict) -> dict:
-    provenance = dict(row.get("provenance") or {})
-    submitted = dict(provenance.pop("submitted_properties", {}) or {})
-    created_at = row.get("created_at")
-    created_iso = created_at.isoformat() if isinstance(created_at, datetime) else created_at
-    return {
-        "type": "Feature",
-        "id": str(row["geoid"]),
-        "geometry": json.loads(row["geometry"]) if row.get("geometry") else None,
-        "properties": {
-            **submitted,
-            "geoid": str(row["geoid"]),
-            "external_id": row.get("external_id"),
-            "created_at": created_iso,
-        },
-    }
+_GEOJSON = "application/geo+json"
+_GEOJSON_SEQ = "application/geo+json-seq"
+# RFC 8142: each JSON text is preceded by RS (0x1e) and followed by LF.
+_RS = b"\x1e"
+_LF = b"\n"
 
 
-async def _stream_feature_collection(
-    session: AsyncSession, collection_id: uuid.UUID
-) -> AsyncIterator[bytes]:
-    yield b'{"type":"FeatureCollection","features":['
-    first = True
-    async for row in place_repo.iter_collection_geojson(session, collection_id):
-        chunk = json.dumps(_export_feature(row), separators=(",", ":"))
-        if first:
-            first = False
-        else:
-            yield b","
-        yield chunk.encode("utf-8")
-    yield b"]}"
+async def _stream_feature_collection(collection_id: uuid.UUID) -> AsyncIterator[bytes]:
+    """A single GeoJSON FeatureCollection, streamed over an owned session."""
+    sessionmaker = get_sessionmaker()
+    async with sessionmaker() as session:
+        yield b'{"type":"FeatureCollection","features":['
+        first = True
+        async for row in place_repo.iter_collection_geojson(session, collection_id):
+            chunk = json.dumps(export_feature(row), separators=(",", ":"))
+            if first:
+                first = False
+            else:
+                yield b","
+            yield chunk.encode("utf-8")
+        yield b"]}"
+
+
+async def _stream_geojson_seq(collection_id: uuid.UUID) -> AsyncIterator[bytes]:
+    """A GeoJSON Text Sequence (RFC 8142): RS + compact Feature + LF per record."""
+    sessionmaker = get_sessionmaker()
+    async with sessionmaker() as session:
+        async for row in place_repo.iter_collection_geojson(session, collection_id):
+            chunk = json.dumps(export_feature(row), separators=(",", ":")).encode("utf-8")
+            yield _RS + chunk + _LF
+
+
+def _wants_seq(request: Request) -> bool:
+    return _GEOJSON_SEQ in request.headers.get("accept", "").lower()
 
 
 @router.get(
@@ -61,14 +73,27 @@ async def _stream_feature_collection(
     summary="Bulk export a collection as GeoJSON (public, DPG)",
 )
 async def bulk_export(
-    collection_id: str, session: AsyncSession = Depends(get_session)
+    collection_id: str,
+    request: Request,
+    session: AsyncSession = Depends(get_session),
 ) -> StreamingResponse:
+    # Resolve the 404 up front (short-lived dependency session); the streaming
+    # generators below open their own sessions so the cursor outlives this one.
     collection = await collection_repo.get_by_slug(session, collection_id)
     if collection is None:
         raise CollectionNotFoundError(collection_id)
+
+    if _wants_seq(request):
+        return StreamingResponse(
+            _stream_geojson_seq(collection.id),
+            media_type=_GEOJSON_SEQ,
+            headers={
+                "Content-Disposition": f'attachment; filename="{collection.slug}.geojsons"',
+            },
+        )
     return StreamingResponse(
-        _stream_feature_collection(session, collection.id),
-        media_type="application/geo+json",
+        _stream_feature_collection(collection.id),
+        media_type=_GEOJSON,
         headers={
             # Use the validated stored slug (not the raw path param) so header
             # safety does not depend on an invariant maintained elsewhere.

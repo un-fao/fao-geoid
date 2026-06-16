@@ -28,11 +28,14 @@ from geoid.models import (
 )
 from geoid.services.exceptions import (
     AnonymousWriteForbiddenError,
+    BulkLimitExceededError,
     CatalogNotFoundError,
     CollectionNotFoundError,
     GeometryConflictError,
     GeometryInvalidError,
+    JobNotFoundError,
     PlaceNotFoundError,
+    ProcessNotFoundError,
 )
 
 # PostgreSQL SQLSTATEs we care about.
@@ -72,6 +75,18 @@ def register_exception_handlers(app: FastAPI) -> None:
     @app.exception_handler(PlaceNotFoundError)
     async def _place_not_found(_: Request, exc: PlaceNotFoundError) -> JSONResponse:
         return _error(status.HTTP_404_NOT_FOUND, str(exc))
+
+    @app.exception_handler(ProcessNotFoundError)
+    async def _process_not_found(_: Request, exc: ProcessNotFoundError) -> JSONResponse:
+        return _error(status.HTTP_404_NOT_FOUND, str(exc), process=exc.process_id)
+
+    @app.exception_handler(JobNotFoundError)
+    async def _job_not_found(_: Request, exc: JobNotFoundError) -> JSONResponse:
+        return _error(status.HTTP_404_NOT_FOUND, str(exc), job=exc.job_id)
+
+    @app.exception_handler(BulkLimitExceededError)
+    async def _bulk_limit_exceeded(_: Request, exc: BulkLimitExceededError) -> JSONResponse:
+        return _error(status.HTTP_413_CONTENT_TOO_LARGE, str(exc), count=exc.count, limit=exc.limit)
 
     @app.exception_handler(GeometryInvalidError)
     async def _geometry_invalid(_: Request, exc: GeometryInvalidError) -> JSONResponse:
