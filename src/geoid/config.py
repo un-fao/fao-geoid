@@ -120,6 +120,63 @@ class Settings(DatabaseSettings):
         ),
     )
 
+    # --- Bulk ingest (milestone 1.3) ---------------------------------------
+    bulk_max_features: int = Field(
+        default=10_000,
+        ge=1,
+        description=(
+            "Hard cap on the number of features accepted in one bulk-ingest "
+            "FeatureCollection. A write bound MUST error (413), never silently "
+            "truncate — exceeding it rejects the whole request."
+        ),
+    )
+    ingest_chunk_size: int = Field(
+        default=2_000,
+        ge=1,
+        description=(
+            "Async worker chunk size: features processed per transaction "
+            "(unit-of-retry = unit-of-atomicity). TEMP staging vanishes on abort "
+            "and re-run converges (ON CONFLICT DO NOTHING is idempotent)."
+        ),
+    )
+    ingest_drain_limit: int = Field(
+        default=100,
+        ge=1,
+        description="Max jobs a single worker invocation claims per drain (SKIP LOCKED).",
+    )
+    export_signed_url_ttl_seconds: int = Field(
+        default=604_800,
+        ge=60,
+        le=604_800,
+        description="TTL for a bulk-export download URL. 604800s = 7d, the GCS V4 max.",
+    )
+    # --- Cloud Run Job trigger for the async worker (best-effort jobs.run) --
+    # All optional: unset (e.g. on-prem / tests) -> the trigger is a no-op and the
+    # durable queue is drained by the Scheduler fallback or a manual worker run.
+    ingest_job_name: str | None = Field(
+        default=None, description="Cloud Run Job name to trigger (jobs.run)."
+    )
+    ingest_job_region: str | None = Field(default=None, description="Region of the ingest Job.")
+    ingest_job_project: str | None = Field(
+        default=None, description="GCP project of the ingest Job (defaults to ADC project)."
+    )
+
+    # --- Completion notification (Notifier seam) ---------------------------
+    # Email is a SECONDARY push convenience — pull-polling GET /jobs/{id} is the
+    # contract. "graph" sends via MS Graph sendMail (app-only OAuth, HTTPS/443),
+    # future-proof vs M365 Basic-auth SMTP (deprecates end-2026). "none" ships the
+    # rest without the org dependency (Entra app reg + Mail.Send consent + mailbox).
+    notify_backend: Literal["none", "graph"] = Field(default="none")
+    graph_tenant_id: str | None = Field(default=None)
+    graph_client_id: str | None = Field(default=None)
+    graph_client_secret: str | None = Field(default=None)
+    graph_sender: str | None = Field(
+        default=None, description="Mailbox/identity sendMail posts as (users/{sender}/sendMail)."
+    )
+    graph_suppress_send: bool = Field(
+        default=False, description="Build the message but skip the HTTP send (tests / dry-run)."
+    )
+
     # --- Read paging guard rails -------------------------------------------
     default_limit: int = Field(default=100, ge=1)
     max_limit: int = Field(default=10_000, ge=1)
