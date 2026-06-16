@@ -29,3 +29,11 @@ class BlobStore(Protocol):
     def url_for(self, key: str) -> str:
         """Return a stable reference (file URI or gs:// / https:// URL) for ``key``."""
         ...
+
+    async def signed_url(self, key: str, *, expires_seconds: int) -> str:
+        """A time-limited download URL for ``key``.
+
+        GCS returns a V4 signed URL (≤7-day); the local store cannot sign and
+        returns a stable file URI instead (the caller treats it as the reference).
+        """
+        ...

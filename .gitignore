@@ -109,3 +109,6 @@ services/dwh-upload-trigger-cf/common/
 
 # Local data
 *.sqlite3
+
+# Local object-store root (LocalFSStore default; bulk-export/by-reference test blobs)
+_blobstore/

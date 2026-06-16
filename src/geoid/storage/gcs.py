@@ -59,3 +59,11 @@ class GCSStore:
 
     def url_for(self, key: str) -> str:
         return f"gs://{self._path(key)}"
+
+    async def signed_url(self, key: str, *, expires_seconds: int) -> str:
+        # V4 signed URL (gcsfs caps expiry at GCS's 7-day maximum). Runtime SA needs
+        # the iam.serviceAccountTokenCreator role to sign without a private key.
+        fs = self._filesystem()
+        return await anyio.to_thread.run_sync(
+            lambda: fs.sign(self._path(key), expiration=expires_seconds)
+        )

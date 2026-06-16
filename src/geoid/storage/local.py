@@ -36,3 +36,8 @@ class LocalFSStore:
 
     def url_for(self, key: str) -> str:
         return self._path(key).resolve().as_uri()
+
+    async def signed_url(self, key: str, *, expires_seconds: int) -> str:
+        # The local store cannot sign; the file URI IS the reference (on-prem the
+        # blob is served by the deployment's own static/file handler).
+        return self.url_for(key)
