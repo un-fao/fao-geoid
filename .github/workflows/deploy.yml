@@ -51,6 +51,7 @@ jobs:
       - name: Resolve image reference
         run: |
           echo "IMAGE=${REGION}-docker.pkg.dev/${PROJECT}/${ARTIFACT_REGISTRY}/${SERVICE}:${{ github.sha }}" >> "$GITHUB_ENV"
+          echo "INGEST_WORKER_JOB=${SERVICE}-ingest-worker" >> "$GITHUB_ENV"
 
       # cloudbuild.yaml enables BuildKit; the `--tag` shortcut can't (see that file).
       - name: Build and push image (Cloud Build)
@@ -82,6 +83,30 @@ jobs:
             --project "$PROJECT" \
             --wait
 
+      # The async bulk-ingest worker: same image, args ["ingest-worker"]. Created
+      # (not executed) here; it is triggered on demand by the web service (jobs.run)
+      # and by a Cloud Scheduler fallback drain. It builds full Settings, so it needs
+      # a real GEOID_ADMIN_TOKEN (the dev-token guard) and the storage config to read
+      # by-reference blobs. Email stays off until the org dependency exists: once the
+      # Entra app reg + Mail.Send consent + sender mailbox are ready, add
+      # GEOID_NOTIFY_BACKEND=graph + GEOID_GRAPH_* env and the worker-only
+      # geoid-graph-client-secret mount here (see local-docs/DEPLOYMENT.md).
+      - name: Deploy ingest worker Job (Cloud Run)
+        run: |
+          gcloud run jobs deploy "$INGEST_WORKER_JOB" \
+            --image "$IMAGE" \
+            --region "$REGION" \
+            --project "$PROJECT" \
+            --service-account "$RUN_SERVICE_ACCOUNT" \
+            --set-cloudsql-instances "$CLOUD_SQL_INSTANCE" \
+            --network "${{ vars.VPC_NETWORK }}" \
+            --subnet "${{ vars.VPC_SUBNET }}" \
+            --vpc-egress private-ranges-only \
+            --set-secrets GEOID_DATABASE_URL=geoid-database-url:latest,GEOID_ADMIN_TOKEN=geoid-admin-token:latest \
+            --set-env-vars "^@^GEOID_ENVIRONMENT=review@GEOID_BASE_URL=${{ vars.GEOID_BASE_URL }}@GEOID_ROOT_PATH=${{ vars.GEOID_ROOT_PATH }}@GEOID_INSTANCE_ID=${{ vars.GEOID_INSTANCE_ID }}@GEOID_PUBLIC_COLLECTION=${{ vars.GEOID_PUBLIC_COLLECTION }}@GEOID_VOCAB=${{ vars.GEOID_VOCAB }}@GEOID_STORAGE_BACKEND=${{ vars.GEOID_STORAGE_BACKEND }}@GEOID_STORAGE_GCS_BUCKET=${{ vars.GEOID_STORAGE_GCS_BUCKET }}" \
+            --command geoid --args ingest-worker \
+            --max-retries 1
+
       - name: Deploy service (Cloud Run)
         run: |
           gcloud run deploy "$SERVICE" \
@@ -94,13 +119,56 @@ jobs:
             --subnet "${{ vars.VPC_SUBNET }}" \
             --vpc-egress private-ranges-only \
             --set-secrets GEOID_DATABASE_URL=geoid-database-url:latest,GEOID_ADMIN_TOKEN=geoid-admin-token:latest \
-            --set-env-vars "^@^GEOID_ENVIRONMENT=review@GEOID_BASE_URL=${{ vars.GEOID_BASE_URL }}@GEOID_ROOT_PATH=${{ vars.GEOID_ROOT_PATH }}@GEOID_INSTANCE_ID=${{ vars.GEOID_INSTANCE_ID }}@GEOID_PUBLIC_COLLECTION=${{ vars.GEOID_PUBLIC_COLLECTION }}@GEOID_VOCAB=${{ vars.GEOID_VOCAB }}@GEOID_STORAGE_BACKEND=${{ vars.GEOID_STORAGE_BACKEND }}@GEOID_STORAGE_GCS_BUCKET=${{ vars.GEOID_STORAGE_GCS_BUCKET }}" \
+            --set-env-vars "^@^GEOID_ENVIRONMENT=review@GEOID_BASE_URL=${{ vars.GEOID_BASE_URL }}@GEOID_ROOT_PATH=${{ vars.GEOID_ROOT_PATH }}@GEOID_INSTANCE_ID=${{ vars.GEOID_INSTANCE_ID }}@GEOID_PUBLIC_COLLECTION=${{ vars.GEOID_PUBLIC_COLLECTION }}@GEOID_VOCAB=${{ vars.GEOID_VOCAB }}@GEOID_STORAGE_BACKEND=${{ vars.GEOID_STORAGE_BACKEND }}@GEOID_STORAGE_GCS_BUCKET=${{ vars.GEOID_STORAGE_GCS_BUCKET }}@GEOID_INGEST_JOB_NAME=${INGEST_WORKER_JOB}@GEOID_INGEST_JOB_REGION=${REGION}@GEOID_INGEST_JOB_PROJECT=${PROJECT}" \
             --port 8000 \
             --allow-unauthenticated \
             --execution-environment gen2 \
             --min-instances 0 \
             --max-instances 4 \
             --cpu-boost
+
+      # Plain-drain trigger: the web service (and the Scheduler fallback) only need
+      # roles/run.invoker on the Job — no overrides, so no run.jobs.runWithOverrides.
+      - name: Allow service + scheduler to trigger the worker Job (run.invoker)
+        run: |
+          SCHEDULER_SA="${{ vars.SCHEDULER_SERVICE_ACCOUNT }}"
+          SCHEDULER_SA="${SCHEDULER_SA:-$RUN_SERVICE_ACCOUNT}"
+          for SA in "$RUN_SERVICE_ACCOUNT" "$SCHEDULER_SA"; do
+            gcloud run jobs add-iam-policy-binding "$INGEST_WORKER_JOB" \
+              --member="serviceAccount:${SA}" \
+              --role="roles/run.invoker" \
+              --region "$REGION" --project "$PROJECT"
+          done
+
+      # bulk-export writes a GeoJSON object to GCS and returns a V4 SIGNED URL. Signing
+      # without a private key needs the worker's runtime SA to impersonate itself
+      # (roles/iam.serviceAccountTokenCreator → the signBlob API). Harmless until
+      # bulk-export is used; required the moment it is.
+      - name: Allow the worker SA to sign bulk-export download URLs (V4 signBlob)
+        run: |
+          gcloud iam service-accounts add-iam-policy-binding "$RUN_SERVICE_ACCOUNT" \
+            --member="serviceAccount:${RUN_SERVICE_ACCOUNT}" \
+            --role="roles/iam.serviceAccountTokenCreator" \
+            --project "$PROJECT"
+
+      # Durable-queue fallback: the trigger is a fallible, quota-gated API call, so a
+      # low-frequency Scheduler run drains anything whose trigger was dropped (the
+      # durable ingest_job row makes a missed trigger a delay, not a loss). v2 run API.
+      - name: Cloud Scheduler fallback drain (every 20 min)
+        run: |
+          SCHEDULER_SA="${{ vars.SCHEDULER_SERVICE_ACCOUNT }}"
+          SCHEDULER_SA="${SCHEDULER_SA:-$RUN_SERVICE_ACCOUNT}"
+          URI="https://${REGION}-run.googleapis.com/v2/projects/${PROJECT}/locations/${REGION}/jobs/${INGEST_WORKER_JOB}:run"
+          gcloud scheduler jobs create http "${INGEST_WORKER_JOB}-drain" \
+            --location "$REGION" --project "$PROJECT" \
+            --schedule "*/20 * * * *" \
+            --uri "$URI" --http-method POST \
+            --oauth-service-account-email "$SCHEDULER_SA" \
+          || gcloud scheduler jobs update http "${INGEST_WORKER_JOB}-drain" \
+            --location "$REGION" --project "$PROJECT" \
+            --schedule "*/20 * * * *" \
+            --uri "$URI" --http-method POST \
+            --oauth-service-account-email "$SCHEDULER_SA"
 
       - name: Install uv (for the smoke script)
         uses: astral-sh/setup-uv@v8.2.0

@@ -825,6 +825,7 @@ dependencies = [
     { name = "geoalchemy2" },
     { name = "geojson-pydantic" },
     { name = "gunicorn" },
+    { name = "httpx" },
     { name = "lark" },
     { name = "pydantic" },
     { name = "pydantic-settings" },
@@ -839,6 +840,7 @@ dependencies = [
 [package.optional-dependencies]
 gcs = [
     { name = "gcsfs" },
+    { name = "google-cloud-run" },
 ]
 oidc = [
     { name = "authlib" },
@@ -866,7 +868,9 @@ requires-dist = [
     { name = "gcsfs", marker = "extra == 'gcs'", specifier = ">=2024.9" },
     { name = "geoalchemy2", specifier = ">=0.16" },
     { name = "geojson-pydantic", specifier = ">=2.1,<2.2" },
+    { name = "google-cloud-run", marker = "extra == 'gcs'", specifier = ">=0.10" },
     { name = "gunicorn", specifier = ">=23.0" },
+    { name = "httpx", specifier = ">=0.27" },
     { name = "httpx", marker = "extra == 'oidc'", specifier = ">=0.27" },
     { name = "lark", specifier = ">=1.1" },
     { name = "pydantic", specifier = ">=2.9" },
@@ -963,6 +967,23 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/a8/dd/1eef226e470369b26824a505c34482c0b493bc35fe8e0c6b003b5feca21a/google_cloud_core-2.6.0.tar.gz", hash = "sha256:e76149739f90fac1fc6757c09f47eaccb3145b54adbd7759b0f7c4b235f46c83", size = 36001, upload-time = "2026-05-07T08:04:04.124Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/84/4a/98da8930ab109c73d9a5d13782a9ebb81ea8c111f6d534a567b71d23e52b/google_cloud_core-2.6.0-py3-none-any.whl", hash = "sha256:6d63ac8e5eca6d9e4319d0a1e2265fadcd7f1049904378caecfa01cf52dd869e", size = 29390, upload-time = "2026-05-07T08:02:34.672Z" },
+]
+
+[[package]]
+name = "google-cloud-run"
+version = "0.16.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "google-api-core", extra = ["grpc"] },
+    { name = "google-auth" },
+    { name = "grpc-google-iam-v1" },
+    { name = "grpcio" },
+    { name = "proto-plus" },
+    { name = "protobuf" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/b7/89/dcaf0dc97e39b41e446456ceb60657ab025de79cfccd39cbd739d1a9849e/google_cloud_run-0.16.0.tar.gz", hash = "sha256:d52cf4e6ad3702ae48caccf6abcab543afee6f61c2a6ec753cc62a31e5b629f1", size = 514452, upload-time = "2026-03-26T22:17:05.589Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/fa/c7/46153dc13713b5e4276d86f28ff4563332f9e4bae5ebc83abc5bfd994801/google_cloud_run-0.16.0-py3-none-any.whl", hash = "sha256:d7d2dd7307130fde2a0ce27e96d580dd23b7b2d973b6484b94d902e6b2618860", size = 459112, upload-time = "2026-03-26T22:16:00.018Z" },
 ]
 
 [[package]]
