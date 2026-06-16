@@ -115,7 +115,10 @@ async def test_graph_notifier_retries_then_gives_up_without_raising(monkeypatch)
     assert attempts["n"] == 3  # 3 tries then give up
 
 
-async def test_post_callback_posts_report_to_success_uri():
+async def test_post_callback_posts_report_to_success_uri(monkeypatch):
+    # The SSRF guard resolves the host; pin it to a public address so the mocked
+    # transport (not real DNS) decides the outcome.
+    monkeypatch.setattr("geoid.notify.callback._resolve_addresses", lambda host: ["8.8.8.8"])
     seen = {}
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -138,6 +141,26 @@ async def test_post_callback_posts_report_to_success_uri():
 
 async def test_post_callback_no_subscriber_is_noop():
     assert await post_callback(None, report={}, status="successful") is False
+
+
+async def test_post_callback_rejects_non_https():
+    # Refused before any network access — http can't be sent.
+    sent = await post_callback(
+        {"successUri": "http://cb.example/ok"}, report={}, status="successful"
+    )
+    assert sent is False
+
+
+async def test_post_callback_rejects_internal_host():
+    # An https URI resolving to a link-local address (e.g. the cloud metadata
+    # endpoint) is the SSRF target the guard exists to block; no client is
+    # injected, so reaching the transport would raise.
+    sent = await post_callback(
+        {"successUri": "https://169.254.169.254/latest/meta-data/"},
+        report={},
+        status="successful",
+    )
+    assert sent is False
 
 
 async def _noop():
