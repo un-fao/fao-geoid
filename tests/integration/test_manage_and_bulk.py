@@ -99,3 +99,50 @@ async def test_bulk_export_returns_geojson_feature_collection(
 
 async def test_bulk_export_unknown_collection_404(client):
     assert (await client.get("/collections/ghost/bulk")).status_code == 404
+
+
+async def test_bulk_export_geojson_seq(client, unit_square_ccw, other_square):
+    import json
+
+    await client.post("/collections/public/items", json=unit_square_ccw)
+    await client.post("/collections/public/items", json=other_square)
+
+    resp = await client.get(
+        "/collections/public/bulk", headers={"Accept": "application/geo+json-seq"}
+    )
+    assert resp.status_code == 200
+    assert resp.headers["content-type"].startswith("application/geo+json-seq")
+    # RFC 8142: records are RS-delimited; each is a standalone Feature.
+    records = [r for r in resp.content.split(b"\x1e") if r.strip()]
+    assert len(records) == 2
+    for rec in records:
+        feature = json.loads(rec)
+        assert feature["type"] == "Feature"
+        assert feature["geometry"]["type"] == "Polygon"
+
+
+async def test_bulk_export_trims_coordinate_precision(client):
+    # A 9-decimal input is trimmed to 7 decimals (~1cm, matched to the dedup grid)
+    # on export — RFC 7946 §11.2.
+    feature = {
+        "type": "Feature",
+        "geometry": {
+            "type": "Polygon",
+            "coordinates": [
+                [
+                    [10.123456789, 10.0],
+                    [11.0, 10.0],
+                    [11.0, 11.0],
+                    [10.123456789, 11.0],
+                    [10.123456789, 10.0],
+                ]
+            ],
+        },
+        "properties": {},
+    }
+    assert (await client.post("/collections/public/items", json=feature)).status_code == 201
+
+    resp = await client.get("/collections/public/bulk")
+    assert resp.status_code == 200
+    assert "10.1234568" in resp.text
+    assert "10.123456789" not in resp.text
