@@ -144,7 +144,10 @@ jobs:
       # without a private key needs the worker's runtime SA to impersonate itself
       # (roles/iam.serviceAccountTokenCreator → the signBlob API). Harmless until
       # bulk-export is used; required the moment it is.
+      # TODO(bulk-export): best-effort until the deployer SA has iam.serviceAccounts.setIamPolicy
+      # on the runtime SA (or this binding is applied once by hand). See DEPLOYMENT.md §4a.
       - name: Allow the worker SA to sign bulk-export download URLs (V4 signBlob)
+        continue-on-error: true
         run: |
           gcloud iam service-accounts add-iam-policy-binding "$RUN_SERVICE_ACCOUNT" \
             --member="serviceAccount:${RUN_SERVICE_ACCOUNT}" \
@@ -154,7 +157,10 @@ jobs:
       # Durable-queue fallback: the trigger is a fallible, quota-gated API call, so a
       # low-frequency Scheduler run drains anything whose trigger was dropped (the
       # durable ingest_job row makes a missed trigger a delay, not a loss). v2 run API.
+      # TODO(bulk): best-effort until the deployer SA can actAs the scheduler SA and
+      # create Cloud Scheduler jobs (or this is set up once by hand). See DEPLOYMENT.md §4a.
       - name: Cloud Scheduler fallback drain (every 20 min)
+        continue-on-error: true
         run: |
           SCHEDULER_SA="${{ vars.SCHEDULER_SERVICE_ACCOUNT }}"
           SCHEDULER_SA="${SCHEDULER_SA:-$RUN_SERVICE_ACCOUNT}"
