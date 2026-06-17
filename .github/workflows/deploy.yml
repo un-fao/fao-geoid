@@ -26,7 +26,22 @@ permissions:
   contents: read
 
 jobs:
+  # Gate: the deploy job must NOT start unless pre-commit is green. Mirrors the
+  # standalone pre-commit.yml so a lint/format failure blocks the deploy at the
+  # source instead of shipping it (a same-run `needs:` is the reliable cross-check —
+  # the separate pre-commit workflow can't gate this one).
+  lint:
+    name: pre-commit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version-file: .python-version
+      - uses: pre-commit/action@v3.0.1
+
   deploy:
+    needs: lint
     runs-on: ubuntu-latest
     environment: review
     env:
