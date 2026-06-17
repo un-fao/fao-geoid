@@ -102,9 +102,7 @@ def decode_geometry(raw: dict | str) -> dict:
         return _REGISTRY[GeometryFormat.GEOJSON].decode(raw)
     if isinstance(raw, str):
         return _REGISTRY[GeometryFormat.WKT].decode(raw)
-    raise ValueError(
-        f"geometry must be a GeoJSON object or a WKT string, got {type(raw).__name__}"
-    )
+    raise ValueError(f"geometry must be a GeoJSON object or a WKT string, got {type(raw).__name__}")
 
 
 def encode_geometry(geojson_geometry: dict, fmt: GeometryFormat) -> str | dict:

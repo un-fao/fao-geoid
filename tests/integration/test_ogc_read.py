@@ -253,6 +253,37 @@ async def test_unknown_f_param_returns_400(client, unit_square_ccw):
     assert resp.status_code == 400
 
 
+async def test_get_item_as_wkt_via_format_alias(client, unit_square_ccw):
+    # `format` is the friendly alias for `f`; both are accepted.
+    geoid = (await client.post("/collections/public/items", json=unit_square_ccw)).json()["geoid"]
+    resp = await client.get(f"/collections/public/items/{geoid}?format=wkt")
+    assert resp.status_code == 200
+    assert resp.headers["content-type"].startswith("text/plain")
+    assert resp.text.startswith("POLYGON")
+
+
+async def test_format_alias_wins_over_f(client, unit_square_ccw):
+    # When both are given, `format` takes precedence.
+    geoid = (await client.post("/collections/public/items", json=unit_square_ccw)).json()["geoid"]
+    resp = await client.get(f"/collections/public/items/{geoid}?format=geojson&f=wkt")
+    assert resp.status_code == 200
+    assert resp.headers["content-type"].startswith("application/geo+json")
+
+
+async def test_unknown_format_param_returns_400(client, unit_square_ccw):
+    geoid = (await client.post("/collections/public/items", json=unit_square_ccw)).json()["geoid"]
+    resp = await client.get(f"/collections/public/items/{geoid}?format=xml")
+    assert resp.status_code == 400
+
+
+async def test_format_param_advertised_in_openapi_not_f(client):
+    spec = (await client.get("/openapi.json")).json()
+    params = spec["paths"]["/collections/{collection_id}/items/{geoid}"]["get"]["parameters"]
+    names = {p["name"] for p in params}
+    assert "format" in names  # the friendly, advertised name
+    assert "f" not in names  # the OGC alias is accepted but hidden from the schema
+
+
 async def test_default_read_is_unchanged_geojson_with_wkt_alternate(client, unit_square_ccw):
     geoid = (await client.post("/collections/public/items", json=unit_square_ccw)).json()["geoid"]
     resp = await client.get(f"/collections/public/items/{geoid}")

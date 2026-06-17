@@ -13,6 +13,7 @@ pytestmark = pytest.mark.unit
 def _wkt_feature(wkt: str, **extra) -> dict:
     return {"type": "Feature", "geometry": wkt, "properties": {}, **extra}
 
+
 _VALID_POLYGON = {
     "type": "Feature",
     "geometry": {
