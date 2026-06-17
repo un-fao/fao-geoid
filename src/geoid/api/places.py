@@ -9,14 +9,15 @@ from __future__ import annotations
 
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from fastapi import APIRouter, Depends, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from geoid.api.format_param import output_format
 from geoid.api.responses import GeoJSONResponse, WKTResponse, feature_response
 from geoid.config import Settings, get_settings
 from geoid.db import get_session
 from geoid.deps import Principal, require_principal
-from geoid.domain.geometry_format import negotiate_format
+from geoid.domain.geometry_format import GeometryFormat
 from geoid.repositories import collection_repo, place_repo
 from geoid.schemas.ogc import FeatureModel
 from geoid.schemas.place import GeometryConflictResponse, MintResponse, PlaceCreate
@@ -71,17 +72,10 @@ async def create_item(
 )
 async def resolve_geoid(
     geoid: uuid.UUID,
-    request: Request,
-    f: str | None = Query(
-        default=None, description="Output format: geojson (default) or wkt (vendor extension)"
-    ),
+    fmt: GeometryFormat = Depends(output_format),
     session: AsyncSession = Depends(get_session),
     settings: Settings = Depends(get_settings),
 ) -> FeatureModel | WKTResponse:
-    try:
-        fmt = negotiate_format(f, request.headers.get("accept"))
-    except ValueError as exc:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
     row = await place_repo.get_by_geoid(session, geoid)
     if row is None:
         raise PlaceNotFoundError(str(geoid))
@@ -99,17 +93,10 @@ async def resolve_geoid(
 async def resolve_by_external_id(
     collection_id: str,
     external_id: str,
-    request: Request,
-    f: str | None = Query(
-        default=None, description="Output format: geojson (default) or wkt (vendor extension)"
-    ),
+    fmt: GeometryFormat = Depends(output_format),
     session: AsyncSession = Depends(get_session),
     settings: Settings = Depends(get_settings),
 ) -> FeatureModel | WKTResponse:
-    try:
-        fmt = negotiate_format(f, request.headers.get("accept"))
-    except ValueError as exc:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
     collection = await collection_repo.get_by_slug(session, collection_id)
     if collection is None:
         raise CollectionNotFoundError(collection_id)

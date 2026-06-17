@@ -21,12 +21,13 @@ import json
 import uuid
 from collections.abc import AsyncIterator
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from fastapi import APIRouter, Depends, Request
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from geoid.api.format_param import output_format
 from geoid.db import get_session, get_sessionmaker
-from geoid.domain.geometry_format import GeometryFormat, encode_geometry, negotiate_format
+from geoid.domain.geometry_format import GeometryFormat, encode_geometry
 from geoid.repositories import collection_repo, place_repo
 from geoid.services.exceptions import CollectionNotFoundError
 from geoid.services.ogc_service import export_feature
@@ -93,16 +94,11 @@ def _wants_seq(request: Request) -> bool:
 async def bulk_export(
     collection_id: str,
     request: Request,
-    f: str | None = Query(
-        default=None, description="Output format: geojson (default) or wkt (vendor extension)"
-    ),
+    fmt: GeometryFormat = Depends(output_format),
     session: AsyncSession = Depends(get_session),
 ) -> StreamingResponse:
-    # ?f= overrides Accept; an unknown ?f= 400s before any I/O.
-    try:
-        fmt = negotiate_format(f, request.headers.get("accept"))
-    except ValueError as exc:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
+    # ?format=/?f= override Accept (an unknown value already 400'd in the
+    # output_format dependency); for GeoJSON, Accept still picks seq vs collection.
 
     # Resolve the 404 up front (short-lived dependency session); the streaming
     # generators below open their own sessions so the cursor outlives this one.

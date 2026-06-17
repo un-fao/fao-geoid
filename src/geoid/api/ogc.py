@@ -15,6 +15,7 @@ from sqlalchemy.exc import IntegrityError, OperationalError, StatementError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from geoid.api.cql import build_cql_clause
+from geoid.api.format_param import output_format
 from geoid.api.paging import enforce_max_offset
 from geoid.api.responses import (
     GeoJSONResponse,
@@ -24,7 +25,7 @@ from geoid.api.responses import (
 )
 from geoid.config import Settings, get_settings
 from geoid.db import get_session
-from geoid.domain.geometry_format import GeometryFormat, negotiate_format
+from geoid.domain.geometry_format import GeometryFormat
 from geoid.repositories import collection_repo, place_repo
 from geoid.schemas.ogc import (
     CollectionDesc,
@@ -108,20 +109,14 @@ async def get_items(
     ),
     limit: int | None = Query(default=None, ge=1),
     offset: int = Query(default=0, ge=0),
-    f: str | None = Query(
-        default=None, description="Output format: geojson (default) or wkt (vendor extension)"
-    ),
+    fmt: GeometryFormat = Depends(output_format),
     session: AsyncSession = Depends(get_session),
     settings: Settings = Depends(get_settings),
 ) -> FeatureCollectionModel | WKTResponse:
     # Pure parameter validation precedes any I/O (and matches manage.py's order,
-    # so cap-vs-404 precedence is identical on both surfaces). An unknown ?f= 400s
-    # here, before collection resolution, like the offset cap.
+    # so cap-vs-404 precedence is identical on both surfaces). An unknown ?format=/?f=
+    # already 400'd in the output_format dependency, before this body runs.
     enforce_max_offset(offset, settings)
-    try:
-        fmt = negotiate_format(f, request.headers.get("accept"))
-    except ValueError as exc:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
     effective_limit = min(limit or settings.default_limit, settings.max_limit)
     cql_clause = build_cql_clause(cql_filter, filter_lang, place_repo.queryable_field_mapping())
 
@@ -152,7 +147,7 @@ async def get_items(
     preserved = [
         (k, v)
         for k, v in request.query_params.multi_items()
-        if k not in ("limit", "offset", "f")
+        if k not in ("limit", "offset", "f", "format")
     ]
     fc = ogc_service.build_feature_collection(
         settings,
@@ -209,17 +204,10 @@ async def get_queryables(
 async def get_item(
     collection_id: str,
     geoid: uuid.UUID,
-    request: Request,
-    f: str | None = Query(
-        default=None, description="Output format: geojson (default) or wkt (vendor extension)"
-    ),
+    fmt: GeometryFormat = Depends(output_format),
     session: AsyncSession = Depends(get_session),
     settings: Settings = Depends(get_settings),
 ) -> FeatureModel | WKTResponse:
-    try:
-        fmt = negotiate_format(f, request.headers.get("accept"))
-    except ValueError as exc:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
     collection = await collection_repo.get_by_slug(session, collection_id)
     if collection is None:
         raise CollectionNotFoundError(collection_id)
