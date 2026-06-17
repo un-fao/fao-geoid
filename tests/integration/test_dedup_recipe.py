@@ -86,11 +86,10 @@ async def test_hash_is_sha256_32_bytes(session):
 async def test_dedup_is_global_across_collections(client, admin_headers, unit_square_ccw):
     # The SAME geometry in two different collections → 409 carrying the first
     # geoid: one geometry → one geoid across the whole catalog (Remi's ruling).
-    await client.post("/manage/catalogs", headers=admin_headers, json={"slug": "wsa"})
     await client.post(
-        "/manage/catalogs/wsa/collections",
+        "/manage/collections",
         headers=admin_headers,
-        json={"slug": "cola", "writable_anon": True},
+        json={"id": "cola", "writable_anon": True},
     )
     a = await client.post("/collections/public/items", json=unit_square_ccw)
     b = await client.post("/collections/cola/items", json=unit_square_ccw)

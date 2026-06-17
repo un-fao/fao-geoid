@@ -8,44 +8,62 @@ pytestmark = pytest.mark.integration
 
 
 async def test_manage_requires_admin_token(client):
-    assert (await client.get("/manage/catalogs")).status_code == 401
+    assert (await client.get("/manage/collections")).status_code == 401
 
 
 async def test_manage_rejects_wrong_token(client):
-    resp = await client.get("/manage/catalogs", headers={"Authorization": "Bearer nope"})
+    resp = await client.get("/manage/collections", headers={"Authorization": "Bearer nope"})
     assert resp.status_code == 401
 
 
-async def test_create_catalog_and_collection(client, admin_headers):
-    ws = await client.post(
-        "/manage/catalogs", headers=admin_headers, json={"slug": "forestry", "title": "Forestry"}
-    )
-    assert ws.status_code == 201
-
+async def test_create_collection(client, admin_headers):
     coll = await client.post(
-        "/manage/catalogs/forestry/collections",
+        "/manage/collections",
         headers=admin_headers,
-        json={"slug": "eudr", "title": "EUDR plots", "writable_anon": False},
+        json={"id": "eudr", "title": "EUDR plots", "writable_anon": False},
     )
     assert coll.status_code == 201
-    assert coll.json()["slug"] == "eudr"
-    assert coll.json()["writable_anon"] is False
+    body = coll.json()
+    assert body["id"] == "eudr"
+    assert body["writable_anon"] is False
+    # The catalog tier is hidden: no internal UUID, no catalog_id in the response.
+    assert "catalog_id" not in body
+    assert set(body) == {"id", "title", "writable_anon", "metadata"}
 
 
-async def test_create_collection_in_unknown_catalog_404(client, admin_headers):
-    resp = await client.post(
-        "/manage/catalogs/ghost/collections", headers=admin_headers, json={"slug": "c"}
+async def test_create_collection_id_round_trips_in_url(client, admin_headers):
+    # The 404 trap is gone: the response `id` is exactly the URL segment.
+    coll = await client.post(
+        "/manage/collections", headers=admin_headers, json={"id": "land-parcels"}
     )
+    collection_id = coll.json()["id"]
+    assert (await client.get(f"/collections/{collection_id}/items")).status_code == 200
+
+
+async def test_duplicate_collection_id_returns_409(client, admin_headers):
+    first = await client.post("/manage/collections", headers=admin_headers, json={"id": "dupe"})
+    assert first.status_code == 201
+    second = await client.post("/manage/collections", headers=admin_headers, json={"id": "dupe"})
+    assert second.status_code == 409
+    body = second.json()
+    assert body["message"] == "collection id already exists"
+    assert body["constraint"] == "uq_collection_catalog_slug"
+
+
+async def test_catalog_routes_are_gone(client, admin_headers):
+    # Catalog is bootstrap-created and internal; there is no /manage/catalogs surface.
+    assert (await client.get("/manage/catalogs", headers=admin_headers)).status_code == 404
+    resp = await client.post("/manage/catalogs", headers=admin_headers, json={"id": "x"})
     assert resp.status_code == 404
 
 
-async def test_list_collections_in_catalog_slice(client, admin_headers):
-    await client.post("/manage/catalogs", headers=admin_headers, json={"slug": "ws"})
-    await client.post("/manage/catalogs/ws/collections", headers=admin_headers, json={"slug": "a"})
-    await client.post("/manage/catalogs/ws/collections", headers=admin_headers, json={"slug": "b"})
+async def test_list_collections_slice(client, admin_headers):
+    await client.post("/manage/collections", headers=admin_headers, json={"id": "a"})
+    await client.post("/manage/collections", headers=admin_headers, json={"id": "b"})
 
-    body = (await client.get("/manage/catalogs/ws/collections", headers=admin_headers)).json()
-    assert {c["slug"] for c in body} == {"a", "b"}
+    body = (await client.get("/manage/collections", headers=admin_headers)).json()
+    # The bootstrap `public` collection is always present alongside the two created here.
+    assert {c["id"] for c in body} == {"public", "a", "b"}
 
 
 async def test_list_item_ids_slice(client, admin_headers, unit_square_ccw, other_square):
@@ -70,12 +88,11 @@ async def test_collection_create_rejects_any_dedup_grid(client, admin_headers):
     # Geometry dedup is global: there is no per-collection grid, so the key is
     # rejected outright (422) rather than silently ignored — silently dropping
     # it would let an admin believe an override took.
-    await client.post("/manage/catalogs", headers=admin_headers, json={"slug": "wsv"})
     for bad in ("10m", None, True, [0.0001], 0, -1e-7, 1e-7, 1e-6):
         resp = await client.post(
-            "/manage/catalogs/wsv/collections",
+            "/manage/collections",
             headers=admin_headers,
-            json={"slug": "v", "metadata": {"dedup_grid": bad}},
+            json={"id": "v", "metadata": {"dedup_grid": bad}},
         )
         assert resp.status_code == 422, f"dedup_grid={bad!r} was accepted"
 

@@ -23,13 +23,13 @@ from geoid.domain.identifiers import derive_identifiers
 from geoid.models import (
     PK_GEOID_REGISTRY,
     PK_PLACE,
+    UQ_COLLECTION_CATALOG_SLUG,
     UQ_GEOID_REGISTRY_GEOM_HASH,
     UQ_PLACE_EXTERNAL_ID,
 )
 from geoid.services.exceptions import (
     AnonymousWriteForbiddenError,
     BulkLimitExceededError,
-    CatalogNotFoundError,
     CollectionNotFoundError,
     GeometryConflictError,
     GeometryInvalidError,
@@ -67,10 +67,6 @@ def register_exception_handlers(app: FastAPI) -> None:
     @app.exception_handler(CollectionNotFoundError)
     async def _collection_not_found(_: Request, exc: CollectionNotFoundError) -> JSONResponse:
         return _error(status.HTTP_404_NOT_FOUND, str(exc), collection=exc.slug)
-
-    @app.exception_handler(CatalogNotFoundError)
-    async def _catalog_not_found(_: Request, exc: CatalogNotFoundError) -> JSONResponse:
-        return _error(status.HTTP_404_NOT_FOUND, str(exc), catalog=exc.slug)
 
     @app.exception_handler(PlaceNotFoundError)
     async def _place_not_found(_: Request, exc: PlaceNotFoundError) -> JSONResponse:
@@ -121,6 +117,12 @@ def register_exception_handlers(app: FastAPI) -> None:
     async def _integrity(_: Request, exc: IntegrityError) -> JSONResponse:
         constraint, sqlstate = _pg_fields(exc)
 
+        if constraint == UQ_COLLECTION_CATALOG_SLUG:
+            return _error(
+                status.HTTP_409_CONFLICT,
+                "collection id already exists",
+                constraint=constraint,
+            )
         if constraint == UQ_PLACE_EXTERNAL_ID:
             return _error(
                 status.HTTP_409_CONFLICT,

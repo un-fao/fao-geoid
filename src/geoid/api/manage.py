@@ -1,4 +1,8 @@
-"""Management router (admin-gated) — catalog/collection create + the 1.2 listing slice."""
+"""Management router (admin-gated) — collection create + the 1.2 listing slice.
+
+Collections are the flat entry point: the catalog tier is a single internal row
+(bootstrap-created) and is not exposed here.
+"""
 
 from __future__ import annotations
 
@@ -10,61 +14,28 @@ from geoid.config import Settings, get_settings
 from geoid.db import get_session
 from geoid.deps import require_admin
 from geoid.repositories import catalog_repo, collection_repo
-from geoid.schemas.collection import (
-    CatalogCreate,
-    CatalogOut,
-    CollectionCreate,
-    CollectionOut,
-    ItemIdList,
-)
+from geoid.schemas.collection import CollectionCreate, CollectionOut, ItemIdList
 from geoid.services import listing_service
-from geoid.services.exceptions import CatalogNotFoundError
 
 router = APIRouter(prefix="/manage", tags=["manage"], dependencies=[Depends(require_admin)])
 
 
-@router.post("/catalogs", response_model=CatalogOut, status_code=status.HTTP_201_CREATED)
-async def create_catalog(
-    body: CatalogCreate, session: AsyncSession = Depends(get_session)
-) -> CatalogOut:
-    catalog = await catalog_repo.create(
-        session, slug=body.slug, title=body.title, metadata=body.metadata
-    )
-    return CatalogOut(
-        id=str(catalog.id), slug=catalog.slug, title=catalog.title, metadata=catalog.meta
-    )
-
-
-@router.get("/catalogs", response_model=list[CatalogOut])
-async def list_catalogs(session: AsyncSession = Depends(get_session)) -> list[CatalogOut]:
-    return await listing_service.list_catalogs(session)
-
-
-@router.post(
-    "/catalogs/{catalog_slug}/collections",
-    response_model=CollectionOut,
-    status_code=status.HTTP_201_CREATED,
-)
+@router.post("/collections", response_model=CollectionOut, status_code=status.HTTP_201_CREATED)
 async def create_collection(
-    catalog_slug: str,
     body: CollectionCreate,
     session: AsyncSession = Depends(get_session),
 ) -> CollectionOut:
-    catalog = await catalog_repo.get_by_slug(session, catalog_slug)
-    if catalog is None:
-        raise CatalogNotFoundError(catalog_slug)
+    catalog = await catalog_repo.get_or_create_default(session)
     collection = await collection_repo.create(
         session,
         catalog_id=catalog.id,
-        slug=body.slug,
+        slug=body.id,
         title=body.title,
         writable_anon=body.writable_anon,
         metadata=body.metadata,
     )
     return CollectionOut(
-        id=str(collection.id),
-        catalog_id=str(collection.catalog_id),
-        slug=collection.slug,
+        id=collection.slug,
         title=collection.title,
         writable_anon=collection.writable_anon,
         metadata=collection.meta,
@@ -72,14 +43,12 @@ async def create_collection(
 
 
 @router.get(
-    "/catalogs/{catalog_slug}/collections",
+    "/collections",
     response_model=list[CollectionOut],
-    summary="List collections in a catalog (1.2)",
+    summary="List collections (1.2)",
 )
-async def list_collections_in_catalog(
-    catalog_slug: str, session: AsyncSession = Depends(get_session)
-) -> list[CollectionOut]:
-    return await listing_service.list_collections_in_catalog(session, catalog_slug)
+async def list_collections(session: AsyncSession = Depends(get_session)) -> list[CollectionOut]:
+    return await listing_service.list_collections(session)
 
 
 @router.get(

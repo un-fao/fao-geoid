@@ -30,6 +30,7 @@ __all__ = [
 ]
 
 # Constraint names referenced by error mapping (single source of truth).
+UQ_COLLECTION_CATALOG_SLUG = "uq_collection_catalog_slug"
 UQ_PLACE_EXTERNAL_ID = "uq_place_collection_external_id"
 # The global geometry-dedup UNIQUE lives on geoid_registry (sharding-ready), not place.
 UQ_GEOID_REGISTRY_GEOM_HASH = "uq_geoid_registry_geom_hash"
