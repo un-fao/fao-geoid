@@ -38,15 +38,6 @@ async def list_all(session: AsyncSession) -> list[Collection]:
     return list((await session.execute(stmt)).scalars().all())
 
 
-async def list_by_catalog(session: AsyncSession, catalog_id: uuid.UUID) -> list[Collection]:
-    stmt = (
-        select(Collection)
-        .where(Collection.catalog_id == catalog_id)
-        .order_by(Collection.slug.asc())
-    )
-    return list((await session.execute(stmt)).scalars().all())
-
-
 async def create(
     session: AsyncSession,
     *,

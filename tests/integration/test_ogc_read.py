@@ -185,11 +185,10 @@ async def test_get_item_by_geoid(client, unit_square_ccw):
 
 async def test_get_item_wrong_collection_returns_404(client, admin_headers, unit_square_ccw):
     geoid = (await client.post("/collections/public/items", json=unit_square_ccw)).json()["geoid"]
-    await client.post("/manage/catalogs", headers=admin_headers, json={"slug": "wsx"})
     await client.post(
-        "/manage/catalogs/wsx/collections",
+        "/manage/collections",
         headers=admin_headers,
-        json={"slug": "elsewhere"},
+        json={"id": "elsewhere"},
     )
     resp = await client.get(f"/collections/elsewhere/items/{geoid}")
     assert resp.status_code == 404

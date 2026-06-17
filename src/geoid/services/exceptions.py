@@ -15,12 +15,6 @@ class CollectionNotFoundError(GeoidServiceError):
         super().__init__(f"collection not found: {slug!r}")
 
 
-class CatalogNotFoundError(GeoidServiceError):
-    def __init__(self, slug: str) -> None:
-        self.slug = slug
-        super().__init__(f"catalog not found: {slug!r}")
-
-
 class GeometryInvalidError(GeoidServiceError):
     """Geometry failed RFC 7946 / ST_IsValid (we reject, never repair)."""
 

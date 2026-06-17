@@ -5,34 +5,22 @@ from __future__ import annotations
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from geoid.models import Collection
-from geoid.repositories import catalog_repo, collection_repo, place_repo
-from geoid.schemas.collection import CatalogOut, CollectionOut, ItemIdList
-from geoid.services.exceptions import CatalogNotFoundError, CollectionNotFoundError
+from geoid.repositories import collection_repo, place_repo
+from geoid.schemas.collection import CollectionOut, ItemIdList
+from geoid.services.exceptions import CollectionNotFoundError
 
 
 def _collection_out(collection: Collection) -> CollectionOut:
     return CollectionOut(
-        id=str(collection.id),
-        catalog_id=str(collection.catalog_id),
-        slug=collection.slug,
+        id=collection.slug,
         title=collection.title,
         writable_anon=collection.writable_anon,
         metadata=collection.meta,
     )
 
 
-async def list_catalogs(session: AsyncSession) -> list[CatalogOut]:
-    catalogs = await catalog_repo.list_all(session)
-    return [CatalogOut(id=str(c.id), slug=c.slug, title=c.title, metadata=c.meta) for c in catalogs]
-
-
-async def list_collections_in_catalog(
-    session: AsyncSession, catalog_slug: str
-) -> list[CollectionOut]:
-    catalog = await catalog_repo.get_by_slug(session, catalog_slug)
-    if catalog is None:
-        raise CatalogNotFoundError(catalog_slug)
-    collections = await collection_repo.list_by_catalog(session, catalog.id)
+async def list_collections(session: AsyncSession) -> list[CollectionOut]:
+    collections = await collection_repo.list_all(session)
     return [_collection_out(c) for c in collections]
 
 

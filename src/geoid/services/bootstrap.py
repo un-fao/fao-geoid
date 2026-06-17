@@ -13,16 +13,10 @@ from geoid.config import Settings
 from geoid.models import Collection
 from geoid.repositories import catalog_repo, collection_repo
 
-_DEFAULT_CATALOG_SLUG = "default"
-
 
 async def ensure_public_collection(session: AsyncSession, settings: Settings) -> Collection:
     """Create the default catalog + reserved public collection if missing."""
-    catalog = await catalog_repo.get_by_slug(session, _DEFAULT_CATALOG_SLUG)
-    if catalog is None:
-        catalog = await catalog_repo.create(
-            session, slug=_DEFAULT_CATALOG_SLUG, title="Default catalog"
-        )
+    catalog = await catalog_repo.get_or_create_default(session)
 
     collection = await collection_repo.get_by_slug(
         session, settings.public_collection, catalog_id=catalog.id
