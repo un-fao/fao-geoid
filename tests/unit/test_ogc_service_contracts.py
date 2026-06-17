@@ -3,6 +3,9 @@ advertised queryables set is pinned to the live CQL2 field mapping."""
 
 from __future__ import annotations
 
+import uuid
+from datetime import UTC, datetime
+
 import pytest
 
 from geoid.config import Settings
@@ -10,6 +13,17 @@ from geoid.repositories.place_repo import queryable_field_mapping
 from geoid.services import ogc_service
 
 pytestmark = pytest.mark.unit
+
+_GEOJSON_TEXT = '{"type":"Polygon","coordinates":[[[10,10],[11,10],[11,11],[10,11],[10,10]]]}'
+
+
+def _item_row() -> dict:
+    return {
+        "geoid": uuid.UUID("019e0000-0000-7000-8000-000000000001"),
+        "geometry": _GEOJSON_TEXT,
+        "created_at": datetime(2026, 6, 17, tzinfo=UTC),
+        "collection_slug": "public",
+    }
 
 
 @pytest.fixture(autouse=True)
@@ -58,3 +72,54 @@ def test_advertised_queryables_exactly_match_the_live_filter_mapping():
     # The queryables document is a CLOSED schema (additionalProperties: false)
     # and unknown names 400 — so advertised and working sets must be identical.
     assert set(ogc_service._QUERYABLE_SCHEMAS) == set(queryable_field_mapping())
+
+
+# --- WKT vendor-extension advertising + encoding -----------------------------
+
+
+def _wkt_alternate(links) -> object | None:
+    return next(
+        (link for link in links if link.rel == "alternate" and link.type == "text/plain"), None
+    )
+
+
+def test_build_feature_advertises_wkt_alternate():
+    feature = ogc_service.build_feature(_settings(), _item_row())
+    alt = _wkt_alternate(feature.links)
+    assert alt is not None
+    assert alt.href.endswith("/items/019e0000-0000-7000-8000-000000000001?f=wkt")
+    assert alt.title == "WKT"
+
+
+def test_build_feature_collection_advertises_wkt_alternate():
+    fc = ogc_service.build_feature_collection(
+        _settings(),
+        rows=[],
+        collection="public",
+        number_matched=0,
+        limit=10,
+        offset=0,
+        query_suffix="",
+    )
+    alt = _wkt_alternate(fc.links)
+    assert alt is not None
+    assert "f=wkt" in alt.href
+
+
+def test_feature_to_wkt_returns_valid_wkt():
+    feature = ogc_service.build_feature(_settings(), _item_row())
+    assert ogc_service.feature_to_wkt(feature) == "POLYGON ((10 10, 11 10, 11 11, 10 11, 10 10))"
+
+
+def test_feature_to_wkt_handles_null_geometry():
+    feature = ogc_service.build_feature(_settings(), {**_item_row(), "geometry": None})
+    assert ogc_service.feature_to_wkt(feature) == ""
+
+
+def test_wkt_is_not_a_conformance_class():
+    # WKT is a documented vendor extension — it adds NO conformance class and does
+    # not touch /conformance. Pin the set so nobody silently advertises it.
+    assert len(ogc_service.CONFORMANCE_CLASSES) == 14
+    joined = " ".join(ogc_service.CONFORMANCE_CLASSES).lower()
+    assert "wkt" not in joined
+    assert "text/plain" not in joined

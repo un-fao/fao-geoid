@@ -21,11 +21,12 @@ import json
 import uuid
 from collections.abc import AsyncIterator
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from geoid.db import get_session, get_sessionmaker
+from geoid.domain.geometry_format import GeometryFormat, encode_geometry, negotiate_format
 from geoid.repositories import collection_repo, place_repo
 from geoid.services.exceptions import CollectionNotFoundError
 from geoid.services.ogc_service import export_feature
@@ -34,6 +35,7 @@ router = APIRouter(tags=["bulk"])
 
 _GEOJSON = "application/geo+json"
 _GEOJSON_SEQ = "application/geo+json-seq"
+_WKT = "text/plain"
 # RFC 8142: each JSON text is preceded by RS (0x1e) and followed by LF.
 _RS = b"\x1e"
 _LF = b"\n"
@@ -64,6 +66,22 @@ async def _stream_geojson_seq(collection_id: uuid.UUID) -> AsyncIterator[bytes]:
             yield _RS + chunk + _LF
 
 
+async def _stream_wkt(collection_id: uuid.UUID) -> AsyncIterator[bytes]:
+    """Newline-delimited WKT, one geometry per row (null geometry skipped).
+
+    WKT is a vendor-extension encoding; geometry is the open base data, so no
+    HATEOAS/properties — just one bare WKT line per place.
+    """
+    sessionmaker = get_sessionmaker()
+    async with sessionmaker() as session:
+        async for row in place_repo.iter_collection_geojson(session, collection_id):
+            geojson = row.get("geometry")
+            if not geojson:
+                continue
+            wkt = encode_geometry(json.loads(geojson), GeometryFormat.WKT)
+            yield wkt.encode("utf-8") + _LF
+
+
 def _wants_seq(request: Request) -> bool:
     return _GEOJSON_SEQ in request.headers.get("accept", "").lower()
 
@@ -75,13 +93,31 @@ def _wants_seq(request: Request) -> bool:
 async def bulk_export(
     collection_id: str,
     request: Request,
+    f: str | None = Query(
+        default=None, description="Output format: geojson (default) or wkt (vendor extension)"
+    ),
     session: AsyncSession = Depends(get_session),
 ) -> StreamingResponse:
+    # ?f= overrides Accept; an unknown ?f= 400s before any I/O.
+    try:
+        fmt = negotiate_format(f, request.headers.get("accept"))
+    except ValueError as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
+
     # Resolve the 404 up front (short-lived dependency session); the streaming
     # generators below open their own sessions so the cursor outlives this one.
     collection = await collection_repo.get_by_slug(session, collection_id)
     if collection is None:
         raise CollectionNotFoundError(collection_id)
+
+    if fmt is GeometryFormat.WKT:
+        return StreamingResponse(
+            _stream_wkt(collection.id),
+            media_type=_WKT,
+            headers={
+                "Content-Disposition": f'attachment; filename="{collection.slug}.wkt"',
+            },
+        )
 
     if _wants_seq(request):
         return StreamingResponse(

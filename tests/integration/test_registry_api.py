@@ -119,6 +119,66 @@ async def test_resolve_unknown_geoid_returns_404(client):
     assert resp.status_code == 404
 
 
+# --- WKT string geometry input (vendor extension) ---------------------------
+
+_WKT_SQUARE = "POLYGON((10 10,11 10,11 11,10 11,10 10))"
+
+
+def _wkt_feature(wkt: str, *, external_id: str | None = None) -> dict:
+    feature = {"type": "Feature", "geometry": wkt, "properties": {}}
+    if external_id is not None:
+        feature["id"] = external_id
+    return feature
+
+
+async def test_post_wkt_string_mints_geoid(client):
+    resp = await client.post("/collections/public/items", json=_wkt_feature(_WKT_SQUARE))
+    assert resp.status_code == 201
+    geoid = resp.json()["geoid"]
+    feat = (await client.get(f"/geoid/{geoid}")).json()
+    assert feat["geometry"]["type"] == "Polygon"
+
+
+async def test_wkt_then_equivalent_geojson_is_409_same_incumbent(client, unit_square_ccw):
+    # Parity: a WKT polygon and the equivalent GeoJSON polygon are the SAME geometry
+    # -> one geoid. The second POST 409s with the first's geoid as incumbent.
+    first = await client.post("/collections/public/items", json=_wkt_feature(_WKT_SQUARE))
+    assert first.status_code == 201
+    incumbent = first.json()["geoid"]
+
+    second = await client.post("/collections/public/items", json=unit_square_ccw)
+    assert second.status_code == 409
+    assert second.json()["geoid"] == incumbent
+
+
+async def test_geojson_then_equivalent_wkt_is_409_same_incumbent(client, unit_square_ccw):
+    # Reverse order: GeoJSON first, then the equivalent WKT — same parity, same geoid.
+    first = await client.post("/collections/public/items", json=unit_square_ccw)
+    assert first.status_code == 201
+    incumbent = first.json()["geoid"]
+
+    second = await client.post("/collections/public/items", json=_wkt_feature(_WKT_SQUARE))
+    assert second.status_code == 409
+    assert second.json()["geoid"] == incumbent
+
+
+async def test_post_invalid_wkt_returns_422(client):
+    resp = await client.post("/collections/public/items", json=_wkt_feature("POLYGON((10 10,11"))
+    assert resp.status_code == 422
+
+
+async def test_post_ewkt_returns_422(client):
+    resp = await client.post(
+        "/collections/public/items", json=_wkt_feature(f"SRID=4326;{_WKT_SQUARE}")
+    )
+    assert resp.status_code == 422
+
+
+async def test_post_wkt_point_returns_422(client):
+    resp = await client.post("/collections/public/items", json=_wkt_feature("POINT(1 2)"))
+    assert resp.status_code == 422
+
+
 async def test_anonymous_write_to_managed_collection_forbidden(
     client, admin_headers, unit_square_ccw
 ):

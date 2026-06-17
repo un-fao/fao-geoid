@@ -10,6 +10,8 @@ from geojson_pydantic import Feature
 from geojson_pydantic.geometries import MultiPolygon, Polygon
 from pydantic import BaseModel, Field, model_validator
 
+from geoid.domain.geometry_format import decode_geometry
+
 # Polygon-first: points/lines are rejected at the schema boundary (422).
 PolygonalGeometry = Polygon | MultiPolygon
 
@@ -37,9 +39,26 @@ class PlaceCreate(Feature[PolygonalGeometry, dict[str, Any] | None]):
 
     The optional GeoJSON ``id`` member becomes the place's ``external_id``
     (collection-scoped unique). Geometry must be a Polygon/MultiPolygon in
-    EPSG:4326. ``properties`` is accepted verbatim into provenance/jsonb; the
-    recognised ``_whisp`` block is mirrored as client provenance.
+    EPSG:4326, supplied either as a GeoJSON geometry object **or** as a WKT string
+    (a vendor extension; both single create and per-feature bulk). ``properties`` is
+    accepted verbatim into provenance/jsonb; the recognised ``_whisp`` block is
+    mirrored as client provenance.
     """
+
+    @model_validator(mode="before")
+    @classmethod
+    def _decode_string_geometry(cls, data: Any) -> Any:
+        """Accept a WKT-string ``geometry`` member by decoding it to GeoJSON first.
+
+        Runs BEFORE geojson-pydantic parses, so a WKT polygon converges on the exact
+        same geometry dict a GeoJSON polygon would — identical geometry text →
+        identical ``geoid_geom_hash_default`` → same geoid / 409. A GeoJSON object
+        ``geometry`` is left untouched (the default path is byte-for-byte unchanged);
+        a malformed WKT string raises ``ValueError`` → ``ValidationError`` → 422.
+        """
+        if isinstance(data, dict) and isinstance(data.get("geometry"), str):
+            return {**data, "geometry": decode_geometry(data["geometry"])}
+        return data
 
     @model_validator(mode="after")
     def _validate_lonlat_bounds(self) -> PlaceCreate:

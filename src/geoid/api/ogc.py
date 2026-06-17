@@ -16,9 +16,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from geoid.api.cql import build_cql_clause
 from geoid.api.paging import enforce_max_offset
-from geoid.api.responses import GeoJSONResponse, SchemaJSONResponse
+from geoid.api.responses import (
+    GeoJSONResponse,
+    SchemaJSONResponse,
+    WKTResponse,
+    feature_response,
+)
 from geoid.config import Settings, get_settings
 from geoid.db import get_session
+from geoid.domain.geometry_format import GeometryFormat, negotiate_format
 from geoid.repositories import collection_repo, place_repo
 from geoid.schemas.ogc import (
     CollectionDesc,
@@ -89,6 +95,7 @@ async def describe_collection(
     response_model=FeatureCollectionModel,
     response_class=GeoJSONResponse,
     summary="Features (CQL2 + paging)",
+    responses={200: {"content": {"text/plain": {}}}},
 )
 async def get_items(
     collection_id: str,
@@ -101,12 +108,20 @@ async def get_items(
     ),
     limit: int | None = Query(default=None, ge=1),
     offset: int = Query(default=0, ge=0),
+    f: str | None = Query(
+        default=None, description="Output format: geojson (default) or wkt (vendor extension)"
+    ),
     session: AsyncSession = Depends(get_session),
     settings: Settings = Depends(get_settings),
-) -> FeatureCollectionModel:
+) -> FeatureCollectionModel | WKTResponse:
     # Pure parameter validation precedes any I/O (and matches manage.py's order,
-    # so cap-vs-404 precedence is identical on both surfaces).
+    # so cap-vs-404 precedence is identical on both surfaces). An unknown ?f= 400s
+    # here, before collection resolution, like the offset cap.
     enforce_max_offset(offset, settings)
+    try:
+        fmt = negotiate_format(f, request.headers.get("accept"))
+    except ValueError as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
     effective_limit = min(limit or settings.default_limit, settings.max_limit)
     cql_clause = build_cql_clause(cql_filter, filter_lang, place_repo.queryable_field_mapping())
 
@@ -135,9 +150,11 @@ async def get_items(
         ) from exc
 
     preserved = [
-        (k, v) for k, v in request.query_params.multi_items() if k not in ("limit", "offset")
+        (k, v)
+        for k, v in request.query_params.multi_items()
+        if k not in ("limit", "offset", "f")
     ]
-    return ogc_service.build_feature_collection(
+    fc = ogc_service.build_feature_collection(
         settings,
         rows=rows,
         collection=collection_id,
@@ -146,6 +163,14 @@ async def get_items(
         offset=offset,
         query_suffix=urlencode(preserved),
     )
+    if fmt is GeometryFormat.WKT:
+        # Bare text/plain: paging + the GeoJSON alternate move to the Link header
+        # since the WKT body can't carry HATEOAS links.
+        return WKTResponse(
+            ogc_service.collection_to_wkt(fc),
+            headers={"Link": ogc_service.links_to_header(fc.links)},
+        )
+    return fc
 
 
 # Registered BEFORE the /items/{geoid} route below, or the literal segment
@@ -179,17 +204,27 @@ async def get_queryables(
     response_model=FeatureModel,
     response_class=GeoJSONResponse,
     summary="A single feature by geoid",
+    responses={200: {"content": {"text/plain": {}}}},
 )
 async def get_item(
     collection_id: str,
     geoid: uuid.UUID,
+    request: Request,
+    f: str | None = Query(
+        default=None, description="Output format: geojson (default) or wkt (vendor extension)"
+    ),
     session: AsyncSession = Depends(get_session),
     settings: Settings = Depends(get_settings),
-) -> FeatureModel:
+) -> FeatureModel | WKTResponse:
+    try:
+        fmt = negotiate_format(f, request.headers.get("accept"))
+    except ValueError as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
     collection = await collection_repo.get_by_slug(session, collection_id)
     if collection is None:
         raise CollectionNotFoundError(collection_id)
     row = await place_repo.get_by_geoid(session, geoid)
     if row is None or row["collection_slug"] != collection_id:
         raise PlaceNotFoundError(f"{collection_id}/{geoid}")
-    return ogc_service.build_feature(settings, row)
+    feature = ogc_service.build_feature(settings, row)
+    return feature_response(feature, fmt)

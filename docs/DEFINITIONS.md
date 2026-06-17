@@ -95,6 +95,11 @@ standard **OGC API – Processes**:
   small public export streams directly (`GET …/bulk`); a large or permissioned
   export runs as a job that produces a single file plus a **time-limited download
   link**.
+
+> **Geometry format.** GeoJSON is the default everywhere. As a documented **vendor
+> extension**, a geometry may also be *supplied* as a WKT string (single create and
+> per-feature bulk) and *returned* as WKT (`?f=wkt` or `Accept: text/plain`); a WKT
+> shape and its equivalent GeoJSON are the same geometry and mint the same geoid.
 - **Repeatable dataset loading (Asset Registry 1.0).** Loading an existing dataset
   is a documented, repeatable procedure built on the asynchronous by-reference
   ingest path, so a large external registry can be onboarded the same way every

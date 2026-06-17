@@ -138,6 +138,26 @@ async def test_bulk_export_geojson_seq(client, unit_square_ccw, other_square):
         assert feature["geometry"]["type"] == "Polygon"
 
 
+async def test_bulk_export_as_wkt(client, unit_square_ccw, other_square):
+    await client.post("/collections/public/items", json=unit_square_ccw)
+    await client.post("/collections/public/items", json=other_square)
+
+    resp = await client.get("/collections/public/bulk?f=wkt")
+    assert resp.status_code == 200
+    assert resp.headers["content-type"].startswith("text/plain")
+    lines = [line for line in resp.text.splitlines() if line.strip()]
+    assert len(lines) == 2
+    assert all(line.startswith("POLYGON") for line in lines)
+
+
+async def test_bulk_export_wkt_via_accept_header(client, unit_square_ccw):
+    await client.post("/collections/public/items", json=unit_square_ccw)
+    resp = await client.get("/collections/public/bulk", headers={"Accept": "text/plain"})
+    assert resp.status_code == 200
+    assert resp.headers["content-type"].startswith("text/plain")
+    assert resp.text.strip().startswith("POLYGON")
+
+
 async def test_bulk_export_trims_coordinate_precision(client):
     # A 9-decimal input is trimmed to 7 decimals (~1cm, matched to the dedup grid)
     # on export — RFC 7946 §11.2.

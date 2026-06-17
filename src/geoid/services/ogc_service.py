@@ -12,6 +12,7 @@ from datetime import UTC, datetime
 from typing import Any, TypedDict
 
 from geoid.config import Settings
+from geoid.domain.geometry_format import WKT_MEDIA_TYPE, GeometryFormat, encode_geometry
 from geoid.domain.identifiers import uri_for
 from geoid.schemas.ogc import (
     CollectionDesc,
@@ -191,14 +192,17 @@ def _feature_links(
     settings: Settings, *, geoid: uuid.UUID, collection: str, predecessor_id: uuid.UUID | None
 ) -> list[Link]:
     base = settings.base_url_clean
+    item_url = f"{base}/collections/{collection}/items/{geoid}"
     links = [
-        Link(href=f"{base}/collections/{collection}/items/{geoid}", rel="self", type=_GEOJSON),
+        Link(href=item_url, rel="self", type=_GEOJSON),
         Link(
             href=f"{base}/geoid/{geoid}",
             rel="alternate",
             type=_GEOJSON,
             title="Durable geoid resolver",
         ),
+        # WKT is a vendor-extension encoding, advertised per OGC alternate links.
+        Link(href=f"{item_url}?f=wkt", rel="alternate", type=WKT_MEDIA_TYPE, title="WKT"),
         Link(href=f"{base}/collections/{collection}", rel="collection", type=_JSON),
     ]
     if predecessor_id is not None:
@@ -305,9 +309,15 @@ def build_feature_collection(
     items_url = f"{base}/collections/{collection}/items"
     features = [build_feature(settings, _with_collection_slug(r, collection)) for r in rows]
 
+    self_qs = _paging_qs(limit, offset, query_suffix)
     links = [
+        Link(href=f"{items_url}?{self_qs}", rel="self", type=_GEOJSON),
+        # WKT alternate of this same page (vendor extension; bare text/plain).
         Link(
-            href=f"{items_url}?{_paging_qs(limit, offset, query_suffix)}", rel="self", type=_GEOJSON
+            href=f"{items_url}?{self_qs}&f=wkt",
+            rel="alternate",
+            type=WKT_MEDIA_TYPE,
+            title="WKT",
         ),
         Link(href=f"{base}/collections/{collection}", rel="collection", type=_JSON),
     ]
@@ -344,3 +354,43 @@ def build_feature_collection(
 def _paging_qs(limit: int, offset: int, query_suffix: str) -> str:
     qs = f"limit={limit}&offset={offset}"
     return f"{qs}&{query_suffix}" if query_suffix else qs
+
+
+# --- WKT vendor-extension shaping (kept in the service/domain seam) ----------
+
+
+def feature_to_wkt(feature: FeatureModel) -> str:
+    """One feature's geometry as a single WKT line (defensive on null geometry)."""
+    if feature.geometry is None:
+        return ""
+    return encode_geometry(feature.geometry, GeometryFormat.WKT)
+
+
+def collection_to_wkt(fc: FeatureCollectionModel) -> str:
+    """A feature collection as newline-delimited WKT, one geometry per line."""
+    return "\n".join(feature_to_wkt(f) for f in fc.features if f.geometry is not None)
+
+
+def _link_header_value(link: Link) -> str:
+    parts = [f"<{link.href}>", f'rel="{link.rel}"']
+    if link.type:
+        parts.append(f'type="{link.type}"')
+    if link.title:
+        parts.append(f'title="{link.title}"')
+    return "; ".join(parts)
+
+
+def links_to_header(links: list[Link]) -> str:
+    """Serialise links to an RFC 8288 ``Link`` header value.
+
+    A bare-WKT body can't carry HATEOAS links, so paging (self/next/prev) and the
+    GeoJSON alternate ride in the ``Link`` header instead (OGC ``/rec/core/link-header``).
+    """
+    return ", ".join(_link_header_value(link) for link in links)
+
+
+def feature_geojson_alternate_header(feature: FeatureModel) -> str:
+    """Reciprocal ``Link`` for a single bare-WKT item: its GeoJSON ``self`` href."""
+    self_link = next((link for link in feature.links if link.rel == "self"), None)
+    href = self_link.href if self_link is not None else ""
+    return f'<{href}>; rel="alternate"; type="{_GEOJSON}"'
