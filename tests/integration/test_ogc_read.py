@@ -197,3 +197,69 @@ async def test_get_item_wrong_collection_returns_404(client, admin_headers, unit
 async def test_get_item_bad_uuid_returns_422(client):
     resp = await client.get("/collections/public/items/not-a-uuid")
     assert resp.status_code == 422
+
+
+# --- WKT output (vendor extension) ------------------------------------------
+
+
+async def test_get_item_as_wkt_via_f_param(client, unit_square_ccw):
+    geoid = (await client.post("/collections/public/items", json=unit_square_ccw)).json()["geoid"]
+    resp = await client.get(f"/collections/public/items/{geoid}?f=wkt")
+    assert resp.status_code == 200
+    assert resp.headers["content-type"].startswith("text/plain")
+    assert resp.text.startswith("POLYGON")
+    # Reciprocal alternate: the bare-WKT body points back at its GeoJSON form.
+    link = resp.headers["link"]
+    assert 'rel="alternate"' in link
+    assert "application/geo+json" in link
+
+
+async def test_resolve_geoid_as_wkt_via_accept_header(client, unit_square_ccw):
+    geoid = (await client.post("/collections/public/items", json=unit_square_ccw)).json()["geoid"]
+    resp = await client.get(f"/geoid/{geoid}", headers={"Accept": "text/plain"})
+    assert resp.status_code == 200
+    assert resp.headers["content-type"].startswith("text/plain")
+    assert resp.text.startswith("POLYGON")
+
+
+async def test_items_collection_as_wkt_is_newline_delimited(client):
+    await _seed(client, 2)
+    resp = await client.get("/collections/public/items?f=wkt")
+    assert resp.status_code == 200
+    assert resp.headers["content-type"].startswith("text/plain")
+    lines = [line for line in resp.text.splitlines() if line.strip()]
+    assert len(lines) == 2
+    assert all(line.startswith("POLYGON") for line in lines)
+    # Paging/self + the GeoJSON alternate ride in the Link header (the body can't).
+    link = resp.headers["link"]
+    assert 'rel="self"' in link
+    assert "f=wkt" in link
+
+
+async def test_f_param_overrides_accept_header(client, unit_square_ccw):
+    # ?f=geojson must win over Accept: text/plain -> GeoJSON, not WKT.
+    geoid = (await client.post("/collections/public/items", json=unit_square_ccw)).json()["geoid"]
+    resp = await client.get(
+        f"/collections/public/items/{geoid}?f=geojson", headers={"Accept": "text/plain"}
+    )
+    assert resp.status_code == 200
+    assert resp.headers["content-type"].startswith("application/geo+json")
+    assert resp.json()["geometry"]["type"] == "Polygon"
+
+
+async def test_unknown_f_param_returns_400(client, unit_square_ccw):
+    geoid = (await client.post("/collections/public/items", json=unit_square_ccw)).json()["geoid"]
+    resp = await client.get(f"/collections/public/items/{geoid}?f=xml")
+    assert resp.status_code == 400
+
+
+async def test_default_read_is_unchanged_geojson_with_wkt_alternate(client, unit_square_ccw):
+    geoid = (await client.post("/collections/public/items", json=unit_square_ccw)).json()["geoid"]
+    resp = await client.get(f"/collections/public/items/{geoid}")
+    assert resp.status_code == 200
+    assert resp.headers["content-type"].startswith("application/geo+json")
+    body = resp.json()
+    assert body["geometry"]["type"] == "Polygon"
+    # The GeoJSON feature advertises the WKT alternate link.
+    alts = [link for link in body["links"] if link["rel"] == "alternate"]
+    assert any(link.get("type") == "text/plain" and "f=wkt" in link["href"] for link in alts)
