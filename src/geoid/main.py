@@ -19,17 +19,23 @@ logger = logging.getLogger("geoid")
 
 _DESCRIPTION = """\
 **GeoID** mints a globally unique, secure, **immutable** identifier (a *geoid*,
-UUIDv7) for every geospatial place, deduplicates by canonical geometry, tracks
-provenance, and accepts **anonymous contributions** — served over **OGC API
-Features**.
+UUIDv8) for every geospatial place, deduplicates by canonical geometry, tracks
+provenance — served over **OGC API Features**.
 
 * **Write / registry** — `POST /collections/{id}/items` → `{geoid, uri}`
 * **Bulk write** — `POST /collections/{id}/items/bulk` (a GeoJSON FeatureCollection,
   synchronous, partial success → a per-feature report)
 * **Resolve** — `GET /geoid/{uuid}`, `GET /collections/{id}/external/{external_id}`
-* **OGC API Features read** — landing, `/conformance`, `/collections`, items (CQL2 + paging)
 * **Health** — `GET /health` (DB connectivity probe)
 """
+
+
+_TAGS_METADATA = [
+    {"name": "health", "description": "App health check"},
+    {"name": "registry", "description": "Write and resolution endpoints"},
+    {"name": "manage", "description": "Admin-gated management endpoints"},
+    {"name": "ogc", "description": "OGC API Features read surface"},
+]
 
 
 @asynccontextmanager
@@ -55,11 +61,10 @@ def create_app() -> FastAPI:
         version=__version__,
         description=_DESCRIPTION,
         lifespan=lifespan,
-        # Behind a proxy sub-path (e.g. /geoid/v1) so Swagger/openapi.json resolve there;
-        # "" (default) leaves the app at root. The proxy strips the prefix before forwarding.
         root_path=settings.root_path,
         license_info={"name": "Apache-2.0", "url": "https://www.apache.org/licenses/LICENSE-2.0"},
         contact={"name": "FAO GeoID Team"},
+        openapi_tags=_TAGS_METADATA,
     )
     register_exception_handlers(app)
 
