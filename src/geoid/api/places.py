@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import uuid
 
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from geoid.api.format_param import output_format
@@ -43,6 +43,17 @@ router = APIRouter(tags=["registry"])
     status_code=status.HTTP_201_CREATED,
     summary="Mint a geoid for a place (duplicate geometry fails with 409)",
     responses={
+        status.HTTP_201_CREATED: {
+            "headers": {
+                "Location": {
+                    "description": (
+                        "URI of the newly minted feature (OGC API - Features Part 4, "
+                        "Requirement 6: a 201 carries a Location header)."
+                    ),
+                    "schema": {"type": "string", "format": "uri"},
+                }
+            }
+        },
         status.HTTP_409_CONFLICT: {
             "model": GeometryConflictResponse,
             "description": (
@@ -51,12 +62,13 @@ router = APIRouter(tags=["registry"])
                 "external_id duplicate also answers 409 — discriminate on "
                 "``constraint``."
             ),
-        }
+        },
     },
 )
 async def create_item(
     collection_id: str,
     feature: PlaceCreate,
+    response: Response,
     principal: Principal = Depends(require_principal),
     session: AsyncSession = Depends(get_session),
     settings: Settings = Depends(get_settings),
@@ -64,13 +76,15 @@ async def create_item(
     collection = await collection_repo.get_by_slug(session, collection_id)
     if collection is None:
         raise CollectionNotFoundError(collection_id)
-    return await registry_service.create_place(
+    result = await registry_service.create_place(
         session,
         settings=settings,
         principal=principal,
         collection=collection,
         feature=feature,
     )
+    response.headers["Location"] = result.item_url
+    return result
 
 
 @router.post(

@@ -15,6 +15,9 @@ async def test_post_polygon_mints_geoid_uri(client, unit_square_ccw):
     geoid = body["geoid"]
     assert body["uri"] == f"http://testserver/geoid/{geoid}"
     assert body["item_url"] == f"http://testserver/collections/public/items/{geoid}"
+    # OGC API - Features Part 4, Requirement 6: a 201 carries a Location header
+    # pointing at the new resource (the item endpoint, not the durable resolver).
+    assert resp.headers["Location"] == body["item_url"]
 
 
 async def test_anonymous_post_captures_whisp_client_provenance(client):
@@ -55,6 +58,8 @@ async def test_identical_geometry_returns_409_with_incumbent_geoid(
     assert body["constraint"] == "uq_geoid_registry_geom_hash"
     assert body["uri"] == f"http://testserver/geoid/{original_geoid}"
     assert "message" in body
+    # Requirement 6 scopes the Location header to 201 only — a 409 carries none.
+    assert "Location" not in second.headers
 
 
 async def test_different_geometry_mints_distinct_geoid(client, unit_square_ccw, other_square):
