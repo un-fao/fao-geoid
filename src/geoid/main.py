@@ -9,7 +9,7 @@ from fastapi import FastAPI
 from sqlalchemy.exc import InterfaceError, OperationalError
 
 from geoid import __version__
-from geoid.api import bulk, health, jobs, manage, ogc, places, processes
+from geoid.api import health, manage, ogc, places
 from geoid.api.errors import register_exception_handlers
 from geoid.config import get_settings
 from geoid.db import dispose_engine, get_sessionmaker
@@ -24,12 +24,10 @@ provenance, and accepts **anonymous contributions** — served over **OGC API
 Features**.
 
 * **Write / registry** — `POST /collections/{id}/items` → `{geoid, uri}`
+* **Bulk write** — `POST /collections/{id}/items/bulk` (a GeoJSON FeatureCollection,
+  synchronous, partial success → a per-feature report)
 * **Resolve** — `GET /geoid/{uuid}`, `GET /collections/{id}/external/{external_id}`
 * **OGC API Features read** — landing, `/conformance`, `/collections`, items (CQL2 + paging)
-* **OGC API Processes** — `bulk-ingest` (sync inline or `Prefer: respond-async`) and
-  `bulk-export` (async → signed download URL); `POST /processes/{id}/execution`,
-  poll `GET /jobs/{jobID}`, fetch `GET /jobs/{jobID}/results`, dismiss `DELETE /jobs/{jobID}`
-* **Bulk** — `GET /collections/{id}/bulk` (public GeoJSON / geo+json-seq stream)
 * **Health** — `GET /health` (DB connectivity probe)
 """
 
@@ -66,14 +64,11 @@ def create_app() -> FastAPI:
     register_exception_handlers(app)
 
     # Probe surface first, then the read surface (OGC) at the root, the registry,
-    # management, and bulk routers. /health is a literal path — no OGC collision.
+    # and management routers. /health is a literal path — no OGC collision.
     app.include_router(health.router)
     app.include_router(ogc.router)
     app.include_router(places.router)
     app.include_router(manage.router)
-    app.include_router(processes.router)
-    app.include_router(jobs.router)
-    app.include_router(bulk.router)
 
     app.state.settings = settings
     return app

@@ -37,24 +37,8 @@ class PlaceNotFoundError(GeoidServiceError):
         super().__init__(f"place not found: {identifier}")
 
 
-class ProcessNotFoundError(GeoidServiceError):
-    """An OGC API - Processes processID that this server does not offer (404)."""
-
-    def __init__(self, process_id: str) -> None:
-        self.process_id = process_id
-        super().__init__(f"process not found: {process_id!r}")
-
-
-class JobNotFoundError(GeoidServiceError):
-    """An async ingest job id that does not exist (404)."""
-
-    def __init__(self, job_id: str) -> None:
-        self.job_id = job_id
-        super().__init__(f"job not found: {job_id}")
-
-
 class BulkLimitExceededError(GeoidServiceError):
-    """A bulk-ingest FeatureCollection exceeds ``GEOID_BULK_MAX_FEATURES`` (413).
+    """A bulk POST FeatureCollection exceeds ``GEOID_BULK_MAX_FEATURES`` (413).
 
     A *write* bound must error, never silently truncate, so the whole request is
     rejected with the count and the configured cap.

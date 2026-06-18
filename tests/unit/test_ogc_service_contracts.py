@@ -119,7 +119,8 @@ def test_feature_to_wkt_handles_null_geometry():
 def test_wkt_is_not_a_conformance_class():
     # WKT is a documented vendor extension — it adds NO conformance class and does
     # not touch /conformance. Pin the set so nobody silently advertises it.
-    assert len(ogc_service.CONFORMANCE_CLASSES) == 14
+    # The 8 classes are OGC API - Features Part 1/3 + CQL2 (the read surface).
+    assert len(ogc_service.CONFORMANCE_CLASSES) == 8
     joined = " ".join(ogc_service.CONFORMANCE_CLASSES).lower()
     assert "wkt" not in joined
     assert "text/plain" not in joined

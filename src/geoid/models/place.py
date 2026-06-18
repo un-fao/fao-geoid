@@ -58,4 +58,3 @@ class Place(Base):
         DateTime(timezone=True), nullable=False, server_default=text("now()")
     )
     originating_instance: Mapped[str | None] = mapped_column(String, nullable=True)
-    ingest_batch_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)

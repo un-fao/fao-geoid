@@ -70,7 +70,6 @@ def upgrade() -> None:
             predecessor_id        uuid REFERENCES place(id),
             created_at            timestamptz NOT NULL DEFAULT now(),
             originating_instance  text,
-            ingest_batch_id       uuid,
             CONSTRAINT ck_place_geom_is_polygonal
                 CHECK (GeometryType(geom) IN ('POLYGON', 'MULTIPOLYGON')),
             CONSTRAINT ck_place_geom_is_valid

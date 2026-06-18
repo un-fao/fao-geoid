@@ -25,7 +25,10 @@ from geoid.schemas.ogc import (
     SpatialExtent,
 )
 
-CONFORMANCE_CLASSES = [
+# OGC API - Features Part 1/3 + CQL2 — the listing/filtering read surface.
+# Phase-1 demo: the items/queryables routes are include_in_schema=False (hidden
+# from the API definition) but still live; /conformance advertises these classes.
+_FEATURES_CLASSES = [
     "http://www.opengis.net/spec/ogcapi-features-1/1.0/conf/core",
     "http://www.opengis.net/spec/ogcapi-features-1/1.0/conf/oas30",
     "http://www.opengis.net/spec/ogcapi-features-1/1.0/conf/geojson",
@@ -34,17 +37,9 @@ CONFORMANCE_CLASSES = [
     "http://www.opengis.net/spec/ogcapi-features-3/1.0/conf/features-filter",
     "http://www.opengis.net/spec/cql2/1.0/conf/cql2-text",
     "http://www.opengis.net/spec/cql2/1.0/conf/cql2-json",
-    # OGC API - Processes Part 1 (18-062r2) — the bulk-ingest surface.
-    "http://www.opengis.net/spec/ogcapi-processes-1/1.0/conf/core",
-    "http://www.opengis.net/spec/ogcapi-processes-1/1.0/conf/ogc-process-description",
-    "http://www.opengis.net/spec/ogcapi-processes-1/1.0/conf/json",
-    "http://www.opengis.net/spec/ogcapi-processes-1/1.0/conf/oas30",
-    "http://www.opengis.net/spec/ogcapi-processes-1/1.0/conf/dismiss",
-    "http://www.opengis.net/spec/ogcapi-processes-1/1.0/conf/callback",
 ]
 
-_PROCESSES_REL = "http://www.opengis.net/def/rel/ogc/1.0/processes"
-_PLACE_SET_REL = "related"
+CONFORMANCE_CLASSES = _FEATURES_CLASSES
 
 _GEOJSON = "application/geo+json"
 _JSON = "application/json"
@@ -60,11 +55,6 @@ _QUERYABLE_SCHEMAS: dict[str, dict[str, Any]] = {
     "external_id": {"type": "string", "title": "Caller-supplied external id"},
     "created_at": {"type": "string", "format": "date-time", "title": "Creation time"},
     "geometry": {"format": "geometry-any", "title": "Place geometry (Polygon/MultiPolygon)"},
-    "ingest_batch_id": {
-        "type": "string",
-        "format": "uuid",
-        "title": "Ingest batch (place set) id",
-    },
 }
 
 
@@ -79,7 +69,6 @@ class ItemRow(TypedDict, total=False):
     created_at: datetime
     predecessor_id: uuid.UUID | None
     originating_instance: str | None
-    ingest_batch_id: uuid.UUID | None
     collection_slug: str
 
 
@@ -104,12 +93,6 @@ def landing_page(settings: Settings) -> LandingPage:
                 title="Conformance classes",
             ),
             Link(href=f"{base}/collections", rel="data", type=_JSON, title="Collections"),
-            Link(
-                href=f"{base}/processes",
-                rel=_PROCESSES_REL,
-                type=_JSON,
-                title="Processes (bulk ingest)",
-            ),
             Link(
                 href=f"{base}/docs",
                 rel="service-doc",
@@ -225,29 +208,6 @@ def _with_collection_slug(row: ItemRow, collection: str) -> ItemRow:
     return {**row, "collection_slug": collection}
 
 
-def export_feature(row: dict[str, Any]) -> dict[str, Any]:
-    """Compact GeoJSON Feature for bulk export (the ``/bulk`` stream + bulk-export job).
-
-    A plain dict (not a FeatureModel) — bulk export has no HATEOAS links and serves
-    the open base data verbatim. Submitted properties round-trip alongside the geoid.
-    """
-    provenance = dict(row.get("provenance") or {})
-    submitted = dict(provenance.pop("submitted_properties", {}) or {})
-    created_at = row.get("created_at")
-    created_iso = created_at.isoformat() if isinstance(created_at, datetime) else created_at
-    return {
-        "type": "Feature",
-        "id": str(row["geoid"]),
-        "geometry": json.loads(row["geometry"]) if row.get("geometry") else None,
-        "properties": {
-            **submitted,
-            "geoid": str(row["geoid"]),
-            "external_id": row.get("external_id"),
-            "created_at": created_iso,
-        },
-    }
-
-
 def build_feature(settings: Settings, row: ItemRow) -> FeatureModel:
     """Assemble an OGC feature from a place read row."""
     geoid: uuid.UUID = row["geoid"]
@@ -277,19 +237,6 @@ def build_feature(settings: Settings, row: ItemRow) -> FeatureModel:
         collection=row["collection_slug"],
         predecessor_id=row.get("predecessor_id"),
     )
-    # Set membership: surface the place-set (ingest batch) id + a resolvable URI so a
-    # feature advertises which bulk ingest minted it (filter via ?filter=ingest_batch_id=...).
-    if row.get("ingest_batch_id") is not None:
-        batch_id = row["ingest_batch_id"]
-        properties["ingest_batch_id"] = str(batch_id)
-        links.append(
-            Link(
-                href=f"{settings.base_url_clean}/place-sets/{batch_id}",
-                rel=_PLACE_SET_REL,
-                type=_JSON,
-                title="Place set (ingest batch)",
-            )
-        )
 
     return FeatureModel(id=str(geoid), geometry=geometry, properties=properties, links=links)
 

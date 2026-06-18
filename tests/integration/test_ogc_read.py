@@ -35,16 +35,15 @@ async def test_landing_page_has_required_links(client):
     assert {"self", "conformance", "data"} <= rels
 
 
-async def test_conformance_declares_core_and_cql2(client):
-    body = (await client.get("/conformance")).json()
-    classes = body["conformsTo"]
-    assert any("ogcapi-features-1/1.0/conf/core" in c for c in classes)
-    assert any("cql2-text" in c for c in classes)
-
-
-async def test_conformance_declares_queryables(client):
+async def test_conformance_declares_features_and_cql2(client):
+    # The OGC API - Processes surface was removed; /conformance advertises the
+    # Features Part 1/3 + CQL2 read classes. (The items/queryables routes stay
+    # include_in_schema=False — hidden from the API definition but still live.)
     classes = (await client.get("/conformance")).json()["conformsTo"]
+    assert any("ogcapi-features-1/1.0/conf/core" in c for c in classes)
     assert any(c.endswith("ogcapi-features-3/1.0/conf/queryables") for c in classes)
+    assert any("cql2-text" in c for c in classes)
+    assert not any("ogcapi-processes" in c for c in classes)
 
 
 async def test_queryables_is_a_json_schema_of_the_cql2_fields(client):
@@ -56,7 +55,7 @@ async def test_queryables_is_a_json_schema_of_the_cql2_fields(client):
     assert body["$id"].endswith("/collections/public/queryables")
     assert body["additionalProperties"] is False
     advertised = set(body["properties"])
-    assert {"geoid", "external_id", "created_at", "geometry", "ingest_batch_id"} == advertised
+    assert {"geoid", "external_id", "created_at", "geometry"} == advertised
     # An advertised queryable must be accepted by the live filter path.
     resp = await client.get("/collections/public/items?filter=external_id='nope'")
     assert resp.status_code == 200
