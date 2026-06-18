@@ -27,20 +27,19 @@ from geoid.models import (
     UQ_GEOID_REGISTRY_GEOM_HASH,
     UQ_PLACE_EXTERNAL_ID,
 )
+from geoid.repositories._pg_errors import (
+    SQLSTATE_CHECK_VIOLATION,
+    SQLSTATE_RESTRICT_VIOLATION,
+    pg_fields,
+)
 from geoid.services.exceptions import (
     AnonymousWriteForbiddenError,
     BulkLimitExceededError,
     CollectionNotFoundError,
     GeometryConflictError,
     GeometryInvalidError,
-    JobNotFoundError,
     PlaceNotFoundError,
-    ProcessNotFoundError,
 )
-
-# PostgreSQL SQLSTATEs we care about.
-_SQLSTATE_CHECK_VIOLATION = "23514"
-_SQLSTATE_RESTRICT_VIOLATION = "23001"  # raised by the immutability trigger
 
 
 def _error(status_code: int, message: str, **extra: object) -> JSONResponse:
@@ -48,19 +47,6 @@ def _error(status_code: int, message: str, **extra: object) -> JSONResponse:
         status_code=status_code,
         content={"code": status_code, "message": message, **extra},
     )
-
-
-def _pg_fields(exc: IntegrityError) -> tuple[str | None, str | None]:
-    """Extract (constraint_name, sqlstate) from a SQLAlchemy asyncpg IntegrityError.
-
-    SQLAlchemy's asyncpg adapter exposes ``sqlstate`` on ``exc.orig`` but the
-    ``constraint_name`` only on the wrapped asyncpg error at ``exc.orig.__cause__``.
-    """
-    orig = getattr(exc, "orig", None)
-    cause = getattr(orig, "__cause__", None)
-    constraint = getattr(cause, "constraint_name", None) or getattr(orig, "constraint_name", None)
-    sqlstate = getattr(orig, "sqlstate", None) or getattr(cause, "sqlstate", None)
-    return constraint, sqlstate
 
 
 def register_exception_handlers(app: FastAPI) -> None:
@@ -71,14 +57,6 @@ def register_exception_handlers(app: FastAPI) -> None:
     @app.exception_handler(PlaceNotFoundError)
     async def _place_not_found(_: Request, exc: PlaceNotFoundError) -> JSONResponse:
         return _error(status.HTTP_404_NOT_FOUND, str(exc))
-
-    @app.exception_handler(ProcessNotFoundError)
-    async def _process_not_found(_: Request, exc: ProcessNotFoundError) -> JSONResponse:
-        return _error(status.HTTP_404_NOT_FOUND, str(exc), process=exc.process_id)
-
-    @app.exception_handler(JobNotFoundError)
-    async def _job_not_found(_: Request, exc: JobNotFoundError) -> JSONResponse:
-        return _error(status.HTTP_404_NOT_FOUND, str(exc), job=exc.job_id)
 
     @app.exception_handler(BulkLimitExceededError)
     async def _bulk_limit_exceeded(_: Request, exc: BulkLimitExceededError) -> JSONResponse:
@@ -115,7 +93,7 @@ def register_exception_handlers(app: FastAPI) -> None:
 
     @app.exception_handler(IntegrityError)
     async def _integrity(_: Request, exc: IntegrityError) -> JSONResponse:
-        constraint, sqlstate = _pg_fields(exc)
+        constraint, sqlstate = pg_fields(exc)
 
         if constraint == UQ_COLLECTION_CATALOG_SLUG:
             return _error(
@@ -140,13 +118,13 @@ def register_exception_handlers(app: FastAPI) -> None:
                 "identical geometry already exists in the catalog",
                 constraint=constraint,
             )
-        if sqlstate == _SQLSTATE_CHECK_VIOLATION:
+        if sqlstate == SQLSTATE_CHECK_VIOLATION:
             return _error(
                 status.HTTP_422_UNPROCESSABLE_CONTENT,
                 "geometry violates a database check (polygon-only / ST_IsValid)",
                 constraint=constraint,
             )
-        if sqlstate == _SQLSTATE_RESTRICT_VIOLATION:
+        if sqlstate == SQLSTATE_RESTRICT_VIOLATION:
             return _error(
                 status.HTTP_409_CONFLICT,
                 "place is immutable; corrections mint a new geoid via predecessor_id",

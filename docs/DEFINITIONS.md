@@ -59,54 +59,33 @@ catalog ─< collection ─< place (each place carries one geoid)
 > workspace/collection/item still available as a label-only alias), not a
 > data-model difference.
 
-### place set
+## Bulk write (many places in one request)
 
-The **set of places minted together by one bulk ingest**. When a dataset is
-loaded in bulk (the *bulk service*, below), every place minted in that run is
-stamped with the same **place-set id** and gets a resolvable **place-set URI**
-(`…/place-sets/{id}`). It answers "which load did this place come from?" and lets
-a whole batch be referenced and filtered as a unit — distinct from a *collection*
-(a durable, named bucket a place lives in) and from a *catalog* (the top-level
-grouping). A place set is a provenance grouping, not a container: a place belongs
-to exactly one collection but is also a member of the one ingest that created it.
+GeoID accepts **many geometries in one request body**: submit a GeoJSON
+`FeatureCollection` to `POST /collections/{id}/items/bulk` and it mints a geoid for
+each feature, **synchronously**, returning one report. It is sized for *hundreds to
+a few thousand* geometries per request — a configurable cap rejects a larger body
+outright rather than silently truncating it.
 
-- **Membership is queryable.** Each feature advertises its place-set id and URI,
-  and the set is filterable via CQL2 (`?filter=ingest_batch_id='…'`), so a client
-  can list exactly the places one ingest produced.
-- **Synchronous and asynchronous bulk both stamp it** — for an async job the
-  place-set id *is* the job id, so the set URI and the job are the same handle.
-
----
-
-## The bulk service
-
-GeoID accepts and serves **whole datasets at once**, for users with the correct
-permissions (it is admin-gated). Two directions, both GeoJSON, both modelled as
-standard **OGC API – Processes**:
-
-- **Bulk ingest** — submit a GeoJSON `FeatureCollection` and mint a geoid for each
-  feature in one operation. The identity, global geometry-deduplication, and
-  `external_id` rules are **exactly** the single-place rules: one bad feature is
-  reported as a per-row rejection (with the same 409/422 meaning a single submission
-  would get) and never aborts the rest of the batch — partial success is the
-  contract. Small batches run inline and return a report immediately; large or
-  by-reference loads run as a tracked **job** you poll to completion.
-- **Bulk download (export)** — export a whole collection as one GeoJSON file. A
-  small public export streams directly (`GET …/bulk`); a large or permissioned
-  export runs as a job that produces a single file plus a **time-limited download
-  link**.
+- **Same rules as a single submission.** Identity, global geometry-deduplication,
+  and `external_id` uniqueness are **exactly** the single-place rules — the bulk
+  path reuses the very same minting machinery, so a geometry minted in bulk gets the
+  identical geoid it would get one-at-a-time (or the same 409 against an existing
+  one).
+- **Partial success is the contract.** One bad feature is reported as a per-feature
+  rejection — with the same meaning the single endpoint's 409/422 would carry (a
+  duplicate geometry names the incumbent geoid; an invalid geometry carries the
+  reason) — and never aborts the rest of the batch. The response is a report: how
+  many features were received, accepted, and rejected, plus the per-feature detail.
 
 > **Geometry format.** GeoJSON is the default everywhere. As a documented **vendor
 > extension**, a geometry may also be *supplied* as a WKT string (single create and
 > per-feature bulk) and *returned* as WKT (`?f=wkt` or `Accept: text/plain`); a WKT
 > shape and its equivalent GeoJSON are the same geometry and mint the same geoid.
-- **Repeatable dataset loading (Asset Registry 1.0).** Loading an existing dataset
-  is a documented, repeatable procedure built on the asynchronous by-reference
-  ingest path, so a large external registry can be onboarded the same way every
-  time and re-run safely if interrupted.
 
-Every bulk ingest produces a *place set* (above) so the loaded dataset stays
-referenceable as a unit afterwards.
+> **Scope (Release 1).** File uploads, asynchronous jobs, bulk export/download, and
+> completion notifications are **deferred** to a later stage. The single synchronous
+> body covers the current requirement (hundreds-to-thousands of geometries).
 
 ---
 

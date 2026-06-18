@@ -1,8 +1,7 @@
-"""CLI entrypoints — one image, three commands: ``web``, ``migrate``, ``ingest-worker``.
+"""CLI entrypoints — one image, two commands: ``web`` and ``migrate``.
 
-geoid web            # run the API (uvicorn)
-geoid migrate        # apply Alembic migrations to head (Cloud Run Job)
-geoid ingest-worker  # drain the async bulk-ingest queue, then exit (Cloud Run Job)
+geoid web      # run the API (uvicorn)
+geoid migrate  # apply Alembic migrations to head (Cloud Run Job)
 """
 
 from __future__ import annotations
@@ -57,45 +56,14 @@ def run_migrate() -> None:
     command.upgrade(config, "head")
 
 
-def run_ingest_worker() -> None:
-    """Drain the async bulk-ingest queue once, then exit (Cloud Run Job semantics).
-
-    Builds its own event loop + sessions (never the request-scoped get_session). The
-    worker claims all currently-pending jobs via SKIP LOCKED, processes each, and
-    exits — a fresh execution is triggered per enqueue (plus a Scheduler fallback).
-    """
-    import asyncio
-
-    from geoid.config import get_settings
-    from geoid.db import dispose_engine
-    from geoid.services import ingest_service
-
-    # Standalone Cloud Run Job: nothing else configures logging here, so the
-    # info-level drain summary needs a root handler to reach Cloud Logging.
-    logging.basicConfig(level=logging.INFO)
-
-    async def _drain() -> int:
-        settings = get_settings()
-        try:
-            claimed = await ingest_service.process_pending_jobs(settings)
-        finally:
-            await dispose_engine()
-        return len(claimed)
-
-    count = asyncio.run(_drain())
-    logger.info("ingest-worker: processed %d job(s)", count)
-
-
 def main() -> int:
     command = sys.argv[1] if len(sys.argv) > 1 else "web"
     if command == "web":
         run_web()
     elif command == "migrate":
         run_migrate()
-    elif command == "ingest-worker":
-        run_ingest_worker()
     else:
-        logger.error("unknown command %r; use 'web', 'migrate', or 'ingest-worker'", command)
+        logger.error("unknown command %r; use 'web' or 'migrate'", command)
         return 2
     return 0
 

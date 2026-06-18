@@ -97,10 +97,6 @@ def main() -> int:
             print(f"  external_id: {props['external_id']}   commodity: {props.get('commodity')}")
             print(f"  provenance:  {props['_geoid_provenance']['client']}")
 
-        bulk = client.get(f"{BASE}/collections/{COLLECTION}/bulk").json()
-        print(
-            f"\n== Bulk export ==\n  GeoJSON FeatureCollection with {len(bulk['features'])} features"
-        )
         print(f"\n✓ done — explore at {BASE}/docs")
     return 0
 

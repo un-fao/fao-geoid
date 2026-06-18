@@ -7,6 +7,9 @@ are identical for both — anonymity is not a special case.
 
 from __future__ import annotations
 
+from typing import Any
+
+from pydantic import ValidationError
 from sqlalchemy.exc import DBAPIError, IntegrityError, InterfaceError, OperationalError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -14,9 +17,23 @@ from geoid.config import Settings
 from geoid.deps import Principal
 from geoid.domain.identifiers import derive_identifiers, new_geoid
 from geoid.domain.provenance import build_provenance, extract_client
-from geoid.models import Collection
+from geoid.models import (
+    PK_GEOID_REGISTRY,
+    PK_PLACE,
+    UQ_PLACE_EXTERNAL_ID,
+    Collection,
+)
 from geoid.repositories import place_repo
-from geoid.schemas.place import MintResponse, PlaceCreate, geometry_to_geojson
+from geoid.repositories._pg_errors import SQLSTATE_CHECK_VIOLATION, pg_fields, sqlstate_of
+from geoid.schemas.place import (
+    BulkAccepted,
+    BulkRejected,
+    BulkReport,
+    BulkSummary,
+    MintResponse,
+    PlaceCreate,
+    geometry_to_geojson,
+)
 from geoid.services.exceptions import (
     AnonymousWriteForbiddenError,
     GeometryConflictError,
@@ -26,11 +43,6 @@ from geoid.services.exceptions import (
 # Geometry validity (ST_IsValid) and polygon-only are enforced by CHECK constraints
 # on the INSERT (SQLSTATE 23514). Polygon-only + lon/lat bounds + RFC 7946 structure
 # are ALSO enforced earlier by the PlaceCreate pydantic schema (422 before the DB).
-_SQLSTATE_CHECK_VIOLATION = "23514"
-
-
-def _sqlstate(exc: DBAPIError) -> str | None:
-    return getattr(getattr(exc, "orig", None), "sqlstate", None)
 
 
 async def create_place(
@@ -77,7 +89,7 @@ async def create_place(
             originating_instance=settings.instance_id,
         )
     except IntegrityError as exc:
-        if _sqlstate(exc) == _SQLSTATE_CHECK_VIOLATION:
+        if sqlstate_of(exc) == SQLSTATE_CHECK_VIOLATION:
             await session.rollback()
             reason = await place_repo.geometry_invalid_reason(session, geojson)
             raise GeometryInvalidError(reason) from exc
@@ -107,3 +119,184 @@ async def create_place(
         collection=collection.slug,
         external_id=external_id,
     )
+
+
+async def create_places_bulk(
+    session: AsyncSession,
+    *,
+    settings: Settings,
+    principal: Principal,
+    collection: Collection,
+    features: list[dict[str, Any]],
+) -> BulkReport:
+    """Mint geoids for many features in ONE request, synchronously (partial success).
+
+    Threads the SAME single-row building blocks as :func:`create_place` (hashing,
+    dedup, provenance, identifiers) so the two write paths can never drift. Each
+    feature runs inside its own SAVEPOINT: an aborting insert (external_id / CHECK /
+    malformed GeoJSON) rolls back just that feature and the batch continues, while a
+    geometry duplicate is swallowed by the arbiter CTE without aborting at all. The
+    report always answers 200 — valid geometries are inserted, bad ones reported
+    with the same reason the single-item endpoint returns.
+
+    Raises:
+        AnonymousWriteForbiddenError: anon POST to a non-anonymous collection. Auth
+            depends on principal + collection only (not the features), so it is one
+            fail-fast check up front (403) rather than a per-feature reject.
+    """
+    if principal.is_anonymous and not collection.writable_anon:
+        raise AnonymousWriteForbiddenError(collection.slug)
+
+    accepted: list[BulkAccepted] = []
+    rejected: list[BulkRejected] = []
+
+    for index, raw in enumerate(features):
+        try:
+            feature = PlaceCreate.model_validate(raw)
+        except ValidationError as exc:
+            rejected.append(
+                BulkRejected(index=index, reason="schema_invalid", detail=_validation_detail(exc))
+            )
+            continue
+
+        outcome = await _mint_one(
+            session,
+            settings=settings,
+            principal=principal,
+            collection=collection,
+            index=index,
+            feature=feature,
+        )
+        (accepted if isinstance(outcome, BulkAccepted) else rejected).append(outcome)
+
+    # Accepted rows committed once at the end; rejected rows left no trace (their
+    # SAVEPOINTs rolled back), so the commit only persists the winners.
+    await session.commit()
+    return BulkReport(
+        summary=BulkSummary(received=len(features), accepted=len(accepted), rejected=len(rejected)),
+        accepted=accepted,
+        rejected=rejected,
+    )
+
+
+async def _mint_one(
+    session: AsyncSession,
+    *,
+    settings: Settings,
+    principal: Principal,
+    collection: Collection,
+    index: int,
+    feature: PlaceCreate,
+) -> BulkAccepted | BulkRejected:
+    """Insert one validated feature inside a SAVEPOINT; classify the outcome.
+
+    The SAVEPOINT (``begin_nested``) is the correctness hinge: a geom_hash duplicate
+    is swallowed by the arbiter CTE (``result.created=False``, no abort), but an
+    external_id / CHECK / malformed-GeoJSON insert ABORTS the statement — without the
+    SAVEPOINT that abort would poison the whole batch. We deliberately do NOT call
+    ``session.rollback()`` here: letting ``begin_nested()``'s context manager roll the
+    SAVEPOINT back on exception leaves the OUTER transaction healthy for the next
+    feature, while a full rollback would discard every already-accepted row.
+    """
+    geojson = geometry_to_geojson(feature)
+    external_id = feature.external_id
+    client = extract_client(feature.properties)
+    provenance = build_provenance(
+        created_by=principal.subject,
+        originating_instance=settings.instance_id,
+        client=client,
+        extra={"submitted_properties": feature.properties or {}},
+    )
+    geoid = new_geoid()
+    try:
+        async with session.begin_nested():
+            result = await place_repo.insert_place(
+                session,
+                geoid=geoid,
+                collection_id=collection.id,
+                geojson=geojson,
+                external_id=external_id,
+                provenance=provenance,
+                originating_instance=settings.instance_id,
+            )
+    except IntegrityError as exc:
+        # The SAVEPOINT has already rolled back; the session is usable again, so a
+        # CHECK violation can recover ST_IsValidReason exactly as the single row does.
+        return await _classify_integrity(session, index, external_id, geojson, exc)
+    except (OperationalError, InterfaceError):
+        raise  # genuine infra failure — never mask as a rejected row
+    except DBAPIError:
+        # Malformed GeoJSON makes ST_GeomFromGeoJSON raise and aborts the statement.
+        return BulkRejected(
+            index=index,
+            reason="invalid_geometry",
+            detail="unparseable GeoJSON geometry",
+            external_id=external_id,
+        )
+
+    if not result.created:
+        # Identical geometry already registered (catalog-wide or an earlier row in
+        # THIS batch): the arbiter looked the incumbent up — carry it like the 409.
+        ids = derive_identifiers(
+            result.geoid, base_url=settings.base_url_clean, collection=result.collection_slug
+        )
+        return BulkRejected(
+            index=index,
+            reason="geometry_conflict",
+            detail="identical geometry already exists in the catalog",
+            geoid=ids["geoid"],
+            uri=ids["uri"],
+            collection=result.collection_slug,
+            external_id=external_id,
+        )
+
+    ids = derive_identifiers(
+        result.geoid, base_url=settings.base_url_clean, collection=collection.slug
+    )
+    return BulkAccepted(
+        index=index,
+        geoid=ids["geoid"],
+        uri=ids["uri"],
+        item_url=ids["item_url"],
+        external_id=external_id,
+    )
+
+
+async def _classify_integrity(
+    session: AsyncSession,
+    index: int,
+    external_id: str | None,
+    geojson: str,
+    exc: IntegrityError,
+) -> BulkRejected:
+    """Map an aborting INSERT's IntegrityError to a per-feature reject (1:1 with 409/422)."""
+    constraint, sqlstate = pg_fields(exc)
+    if constraint == UQ_PLACE_EXTERNAL_ID:
+        return BulkRejected(
+            index=index,
+            reason="external_id_conflict",
+            detail="external_id already exists in this collection",
+            external_id=external_id,
+        )
+    if constraint in (PK_PLACE, PK_GEOID_REGISTRY):
+        return BulkRejected(index=index, reason="geoid_conflict", external_id=external_id)
+    if sqlstate == SQLSTATE_CHECK_VIOLATION:
+        reason = await place_repo.geometry_invalid_reason(session, geojson)
+        return BulkRejected(
+            index=index, reason="invalid_geometry", detail=reason, external_id=external_id
+        )
+    # Unexpected integrity failure — surface it without aborting the batch.
+    return BulkRejected(
+        index=index,
+        reason="invalid_geometry",
+        detail=f"integrity constraint violation ({constraint or sqlstate})",
+        external_id=external_id,
+    )
+
+
+def _validation_detail(exc: ValidationError) -> str:
+    """A concise one-line summary of the first pydantic error (for ``schema_invalid``)."""
+    first = exc.errors()[0]
+    loc = ".".join(str(part) for part in first.get("loc", ()))
+    msg = first.get("msg", "validation error")
+    return f"{loc}: {msg}" if loc else msg

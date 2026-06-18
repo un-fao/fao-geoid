@@ -55,6 +55,9 @@ async def list_collections(session: AsyncSession = Depends(get_session)) -> list
     "/collections/{collection_id}/item-ids",
     response_model=ItemIdList,
     summary="List item-ids (geoids) in a collection (1.2)",
+    # Phase-1 demo: hidden from the API definition (Processes-only surface).
+    # The route stays live and serving; re-enable = drop include_in_schema.
+    include_in_schema=False,
 )
 async def list_item_ids(
     collection_id: str,

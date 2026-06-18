@@ -97,6 +97,9 @@ async def describe_collection(
     response_class=GeoJSONResponse,
     summary="Features (CQL2 + paging)",
     responses={200: {"content": {"text/plain": {}}}},
+    # Phase-1 demo: hidden from the API definition (Processes-only surface).
+    # The route stays live and serving; re-enable = drop include_in_schema.
+    include_in_schema=False,
 )
 async def get_items(
     collection_id: str,
@@ -176,6 +179,9 @@ async def get_items(
     "/collections/{collection_id}/queryables",
     response_class=SchemaJSONResponse,
     summary="Queryables — the fields usable in CQL2 filters (OGC Part 3)",
+    # Phase-1 demo: hidden from the API definition (Processes-only surface).
+    # The route stays live and serving; re-enable = drop include_in_schema.
+    include_in_schema=False,
 )
 @router.get("/collections/{collection_id}/items/queryables", include_in_schema=False)
 async def get_queryables(

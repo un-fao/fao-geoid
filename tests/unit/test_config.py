@@ -82,6 +82,11 @@ def test_max_offset_default_and_rejects_negative():
         _settings(max_offset=-1)
 
 
+def test_bulk_max_features_default_is_1000():
+    # The synchronous bulk POST is sized for hundreds-to-a-few-thousand geometries.
+    assert _settings().bulk_max_features == 1_000
+
+
 @pytest.mark.parametrize("environment", ["review", "production"])
 def test_default_admin_token_outside_development_is_rejected(environment):
     with pytest.raises(ValidationError):
@@ -105,11 +110,6 @@ def test_invalid_vocab_is_rejected():
         _settings(vocab="bogus")
 
 
-def test_invalid_storage_backend_is_rejected():
-    with pytest.raises(ValidationError):
-        _settings(storage_backend="bogus")
-
-
 @pytest.mark.parametrize("environment", ["review", "production"])
 def test_database_settings_needs_no_admin_token_outside_development(monkeypatch, environment):
     # The regression pin: the migrate job constructs DatabaseSettings with no
@@ -131,7 +131,7 @@ def test_database_settings_reads_database_url_from_env(monkeypatch):
 
 def test_database_settings_excludes_app_level_fields():
     # Structural pin: app-layer config must not creep onto the DB-layer surface.
-    for field in ("admin_token", "environment", "base_url", "vocab", "storage_backend"):
+    for field in ("admin_token", "environment", "base_url", "vocab", "bulk_max_features"):
         assert field not in DatabaseSettings.model_fields
 
 

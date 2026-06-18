@@ -8,11 +8,14 @@
 > [`../PERFORMANCE.md`](../PERFORMANCE.md); this doc cross-references its deferred
 > roadmap rather than restating it.
 >
-> **Status.** The *decisions* below are recorded now. The bulk-ingest/fetch
-> **code** they motivate is **BUILT** (milestone 1.3 — see §8): a conformant
-> OGC API – Processes surface (`bulk-ingest` + `bulk-export`), the async
-> `ingest_job` queue (migration `0004`), and the `geoid ingest-worker`. The
-> *deferred* columnar/keyset items in §8 remain the "soon", not the "now".
+> **Status.** The *decisions* below are recorded now. The bulk **write** they
+> motivate now ships as **one synchronous route** — `POST /collections/{id}/items/bulk`
+> takes a GeoJSON `FeatureCollection`, sized for hundreds-to-thousands of geometries
+> (see §8). The heavier async pipeline (OGC API - Processes/Jobs, the `ingest_job`
+> queue, `ingest-worker`, GCS export) was **removed as overkill** for the actual
+> requirement; the set-based `COPY`-staging ladder below stays the recorded plan for
+> *if* volumes ever reach millions. The *deferred* columnar/keyset items remain the
+> "soon", not the "now".
 
 ---
 
@@ -53,7 +56,7 @@ most "scale Postgres" advice starts.
 | **1** | Read pressure on the OGC surface | **Read replicas** | OGC `GET` is replica-safe; `POST` stays on the primary. Needs a read/write session split in `db.py`. Watch **read-your-writes**: route a writer's own immediate read back to the primary. |
 | **2** | `place` too large / write volume saturates one table | **Partition `place`** (native declarative, hash by `collection_id`) | **Already unblocked:** a partitioned-table unique must include the partition key (§3), so global `UNIQUE(geom_hash)` cannot live on a partitioned `place` — but it no longer does. Global geometry-uniqueness already lives on the **unpartitioned `geoid_registry`** (`uq_geoid_registry_geom_hash`, since `0001`); partitioning `place` needs no schema relocation. |
 | **3** | Single primary saturated (CPU / IOPS / connections) | **Citus** — `place` distributed by `collection_id`, `geoid_registry` as a **reference table** | Same constraint as rung 2: a Citus distributed unique must include the distribution column. Global dedup already lives on `geoid_registry`; rung 3 only makes that table a **replicated reference table** so its `UNIQUE` is enforced cluster-wide. Mirrors Instagram's logical-shards pattern (§4). |
-| **Parallel track** | OLAP / billion-row export / analytical scans | **Columnar offload** (DuckDB / Parquet) | Runs *off* the primary. Periodic Parquet snapshots to GCS via the existing `BlobStore`. Never burden the OLTP primary with analytical full scans. Independent of rungs 1–3 — adopt whenever analytical read demand appears. |
+| **Parallel track** | OLAP / billion-row export / analytical scans | **Columnar offload** (DuckDB / Parquet) | Runs *off* the primary. Periodic Parquet snapshots to GCS via a future snapshot job (an object-storage seam re-introduced if/when this is built). Never burden the OLTP primary with analytical full scans. Independent of rungs 1–3 — adopt whenever analytical read demand appears. |
 
 ---
 
@@ -202,7 +205,7 @@ registry hinge rather than by throughput.
 |---|---|---|
 | **PostgreSQL + PostGIS** | **Keep — system of record.** | All writes, geometry validation, the dedup recipe, GiST spatial filtering, OGC OLTP reads, and the `change_log` event log. Non-negotiable; everything else orbits it. |
 | **Parallelism / bulk loading** | **Adopt for bulk ingest — highest near-term value.** | `COPY` into an **UNLOGGED/TEMP staging table** (asyncpg `copy_records_to_table`), then one set-based `INSERT … SELECT … ON CONFLICT DO NOTHING` — orders of magnitude faster than per-row `INSERT` at millions of rows. **PgBouncer** (transaction pool) for connection fan-out (set asyncpg `statement_cache_size=0` when that pooler lands — already flagged in `PERFORMANCE.md`). Postgres **parallel query** for analytical counts/exports. Async job queue via `SELECT … FOR UPDATE SKIP LOCKED` — no new infrastructure. |
-| **DuckDB** | **Adopt later — OLAP/export complement, never a replacement.** | Bulk *fetch* and analytics at billions of rows: periodic **Parquet snapshots** of `place` / `geoid_registry` to GCS (reuses `storage/gcs.py`), queried by DuckDB far faster than OFFSET pagination — and **off the primary**. Optional `pg_duckdb` on a read replica. **Never** for writes, validation, or topology — it does not own the geometry recipe. |
+| **DuckDB** | **Adopt later — OLAP/export complement, never a replacement.** | Bulk *fetch* and analytics at billions of rows: periodic **Parquet snapshots** of `place` / `geoid_registry` to GCS (via a re-introduced object-storage seam), queried by DuckDB far faster than OFFSET pagination — and **off the primary**. Optional `pg_duckdb` on a read replica. **Never** for writes, validation, or topology — it does not own the geometry recipe. |
 | **Redis / caching** | **Adopt later — accelerator that must fail-open.** | (a) **Cache-aside** for OGC reads: because `place` is immutable, invalidation is trivial — bump a per-collection version key on insert; `GET /…/items/{geoid}` is effectively cache-forever. (b) **Bloom filter** of known `geom_hash` to pre-skip dedup DB hits during bulk ingest — the DB `UNIQUE` stays the source of truth. **Redis down ⇒ fall back to Postgres** (slower, still correct). Not needed at demo scale. |
 
 The shape of the verdict: **one authoritative engine, a fast bulk-load path on top
@@ -299,76 +302,42 @@ Each **DEFERRED** decision names its trigger metric and links to the matching
 
 ---
 
-## 8. The bulk endpoints this verdict motivates (BUILT — milestone 1.3)
+## 8. The bulk write this verdict motivates (synchronous; the async ladder is deferred)
 
 The verdict above existed to de-risk the **bulk ingest/fetch** work named in
-`PERFORMANCE.md`'s roadmap. That work is now **built** as one conformant
-**OGC API – Processes Part 1** surface (the FAO-valued OGC alignment; sync and async
-are *the same process*, selected by the `Prefer` header). Discovery is public
-(`GET /processes`, `GET /processes/{id}`); execution is admin-gated.
+`PERFORMANCE.md`'s roadmap. Remi then **simplified the requirement**: the real need is
+to submit *hundreds to a few thousand* geometries in one request, **synchronously** —
+not a file-upload / async-job pipeline. So the heavyweight OGC API - Processes/Jobs
+surface, the durable `ingest_job` queue (migration `0004`), the `ingest-worker`, the
+GCS export, and the storage/notify seams were **removed as overkill**, and the bulk
+write is now **one route**.
 
-**Ingest — Tier 1 (synchronous, bounded batch).**
-`POST /processes/bulk-ingest/execution` (no `Prefer`) takes a GeoJSON
-FeatureCollection in `inputs.items` (cap `GEOID_BULK_MAX_FEATURES`, default 10k — a
-write bound **errors 413**, never truncates) and returns **HTTP 200** with an
-`IngestionReport{ collection, batch_id, place_set_uri, total, accepted_count,
-rejected_count, accepted[{row_no, geoid, uri, collection, external_id}],
-rejected[{row_no, reason, detail, constraint, incumbent_geoid, external_id}] }` —
-per-row partial success, so one bad geometry or duplicate never fails the batch, and
-each reject's `reason` maps 1:1 to the single-row 4xx (`schema_invalid` /
-`geometry_invalid` 422, `external_id_conflict` / `geometry_conflict` /
-`geometry_conflict_in_batch` 409). Mechanics: per-row `PlaceCreate` validation →
-asyncpg `copy_records_to_table` (text/jsonb — **never** binary COPY) into a
-`CREATE TEMP TABLE … ON COMMIT DROP` staging table → classify-and-DELETE every
-per-row abort risk (invalid geometry, in-batch + existing `external_id` dups,
-in-batch geometry twins) **before** the set-based insert → one set-based **arbiter
-CTE** mirroring the single-row write — `INSERT INTO geoid_registry (…) SELECT …,
-geoid_geom_hash_default(ST_SetSRID(ST_GeomFromGeoJSON(geojson_text),4326)) FROM
-staging ON CONFLICT ON CONSTRAINT uq_geoid_registry_geom_hash DO NOTHING RETURNING …`
-whose returned rows drive the `INSERT INTO place (… ingest_batch_id) SELECT … FROM
-staging` (place rows written only for arbiter winners) → one incumbent-resolution
-query against `geoid_registry` for the conflicted rows → build the report from
-`RETURNING` + the anti-join (the wCTE single snapshot means you cannot re-query
-`place`). The registry UNIQUE still enforces global dedup and the `place_after_insert`
-trigger still appends `change_log`. Every row's `ingest_batch_id` (the place-set id,
-declared in `0001`) is now populated.
+**The route.** `POST /collections/{id}/items/bulk` takes a GeoJSON `FeatureCollection`
+(RFC 7946 §3.3) and returns **HTTP 200** with a `BulkReport{ summary{received,
+accepted, rejected}, accepted[{index, geoid, uri, item_url, external_id}],
+rejected[{index, reason, detail, geoid?, uri?, collection?, external_id?}] }`.
+`GEOID_BULK_MAX_FEATURES` (default **1000**) caps the body — a write bound **errors
+413**, never truncates. Per-feature **partial success** is the contract: one bad
+geometry or duplicate never fails the batch, and each reject's `reason` maps 1:1 to
+the single-row 4xx (`schema_invalid` / `invalid_geometry` 422; `geometry_conflict`
+[+ incumbent geoid] / `external_id_conflict` / `geoid_conflict` 409). It **reuses the
+single-row machinery verbatim** — `PlaceCreate` validation, then the same
+`place_repo.insert_place` arbiter CTE (`INSERT INTO geoid_registry … ON CONFLICT ON
+CONSTRAINT uq_geoid_registry_geom_hash DO NOTHING`, always via
+`geoid_geom_hash_default`) — so bulk and single-row geoids/hashes are byte-identical.
+Each feature runs in its own **SAVEPOINT** (`begin_nested`) so an aborting insert
+(external_id / CHECK / malformed GeoJSON) rolls back just that feature; a geometry
+duplicate is swallowed by the arbiter without aborting at all. Auth mirrors the single
+route (anon only into a `writable_anon` collection), checked once up front (403).
 
-**Ingest — Tier 2 (async, file-based — the millions/billions path).**
-`POST /processes/bulk-ingest/execution` with `Prefer: respond-async` (RFC 7240)
-commits an `ingest_job` row, best-effort triggers the worker, and returns **HTTP 201
-+ `Location: /jobs/{jobID}`** (OGC 18-062r2 Req 34: async is **201**, not 202). The
-source is `inputs.items` either by value (inline FeatureCollection) or by reference
-(`{"href": "<blob key>"}`, fetched via the `BlobStore`/GCS seam). Poll
-`GET /jobs/{jobID}` (OGC `StatusInfo`, status enum `accepted|running|successful|
-failed|dismissed`), fetch `GET /jobs/{jobID}/results` (the `IngestionReport`), cancel
-`DELETE /jobs/{jobID}` (`/conf/dismiss`). An optional `subscriber` element gives an
-OGC `/conf/callback` machine push; an optional `notifyEmail` plus
-`GEOID_NOTIFY_BACKEND=graph` sends an at-most-once completion email (MS Graph
-`sendMail`, guarded by `notified_at`). A client `Idempotency-Key` is a UNIQUE on the
-job row — a replay returns the existing job (200), so a lost 201 never double-loads.
-The `geoid ingest-worker` CLI **drains** the queue with `SELECT … FOR UPDATE SKIP
-LOCKED`, streaming the blob in `GEOID_INGEST_CHUNK_SIZE` chunks (one txn per chunk:
-unit-of-retry = unit-of-atomicity), running the same set-based dedup pass.
-
-**Fetch / export.** `bulk-export` is a second OGC process (async-only — a large
-export must not stream inline under Cloud Run's 60-minute request cap):
-`POST /processes/bulk-export/execution` (`Prefer: respond-async`) writes the whole
-collection to one GeoJSON object in storage and returns an `ExportResult` whose `href`
-is a **GCS V4 signed URL** (≤7-day, capped by `GEOID_EXPORT_SIGNED_URL_TTL_SECONDS`) —
-a stable file URI on the local backend. The small public stream
-`GET /collections/{id}/bulk` stays, now content-negotiating `application/geo+json-seq`
-(RFC 8142) and trimming coordinates to 7 decimals (matched to the 1e-7 dedup grid).
-GeoParquet (1.1.0 / OGC 24-013) and FlatGeobuf are a **deferred** opt-in `format` on
-this same async path (lazy `pyogrio`/GDAL in the worker). Still deferred from §5/§7:
-keyset paging to retire OFFSET (ADR-010); DuckDB-off-primary Parquet snapshots
+**If volumes ever grow.** The set-based `COPY` → TEMP-staging → one set-based arbiter
+CTE path (ADR-002 above; `copy_records_to_table`, text/jsonb, classify-and-DELETE the
+abort risks before the insert) remains the **recorded plan** for a future
+millions-of-rows load, alongside an async `SELECT … FOR UPDATE SKIP LOCKED` job queue
+and an export process. None of it is built today — the synchronous route covers the
+requirement, and the ladder is re-openable without re-deciding. Still deferred from
+§5/§7: keyset paging to retire OFFSET (ADR-010); DuckDB-off-primary Parquet snapshots
 (ADR-008); approximate `numberMatched` (ADR-011).
-
-Migration `0004_ingest_jobs` adds the `ingest_job` table — **operational /
-status-mutable**, deliberately *not* under the immutability triggers (a CHECK pins the
-status enum instead; same posture as `dedup_recipe_stamp` in `0003`), **no FK to
-`place`** (Citus posture) — plus the `place(ingest_batch_id)` index so set-membership
-filters don't full-scan. Per-job staging is TEMP `ON COMMIT DROP` in the worker
-transaction (no persistent DDL).
 
 ---
 

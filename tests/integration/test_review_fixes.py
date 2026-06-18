@@ -111,12 +111,3 @@ async def test_empty_collection_extent_is_world(client, admin_headers):
     await client.post("/manage/collections", headers=admin_headers, json={"id": "emptyc"})
     desc = (await client.get("/collections/emptyc")).json()
     assert desc["extent"]["spatial"]["bbox"] == [[-180.0, -90.0, 180.0, 90.0]]
-
-
-# --- #12 Content-Disposition uses the validated slug ------------------------
-
-
-async def test_bulk_content_disposition_uses_slug(client, unit_square_ccw):
-    await client.post("/collections/public/items", json=unit_square_ccw)
-    resp = await client.get("/collections/public/bulk")
-    assert resp.headers["content-disposition"] == 'attachment; filename="public.geojson"'

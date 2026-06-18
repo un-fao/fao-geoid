@@ -20,9 +20,19 @@ from geoid.deps import Principal, require_principal
 from geoid.domain.geometry_format import GeometryFormat
 from geoid.repositories import collection_repo, place_repo
 from geoid.schemas.ogc import FeatureModel
-from geoid.schemas.place import GeometryConflictResponse, MintResponse, PlaceCreate
+from geoid.schemas.place import (
+    BulkFeatureCollection,
+    BulkReport,
+    GeometryConflictResponse,
+    MintResponse,
+    PlaceCreate,
+)
 from geoid.services import ogc_service, registry_service
-from geoid.services.exceptions import CollectionNotFoundError, PlaceNotFoundError
+from geoid.services.exceptions import (
+    BulkLimitExceededError,
+    CollectionNotFoundError,
+    PlaceNotFoundError,
+)
 
 router = APIRouter(tags=["registry"])
 
@@ -60,6 +70,36 @@ async def create_item(
         principal=principal,
         collection=collection,
         feature=feature,
+    )
+
+
+@router.post(
+    "/collections/{collection_id}/items/bulk",
+    response_model=BulkReport,
+    status_code=status.HTTP_200_OK,
+    summary="Bulk-mint geoids from a GeoJSON FeatureCollection (synchronous, partial success)",
+)
+async def create_items_bulk(
+    collection_id: str,
+    body: BulkFeatureCollection,
+    principal: Principal = Depends(require_principal),
+    session: AsyncSession = Depends(get_session),
+    settings: Settings = Depends(get_settings),
+) -> BulkReport:
+    # A write bound MUST error, never truncate: too many features rejects the
+    # whole request (413) before any insert. Auth (anon → writable_anon) is checked
+    # once up front in the service, since it depends on principal + collection only.
+    if len(body.features) > settings.bulk_max_features:
+        raise BulkLimitExceededError(len(body.features), settings.bulk_max_features)
+    collection = await collection_repo.get_by_slug(session, collection_id)
+    if collection is None:
+        raise CollectionNotFoundError(collection_id)
+    return await registry_service.create_places_bulk(
+        session,
+        settings=settings,
+        principal=principal,
+        collection=collection,
+        features=body.features,
     )
 
 
