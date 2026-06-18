@@ -61,7 +61,6 @@ async def geometry_invalid_reason(session: AsyncSession, geojson: str) -> str:
 async def insert_place(
     session: AsyncSession,
     *,
-    geoid: uuid.UUID,
     collection_id: uuid.UUID,
     geojson: str,
     external_id: str | None,
@@ -70,14 +69,18 @@ async def insert_place(
 ) -> InsertResult:
     """Insert a place; an identical geometry ANYWHERE in the catalog conflicts.
 
-    Single-statement arbiter CTE: the ``arb`` leg inserts into ``geoid_registry``
-    (the global dedup arbiter) ``ON CONFLICT ... DO NOTHING`` on the geom_hash
-    UNIQUE, and the ``place`` leg inserts ``FROM arb`` — so the place row is
-    written ONLY if the registry arbiter won. Both inserts are one statement /
-    one transaction, so an external_id or CHECK failure on the place leg rolls the
-    registry row back too (no orphan), and the AFTER INSERT trigger then appends
-    change_log. A duplicate geometry returns no row (DO NOTHING, not a raised
-    exception) — the hot dedup path never aborts the transaction.
+    Single-statement arbiter CTE. The geoid is **derived DB-side** from the geometry:
+    the ``calc``/``ids`` legs compute the canonical ``geom_hash`` once and the
+    deterministic geoid ``geoid_from_geom_hash(h)`` from it, so identity and dedup
+    come from one fingerprint and cannot drift (migration 0004). The ``arb`` leg
+    inserts into ``geoid_registry`` (the global dedup arbiter) ``ON CONFLICT ... DO
+    NOTHING`` on the geom_hash UNIQUE, and the ``place`` leg inserts only for the
+    geoid the arbiter accepted (``JOIN arb``) — so the place row is written ONLY if
+    the registry arbiter won. Both inserts are one statement / one transaction, so an
+    external_id or CHECK failure on the place leg rolls the registry row back too (no
+    orphan), and the AFTER INSERT trigger then appends change_log. A duplicate
+    geometry returns no row (DO NOTHING, not a raised exception) — the hot dedup path
+    never aborts the transaction.
 
     Race safety: Postgres speculative insertion makes a concurrent loser block on
     the winner's XID with its own transaction still healthy, and under READ
@@ -94,11 +97,16 @@ async def insert_place(
     """
     insert_stmt = text(
         f"""
-        WITH arb AS (
+        WITH calc AS (
+            SELECT g, geoid_geom_hash_default(g) AS h
+            FROM (SELECT {_GEOM_EXPR} AS g) src
+        ),
+        ids AS (
+            SELECT g, h, geoid_from_geom_hash(h) AS geoid FROM calc
+        ),
+        arb AS (
             INSERT INTO geoid_registry (geoid, place_id, collection_id, geom_hash)
-            VALUES (
-                :geoid, :geoid, :collection_id, geoid_geom_hash_default({_GEOM_EXPR})
-            )
+            SELECT geoid, geoid, :collection_id, h FROM ids
             ON CONFLICT ON CONSTRAINT uq_geoid_registry_geom_hash DO NOTHING
             RETURNING geoid
         )
@@ -107,14 +115,14 @@ async def insert_place(
             originating_instance
         )
         SELECT
-            :geoid, :collection_id, {_GEOM_EXPR}, :external_id,
+            i.geoid, :collection_id, i.g, :external_id,
             CAST(:provenance AS jsonb), :originating_instance
-        FROM arb
+        FROM ids i
+        JOIN arb a ON a.geoid = i.geoid
         RETURNING id
         """
     )
     params = {
-        "geoid": geoid,
         "collection_id": collection_id,
         "geojson": geojson,
         "external_id": external_id,

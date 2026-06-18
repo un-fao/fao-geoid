@@ -1,5 +1,12 @@
 """record the dedup-recipe version and the engine stack hashes were computed under
 
+SUPERSEDED IN PART BY 0004 (2026-06-18): the paragraph below describing drift as
+"survivable" and the geoid as "UUIDv7, independent of the hash" is NO LONGER TRUE —
+from migration 0004 the geoid is DERIVED from ``geom_hash`` (deterministic UUIDv8), so
+the recipe is identity-load-bearing and frozen, and ``scripts/rehash_geom_hashes.py``
+must NOT be run against live identity data (it would re-mint geoids). See ADR-004 and
+0004's docstring. (This note is the only edit to an applied migration — comment only.)
+
 ``geoid_geom_hash`` is GEOS-bound (``ST_ReducePrecision`` + ``ST_Normalize``), so
 its output can drift across PostGIS/GEOS builds. Drift is survivable — the hash is
 operational dedup, not identity (the geoid is UUIDv7, independent of the hash), and

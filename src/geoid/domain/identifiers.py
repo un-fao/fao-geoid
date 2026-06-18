@@ -1,9 +1,20 @@
-"""The geoid identifier: a UUIDv7 minted app-side, plus the read-time derivations.
+"""The geoid identifier: a deterministic, content-addressed UUIDv8 derived from the
+geometry, plus the read-time derivations and the legacy UUIDv7 minter (now used only
+for internal infrastructure ids).
 
-The *one unrecoverable decision* in the system is that every geoid is an immutable
-UUIDv7 (RFC 9562). Postgres 17 has no native ``uuidv7()`` (that ships in PG18), and
-a standalone country instance must be able to mint offline, so we generate it here
-in the registry service rather than in the database.
+The *one unrecoverable decision* in the system is that every geoid is an immutable,
+**content-addressed** UUIDv8 (RFC 9562 §5.8): the first 16 bytes of the geometry's
+canonical SHA-256 ``geom_hash`` with the version (8) and variant bits stamped
+(:func:`geoid_from_geom_hash`). Identity is therefore a pure function of the canonical
+geometry — the same geometry yields the same geoid on every deployment (federation
+without coordination), and re-creating a deleted geometry recovers its geoid. The
+authoritative value is computed DB-side in the arbiter CTE (migration 0004's SQL
+``geoid_from_geom_hash``) from the very ``geom_hash`` used for dedup, so identity and
+dedup can never drift; this Python mirror must stay byte-identical for tests/tooling.
+RFC 9562 §6.5 mandates UUIDv8 (not the SHA-1 v5) for SHA-256-based name UUIDs.
+
+:func:`uuid7`/:func:`new_geoid` remain the monotonic UUIDv7 minter, now used only for
+internal infrastructure rows (catalog/collection ids), never for geoids.
 
 On read we derive resolvable forms from the bare UUID:
 
@@ -19,6 +30,7 @@ import time
 import uuid
 
 _UUID_V7_VERSION = 0x70  # version 7 in the high nibble of byte 6
+_UUID_V8_VERSION = 0x80  # version 8 in the high nibble of byte 6
 _VARIANT_RFC4122 = 0x80  # variant 10xx in the high bits of byte 8
 
 # Monotonic state (RFC 9562 §6.2 Method 1): the 12-bit rand_a field is a counter,
@@ -111,8 +123,35 @@ def uuid7(ts_ms: int | None = None) -> uuid.UUID:
 
 
 def new_geoid() -> uuid.UUID:
-    """Mint a fresh geoid (a UUIDv7). The bare UUID is the canonical identifier."""
+    """Mint a fresh monotonic UUIDv7 for an internal infrastructure row.
+
+    Geoids are NOT minted here — they are derived from the geometry by
+    :func:`geoid_from_geom_hash`. This remains the id source for catalog/collection
+    rows, which have no natural content to address.
+    """
     return uuid7()
+
+
+def geoid_from_geom_hash(geom_hash: bytes) -> uuid.UUID:
+    """Derive the deterministic geoid (UUIDv8) from a geometry's SHA-256 ``geom_hash``.
+
+    Takes the first 16 bytes of the digest and stamps the version (8) and RFC 4122
+    variant bits in place, so the geoid is a pure function of the canonical geometry:
+    the same geometry → the same geoid on every deployment, and a re-created geometry
+    recovers its geoid. Byte-identical to the SQL ``geoid_from_geom_hash`` (migration
+    0004) — the database computes the authoritative value; this mirror serves tests
+    and tooling.
+
+    Args:
+        geom_hash: the canonical geometry digest (a 32-byte SHA-256; only the first
+            16 bytes are consumed). Inputs shorter than 16 bytes are rejected.
+    """
+    if len(geom_hash) < 16:
+        raise ValueError(f"geom_hash must be at least 16 bytes, got {len(geom_hash)}")
+    raw = bytearray(geom_hash[:16])
+    raw[6] = (raw[6] & 0x0F) | _UUID_V8_VERSION
+    raw[8] = (raw[8] & 0x3F) | _VARIANT_RFC4122
+    return uuid.UUID(bytes=bytes(raw))
 
 
 def timestamp_ms_of(value: uuid.UUID) -> int:
