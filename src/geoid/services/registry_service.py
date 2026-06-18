@@ -15,7 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from geoid.config import Settings
 from geoid.deps import Principal
-from geoid.domain.identifiers import derive_identifiers, new_geoid
+from geoid.domain.identifiers import derive_identifiers
 from geoid.domain.provenance import build_provenance, extract_client
 from geoid.models import (
     PK_GEOID_REGISTRY,
@@ -74,14 +74,13 @@ async def create_place(
         extra={"submitted_properties": feature.properties or {}},
     )
 
-    geoid = new_geoid()
     # Happy path is one INSERT round-trip: the DB CHECK constraints reject invalid
     # geometry (23514) and we recover ST_IsValidReason for the 422 ONLY on that
-    # error path — so a valid POST never pays a separate pre-validation query.
+    # error path — so a valid POST never pays a separate pre-validation query. The
+    # geoid is derived from the geometry inside the insert (DB-side), not minted here.
     try:
         result = await place_repo.insert_place(
             session,
-            geoid=geoid,
             collection_id=collection.id,
             geojson=geojson,
             external_id=external_id,
@@ -207,12 +206,10 @@ async def _mint_one(
         client=client,
         extra={"submitted_properties": feature.properties or {}},
     )
-    geoid = new_geoid()
     try:
         async with session.begin_nested():
             result = await place_repo.insert_place(
                 session,
-                geoid=geoid,
                 collection_id=collection.id,
                 geojson=geojson,
                 external_id=external_id,

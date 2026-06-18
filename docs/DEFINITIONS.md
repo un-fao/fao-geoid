@@ -10,18 +10,23 @@ describes *what the system guarantees*, not how the code is written.
 
 ### geoid
 
-The **identifier GeoID mints for a geospatial place** — one globally unique,
-immutable UUID (UUIDv7) per place. It is the product's output. On read it is also
+The **identifier GeoID assigns to a geospatial place** — one globally unique,
+immutable UUID (UUIDv8) per place. It is the product's output. On read it is also
 surfaced as a resolvable URI, but that is a derived view of the *same* underlying
 geoid.
 
-- **Immutable.** A geoid never changes and is never reused or deleted. A
-  correction does not edit a place; it mints a *new* geoid that points back to the
-  one it supersedes, and the original still resolves forever.
-- **Identity, not geometry.** The geoid identifies a place; it is *not* computed
-  from the shape — but the registry enforces a one-to-one mapping: an identical
-  geometry is registered **once**, catalog-wide (see *deduplication* below), and
-  one place keeps its geoid even though its geometry is fixed at mint time.
+- **Immutable.** A geoid never changes, no two distinct places ever share one, and
+  it is never deleted. A correction does not edit a place; it mints a *new* geoid
+  that points back to the one it supersedes, and the original still resolves forever.
+- **Deterministic — derived from the geometry.** The geoid is computed from the
+  place's canonical geometry, so the *same* geometry always produces the *same*
+  geoid — on any GeoID deployment, with no coordination between instances, and again
+  even if a place were removed and re-registered. This is what lets independent
+  (e.g. federated national) instances agree on identifiers by construction. Because
+  identity is derived from the shape, the one-to-one mapping is intrinsic: an
+  identical geometry is registered **once**, catalog-wide (see *deduplication*
+  below). A *corrected* geometry is a different shape, so it naturally receives a new
+  geoid linked to the one it supersedes.
 
 ### external_id
 

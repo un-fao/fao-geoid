@@ -178,12 +178,14 @@ was cross-checked against the primary
 
 **What GeoID already has**
 
-- **Time-ordered primary keys.** Instagram engineered time-sortable IDs so
-  `ORDER BY id` ≈ `ORDER BY created_at` with no separate time index. GeoID's geoid
-  is **UUIDv7 — already time-ordered by construction**, and the composite paging
-  index `(collection_id, created_at, id)` already leans on that ordering. This
-  benefit is largely *present*, not pending.
-- **Caveat:** UUIDv7 does **not** embed a shard id. Routing is therefore by
+- **Time-ordered reads via the composite index, NOT the PK.** Instagram engineered
+  time-sortable IDs so `ORDER BY id` ≈ `ORDER BY created_at`. GeoID deliberately gives
+  up that PK property: the geoid is a **deterministic, content-addressed UUIDv8**
+  (ADR-004), so it is *not* time-ordered and distributes randomly in the b-tree (the
+  cost of federation-stable identity — see ADR-004's consequences). Time-ordered
+  paging instead leans entirely on the composite index `(collection_id, created_at,
+  id)`, which is why that index — not the PK — is the load-bearing paging structure.
+- **Caveat:** the geoid does **not** embed a shard id. Routing is therefore by
   `collection_id`, not by parsing the geoid — you cannot recover the shard from the
   identifier the way Instagram's IDs encode it.
 

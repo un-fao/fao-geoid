@@ -156,3 +156,48 @@ def test_explicit_ts_ms_bypasses_monotonic_state(monkeypatch):
     assert identifiers.timestamp_ms_of(value) == 1_780_000_000_000
     assert identifiers._last_ms == 123
     assert identifiers._counter == 7
+
+
+# --- Deterministic geoid: UUIDv8 derived from the geometry's SHA-256 geom_hash ----
+# geoid_from_geom_hash MUST stay byte-identical to the SQL function of the same name
+# (migration 0004) — the Python and DB derivations are the same identity.
+
+# SHA-256 of the canonical baseline_unit_square at grid 1e-7 (golden-vector corpus).
+_BASELINE_UNIT_SQUARE_SHA256 = "c624e28423aaac2485c0cda6e2ecab95fba795d9b3ff32ffce582ec9868a24c4"
+
+
+def test_geoid_from_geom_hash_is_version_8_and_rfc4122_variant():
+    geoid = identifiers.geoid_from_geom_hash(bytes.fromhex(_BASELINE_UNIT_SQUARE_SHA256))
+    assert geoid.version == 8
+    assert geoid.variant == uuid.RFC_4122
+
+
+def test_geoid_from_geom_hash_is_deterministic():
+    digest = bytes.fromhex(_BASELINE_UNIT_SQUARE_SHA256)
+    assert identifiers.geoid_from_geom_hash(digest) == identifiers.geoid_from_geom_hash(digest)
+
+
+def test_geoid_from_geom_hash_known_answer():
+    # Pins the exact byte layout (first 16 bytes of the SHA-256, version=8 + variant
+    # stamped) so any change to the stamping surfaces as identity drift.
+    geoid = identifiers.geoid_from_geom_hash(bytes.fromhex(_BASELINE_UNIT_SQUARE_SHA256))
+    assert str(geoid) == "c624e284-23aa-8c24-85c0-cda6e2ecab95"
+
+
+def test_geoid_from_geom_hash_distinct_digests_give_distinct_geoids():
+    a = identifiers.geoid_from_geom_hash(bytes.fromhex("00" * 32))
+    b = identifiers.geoid_from_geom_hash(bytes.fromhex("ff" * 32))
+    assert a != b
+
+
+def test_geoid_from_geom_hash_uses_only_first_16_bytes():
+    # The geoid is a 128-bit truncation: bytes past the 16th never affect it.
+    prefix = "11" * 16
+    geoid_a = identifiers.geoid_from_geom_hash(bytes.fromhex(prefix + "00" * 16))
+    geoid_b = identifiers.geoid_from_geom_hash(bytes.fromhex(prefix + "ff" * 16))
+    assert geoid_a == geoid_b
+
+
+def test_geoid_from_geom_hash_rejects_short_input():
+    with pytest.raises(ValueError):
+        identifiers.geoid_from_geom_hash(b"\x00" * 15)
