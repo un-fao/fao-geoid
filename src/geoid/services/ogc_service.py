@@ -26,8 +26,8 @@ from geoid.schemas.ogc import (
 )
 
 # OGC API - Features Part 1/3 + CQL2 — the listing/filtering read surface.
-# Phase-1 demo: the items/queryables routes are include_in_schema=False (hidden
-# from the API definition) but still live; /conformance advertises these classes.
+# Phase-1 demo: the queryables route is include_in_schema=False (hidden from the
+# API definition) but still live; /conformance advertises these classes.
 _FEATURES_CLASSES = [
     "http://www.opengis.net/spec/ogcapi-features-1/1.0/conf/core",
     "http://www.opengis.net/spec/ogcapi-features-1/1.0/conf/oas30",
