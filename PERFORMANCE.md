@@ -53,7 +53,7 @@ it stayed at ~73 ms p95 despite an 8× data increase — see the index result be
 
 ## Live review environment (network-bound) — 2026-06-15
 
-Heavy run against the **deployed review service** (`https://data.review.fao.org/geoid/v1`;
+Heavy run against the **deployed review service** (`https://data.review.fao.org/geoid`;
 Cloud Run gen2 min-0 / max-4 + Cloud SQL `db-custom-2-4096`, PostGIS 3.6.0 / GEOS 3.11.4),
 **concurrency=64, 60 s/scenario**, order read→dedup→mint (read warms the min-0 instances):
 

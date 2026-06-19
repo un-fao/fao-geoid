@@ -45,7 +45,7 @@ def test_uri_derivation_strips_trailing_slash():
     value = uuid.UUID("019e9976-974c-7d01-b2b6-299f41d9d29c")
     assert (
         identifiers.uri_for(value, "https://data.fao.org/")
-        == "https://data.fao.org/geoid/019e9976-974c-7d01-b2b6-299f41d9d29c"
+        == "https://data.fao.org/019e9976-974c-7d01-b2b6-299f41d9d29c"
     )
 
 

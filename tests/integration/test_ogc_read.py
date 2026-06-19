@@ -215,7 +215,7 @@ async def test_get_item_as_wkt_via_f_param(client, unit_square_ccw):
 
 async def test_resolve_geoid_as_wkt_via_accept_header(client, unit_square_ccw):
     geoid = (await client.post("/collections/public/items", json=unit_square_ccw)).json()["geoid"]
-    resp = await client.get(f"/geoid/{geoid}", headers={"Accept": "text/plain"})
+    resp = await client.get(f"/{geoid}", headers={"Accept": "text/plain"})
     assert resp.status_code == 200
     assert resp.headers["content-type"].startswith("text/plain")
     assert resp.text.startswith("POLYGON")

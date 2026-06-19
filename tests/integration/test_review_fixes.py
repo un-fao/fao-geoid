@@ -93,7 +93,7 @@ async def test_items_response_is_geojson_media_type(client, unit_square_ccw):
 async def test_item_and_resolver_are_geojson_media_type(client, unit_square_ccw):
     geoid = (await client.post("/collections/public/items", json=unit_square_ccw)).json()["geoid"]
     item = await client.get(f"/collections/public/items/{geoid}")
-    resolver = await client.get(f"/geoid/{geoid}")
+    resolver = await client.get(f"/{geoid}")
     assert item.headers["content-type"].startswith("application/geo+json")
     assert resolver.headers["content-type"].startswith("application/geo+json")
 

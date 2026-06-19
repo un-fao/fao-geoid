@@ -44,15 +44,15 @@ def test_root_path_defaults_empty_and_leaves_base_url_clean_unchanged():
     assert settings.base_url_clean == "https://data.fao.org"
 
 
-@pytest.mark.parametrize("given", ["geoid/v1", "/geoid/v1", "/geoid/v1/", "  /geoid/v1  "])
+@pytest.mark.parametrize("given", ["geoid", "/geoid", "/geoid/", "  /geoid  "])
 def test_root_path_is_normalised_to_leading_slash_no_trailing(given):
-    assert _settings(root_path=given).root_path == "/geoid/v1"
+    assert _settings(root_path=given).root_path == "/geoid"
 
 
 def test_base_url_clean_includes_root_path():
     # The minted URI/OGC-link prefix must carry the proxy sub-path to stay resolvable.
-    settings = _settings(base_url="https://data.review.fao.org", root_path="/geoid/v1")
-    assert settings.base_url_clean == "https://data.review.fao.org/geoid/v1"
+    settings = _settings(base_url="https://data.review.fao.org", root_path="/geoid")
+    assert settings.base_url_clean == "https://data.review.fao.org/geoid"
 
 
 def test_oidc_disabled_without_issuer():
