@@ -7,6 +7,7 @@ are identical for both — anonymity is not a special case.
 
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 from pydantic import ValidationError
@@ -38,7 +39,10 @@ from geoid.services.exceptions import (
     AnonymousWriteForbiddenError,
     GeometryConflictError,
     GeometryInvalidError,
+    RegistryConsistencyError,
 )
+
+logger = logging.getLogger(__name__)
 
 # Geometry validity (ST_IsValid) and polygon-only are enforced by CHECK constraints
 # on the INSERT (SQLSTATE 23514). Polygon-only + lon/lat bounds + RFC 7946 structure
@@ -103,7 +107,13 @@ async def create_place(
     if not result.created:
         # Identical geometry already registered (anywhere in the catalog): the
         # insert failed, and the 409 must carry the incumbent geoid + collection.
-        # The repo's incumbent lookup guarantees collection_slug when created=False.
+        if result.collection_slug is None:
+            # Genuine registry/recipe drift — the repo couldn't resolve the incumbent
+            # collection. Surface a structured 500 rather than crashing on a None slug.
+            logger.error(
+                "registry drift: dedup loser geoid=%s has no incumbent collection", result.geoid
+            )
+            raise RegistryConsistencyError(result.geoid)
         raise GeometryConflictError(geoid=result.geoid, collection=result.collection_slug)
 
     ids = derive_identifiers(
@@ -168,9 +178,9 @@ async def create_places_bulk(
         )
         (accepted if isinstance(outcome, BulkAccepted) else rejected).append(outcome)
 
-    # Accepted rows committed once at the end; rejected rows left no trace (their
-    # SAVEPOINTs rolled back), so the commit only persists the winners.
-    await session.commit()
+    # get_session() owns the transaction boundary and commits on success (matching
+    # create_place). Rejected rows left no trace — their per-feature SAVEPOINTs already
+    # rolled back — so that commit persists only the accepted winners.
     return BulkReport(
         summary=BulkSummary(received=len(features), accepted=len(accepted), rejected=len(rejected)),
         accepted=accepted,
@@ -234,6 +244,15 @@ async def _mint_one(
     if not result.created:
         # Identical geometry already registered (catalog-wide or an earlier row in
         # THIS batch): the arbiter looked the incumbent up — carry it like the 409.
+        if result.collection_slug is None:
+            # Genuine registry/recipe drift — abort the batch with a structured 500
+            # rather than emitting a malformed reject row with no incumbent collection.
+            logger.error(
+                "registry drift: dedup loser geoid=%s has no incumbent collection (bulk index %d)",
+                result.geoid,
+                index,
+            )
+            raise RegistryConsistencyError(result.geoid)
         ids = derive_identifiers(
             result.geoid, base_url=settings.base_url_clean, collection=result.collection_slug
         )
@@ -282,10 +301,15 @@ async def _classify_integrity(
         return BulkRejected(
             index=index, reason="invalid_geometry", detail=reason, external_id=external_id
         )
-    # Unexpected integrity failure — surface it without aborting the batch.
+    # Unrecognised integrity constraint — should not happen. Log it and surface an
+    # honest internal_error (not a mislabelled invalid_geometry); the batch survives
+    # as one rejected row rather than aborting.
+    logger.error(
+        "unclassified integrity violation: constraint=%r sqlstate=%r", constraint, sqlstate
+    )
     return BulkRejected(
         index=index,
-        reason="invalid_geometry",
+        reason="internal_error",
         detail=f"integrity constraint violation ({constraint or sqlstate})",
         external_id=external_id,
     )

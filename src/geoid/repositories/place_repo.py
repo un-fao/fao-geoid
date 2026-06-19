@@ -8,13 +8,16 @@ if the registry arbiter won. So an identical-geometry clash (catalog-wide) write
 no row and never aborts the transaction, while an external_id or geoid clash on
 the ``place`` leg still raises 23505 (mapped to 409 by constraint name) and rolls
 the whole statement — including the registry row — back. When the place row is
-not written we look up the incumbent geoid in ``geoid_registry`` using the SAME
-``geoid_geom_hash_default`` wrapper, so the stored and recomputed hashes can never
-drift; the service then raises ``GeometryConflictError`` (→ 409 + incumbent geoid).
+not written the geoid is still derived in-statement from the geometry (race-free);
+only the incumbent's collection slug is read back from ``geoid_registry`` (via the
+same ``geoid_geom_hash_default`` wrapper, with a bounded retry for the rare
+concurrent pre-commit window), so the service can raise ``GeometryConflictError``
+(→ 409 + incumbent geoid).
 """
 
 from __future__ import annotations
 
+import asyncio
 import json
 import uuid
 from dataclasses import dataclass
@@ -27,6 +30,12 @@ from geoid.models import Place
 
 # Geometry built identically everywhere: GeoJSON -> geometry, SRID pinned to 4326.
 _GEOM_EXPR = "ST_SetSRID(ST_GeomFromGeoJSON(:geojson), 4326)"
+
+# Concurrent-loser slug recovery: on the rare pre-commit miss (the in-statement
+# LEFT JOIN ran before the winner committed) re-snapshot under READ COMMITTED a few
+# times. ~60ms worst case, paid ONLY on that miss; the geoid itself never waits.
+_INCUMBENT_SLUG_RETRIES = 3
+_INCUMBENT_SLUG_BACKOFF_S = 0.02
 
 
 @dataclass(frozen=True)
@@ -58,6 +67,27 @@ async def geometry_invalid_reason(session: AsyncSession, geojson: str) -> str:
     return row["reason"] or "invalid geometry"
 
 
+async def _resolve_incumbent_slug(session: AsyncSession, geojson: str) -> str | None:
+    """Re-read the incumbent's collection slug until the winner's row is visible.
+
+    Paid ONLY on the rare concurrent pre-commit miss, where the in-statement LEFT
+    JOIN couldn't yet see the winner's not-yet-committed registry row. Each execute
+    starts a fresh statement snapshot under READ COMMITTED, so a bounded retry
+    catches the winner's commit; the geoid is already derived in-statement and never
+    depends on this. Returns None if the row never appears (genuine recipe drift).
+    """
+    stmt = text(
+        "SELECT c.slug FROM geoid_registry r JOIN collection c ON c.id = r.collection_id "
+        f"WHERE r.geom_hash = geoid_geom_hash_default({_GEOM_EXPR})"
+    )
+    for _ in range(_INCUMBENT_SLUG_RETRIES):
+        slug = (await session.execute(stmt, {"geojson": geojson})).scalar_one_or_none()
+        if slug is not None:
+            return slug
+        await asyncio.sleep(_INCUMBENT_SLUG_BACKOFF_S)
+    return None
+
+
 async def insert_place(
     session: AsyncSession,
     *,
@@ -82,11 +112,17 @@ async def insert_place(
     geometry returns no row (DO NOTHING, not a raised exception) — the hot dedup path
     never aborts the transaction.
 
-    Race safety: Postgres speculative insertion makes a concurrent loser block on
-    the winner's XID with its own transaction still healthy, and under READ
-    COMMITTED the follow-up incumbent lookup takes a fresh snapshot that sees the
-    winner's committed registry row — so every conflict resolves to a real
-    incumbent geoid. This breaks if the isolation level is raised to REPEATABLE READ.
+    Race safety: the geoid is derived in the SAME statement as the arbiter
+    (``i.geoid`` from the ``ids`` leg), so a concurrent loser ALWAYS gets the real
+    incumbent geoid with no cross-statement visibility gap — never a geoid-less
+    response. Only the incumbent's collection slug can be missing, in the narrow
+    concurrent pre-commit window where the in-statement ``LEFT JOIN`` ran before the
+    winner committed; ``_resolve_incumbent_slug`` re-snapshots under READ COMMITTED
+    with a bounded retry to recover it. If it still never appears (genuine recipe
+    drift) the result carries ``collection_slug=None`` and the service raises
+    ``RegistryConsistencyError`` (a structured 500) — the repo reports the fact, it
+    does not decide the HTTP outcome. This retry relies on READ COMMITTED taking a
+    fresh snapshot per statement; it breaks under REPEATABLE READ.
 
     Dual-violation precedence: when a submission duplicates BOTH the geometry and
     an existing external_id, the geometry arbiter wins — the registry leg runs
@@ -109,17 +145,26 @@ async def insert_place(
             SELECT geoid, geoid, :collection_id, h FROM ids
             ON CONFLICT ON CONSTRAINT uq_geoid_registry_geom_hash DO NOTHING
             RETURNING geoid
-        )
-        INSERT INTO place (
-            id, collection_id, geom, external_id, provenance,
-            originating_instance
+        ),
+        ins AS (
+            INSERT INTO place (
+                id, collection_id, geom, external_id, provenance,
+                originating_instance
+            )
+            SELECT
+                i.geoid, :collection_id, i.g, :external_id,
+                CAST(:provenance AS jsonb), :originating_instance
+            FROM ids i
+            JOIN arb a ON a.geoid = i.geoid
+            RETURNING id
         )
         SELECT
-            i.geoid, :collection_id, i.g, :external_id,
-            CAST(:provenance AS jsonb), :originating_instance
+            i.geoid AS geoid,
+            EXISTS (SELECT 1 FROM ins) AS created,
+            c.slug AS incumbent_slug
         FROM ids i
-        JOIN arb a ON a.geoid = i.geoid
-        RETURNING id
+        LEFT JOIN geoid_registry r ON r.geom_hash = i.h
+        LEFT JOIN collection c ON c.id = r.collection_id
         """
     )
     params = {
@@ -130,23 +175,19 @@ async def insert_place(
         "originating_instance": originating_instance,
     }
     row = (await session.execute(insert_stmt, params)).first()
-    if row is not None:
-        return InsertResult(geoid=row[0], created=True)
+    geoid, created, slug = row[0], row[1], row[2]
+    if created:
+        return InsertResult(geoid=geoid, created=True)
 
-    # The registry arbiter swallowed the insert -> resolve the incumbent
-    # (catalog-wide) via the SAME geoid_geom_hash_default wrapper that computed
-    # the stored hash, so the recomputed and stored hashes can't drift.
-    lookup_stmt = text(
-        f"""
-        SELECT r.geoid, c.slug
-          FROM geoid_registry r JOIN collection c ON c.id = r.collection_id
-         WHERE r.geom_hash = geoid_geom_hash_default({_GEOM_EXPR})
-        """
-    )
-    incumbent = (await session.execute(lookup_stmt, {"geojson": geojson})).first()
-    if incumbent is None:
-        raise RuntimeError("dedup conflict but incumbent geoid not found (recipe drift?)")
-    return InsertResult(geoid=incumbent[0], created=False, collection_slug=incumbent[1])
+    # Dedup loser: the geoid above is the deterministic incumbent geoid (derived
+    # in-statement, never null). Only the incumbent's collection slug can lag — NULL
+    # in the rare concurrent pre-commit window where the LEFT JOIN ran before the
+    # winner committed — so re-read just the slug with a bounded retry. If it still
+    # never appears (genuine recipe drift) report the fact with collection_slug=None;
+    # the service decides the HTTP outcome (RegistryConsistencyError → structured 500).
+    if slug is None:
+        slug = await _resolve_incumbent_slug(session, geojson)
+    return InsertResult(geoid=geoid, created=False, collection_slug=slug)
 
 
 # --- Read path --------------------------------------------------------------

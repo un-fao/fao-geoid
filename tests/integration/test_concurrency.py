@@ -23,17 +23,23 @@ async def test_concurrent_identical_posts_converge_to_one_geoid(client, session,
         *[client.post("/collections/public/items", json=unit_square_ccw) for _ in range(k)]
     )
 
+    # Assert statuses BEFORE reading geoids so a stray 500 surfaces with its body,
+    # not as an opaque KeyError on a missing "geoid" key.
     statuses = [r.status_code for r in responses]
-    geoids = {r.json()["geoid"] for r in responses}
-
-    assert all(s in (201, 409) for s in statuses), statuses
+    offenders = [(r.status_code, r.json()) for r in responses if r.status_code not in (201, 409)]
+    assert not offenders, f"unexpected statuses: {offenders}"
     assert statuses.count(201) == 1, f"expected exactly one mint, got {statuses}"
-    assert statuses.count(409) == k - 1
-    # Every loser's 409 body must carry the winner's geoid (no empty conflicts).
+    assert statuses.count(409) == k - 1, f"expected {k - 1} conflicts, got {statuses}"
+
+    # Every winner/loser response converges on the one deterministic geoid, and
+    # every loser's 409 body must carry the incumbent geoid (no empty conflicts).
+    geoids = {r.json()["geoid"] for r in responses if r.status_code in (201, 409)}
     assert len(geoids) == 1, f"expected a single geoid, got {geoids}"
     for resp in responses:
         if resp.status_code == 409:
-            assert resp.json()["constraint"] == "uq_geoid_registry_geom_hash"
+            body = resp.json()
+            assert body["constraint"] == "uq_geoid_registry_geom_hash", body
+            assert body["geoid"], body
 
     place_count = (await session.execute(text("SELECT count(*) FROM place"))).scalar_one()
     registry_count = (
@@ -67,3 +73,22 @@ async def test_concurrent_distinct_posts_all_mint(client, session):
     assert len({r.json()["geoid"] for r in responses}) == k
     place_count = (await session.execute(text("SELECT count(*) FROM place"))).scalar_one()
     assert place_count == k
+
+
+async def test_resolve_incumbent_slug_returns_committed_collection(
+    client, session, unit_square_ccw
+):
+    """The slug-recovery helper reads back the incumbent's collection once visible.
+
+    Covers ``_resolve_incumbent_slug``'s success path deterministically (no race):
+    mint a place via the API (committed), then call the helper directly — it must
+    return the incumbent's collection slug from the now-visible registry row. The
+    concurrent path only reaches this helper when the in-statement LEFT JOIN missed.
+    """
+    from geoid.repositories.place_repo import _resolve_incumbent_slug
+    from geoid.schemas.place import PlaceCreate, geometry_to_geojson
+
+    assert (await client.post("/collections/public/items", json=unit_square_ccw)).status_code == 201
+
+    geojson = geometry_to_geojson(PlaceCreate.model_validate(unit_square_ccw))
+    assert await _resolve_incumbent_slug(session, geojson) == "public"

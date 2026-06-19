@@ -97,7 +97,10 @@ class MintResponse(BaseModel):
     body is :class:`GeometryConflictResponse`.
     """
 
-    geoid: str = Field(description="The bare UUIDv7 — the canonical, immutable identifier.")
+    geoid: str = Field(
+        description="The geoid — a content-addressed UUIDv8 derived from the geometry; "
+        "the canonical, immutable identifier."
+    )
     uri: str = Field(description="Durable resolver URI, e.g. https://data.fao.org/geoid/<uuid>.")
     item_url: str = Field(description="Collection-scoped OGC API Features item URL.")
     collection: str = Field(description="Collection slug the place was minted into.")
@@ -129,6 +132,7 @@ BulkRejectReason = Literal[
     "geometry_conflict",  # identical geometry already registered — 409 + incumbent
     "external_id_conflict",  # duplicate (collection, external_id) — 409
     "geoid_conflict",  # geoid PK collision — 409 (backstop)
+    "internal_error",  # unrecognised integrity constraint — logged, surfaced honestly
 ]
 
 

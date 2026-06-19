@@ -91,7 +91,8 @@ def main() -> int:
         print(f"  collection extent (real)  → {desc['extent']['spatial']['bbox'][0]}")
 
         if first_geoid:
-            props = client.get(f"{BASE}/geoid/{first_geoid}").json()["properties"]
+            # Resolver lives at the app root (BASE already includes any /geoid root_path).
+            props = client.get(f"{BASE}/{first_geoid}").json()["properties"]
             print(f"\n== Resolve {first_geoid} ==")
             print(f"  uri:         {props['uri']}")
             print(f"  external_id: {props['external_id']}   commodity: {props.get('commodity')}")

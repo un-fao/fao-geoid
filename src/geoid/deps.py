@@ -76,6 +76,7 @@ def _resolve_static(creds: HTTPAuthorizationCredentials | None, settings: Settin
 
 async def require_principal(
     creds: HTTPAuthorizationCredentials | None = Depends(bearer_scheme),
+    settings: Settings = Depends(get_settings),
 ) -> Principal:
     """Resolve the caller's identity. Anonymous is a valid (non-error) outcome.
 
@@ -85,8 +86,10 @@ async def require_principal(
     token against the configured issuer/JWKS here and map claims -> roles. Until
     then the temporary static-token path is authoritative and does not depend on
     FAO's (unverified) IdP.
+
+    ``settings`` is injected (not fetched via ``get_settings()``) so the auth path
+    honours ``app.dependency_overrides[get_settings]`` in tests.
     """
-    settings = get_settings()
     return _resolve_static(creds, settings)
 
 

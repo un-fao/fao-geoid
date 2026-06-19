@@ -14,6 +14,8 @@ Constraint→HTTP mapping (DB is the source of truth; switch on constraint_name)
 
 from __future__ import annotations
 
+import logging
+
 from fastapi import FastAPI, Request, status
 from fastapi.responses import JSONResponse
 from sqlalchemy.exc import IntegrityError
@@ -39,7 +41,10 @@ from geoid.services.exceptions import (
     GeometryConflictError,
     GeometryInvalidError,
     PlaceNotFoundError,
+    RegistryConsistencyError,
 )
+
+logger = logging.getLogger(__name__)
 
 
 def _error(status_code: int, message: str, **extra: object) -> JSONResponse:
@@ -89,6 +94,19 @@ def register_exception_handlers(app: FastAPI) -> None:
             uri=ids["uri"],
             collection=exc.collection,
             constraint=UQ_GEOID_REGISTRY_GEOM_HASH,
+        )
+
+    @app.exception_handler(RegistryConsistencyError)
+    async def _registry_consistency(_: Request, exc: RegistryConsistencyError) -> JSONResponse:
+        # Should-not-happen registry/recipe drift: a dedup loser whose incumbent
+        # collection never materialised. Registering a SPECIFIC-type handler (not a
+        # bare Exception handler) keeps this on Starlette's ExceptionMiddleware, which
+        # returns the response instead of the ServerErrorMiddleware re-raise the test
+        # client trips on. logger.exception captures the traceback for ops.
+        logger.exception("registry consistency error for geoid %s", exc.geoid)
+        return _error(
+            status.HTTP_500_INTERNAL_SERVER_ERROR,
+            "internal registry inconsistency",
         )
 
     @app.exception_handler(IntegrityError)

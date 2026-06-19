@@ -13,7 +13,6 @@ from geoid.api.paging import enforce_max_offset
 from geoid.config import Settings, get_settings
 from geoid.db import get_session
 from geoid.deps import require_admin
-from geoid.repositories import catalog_repo, collection_repo
 from geoid.schemas.collection import CollectionCreate, CollectionOut, ItemIdList
 from geoid.services import listing_service
 
@@ -25,21 +24,7 @@ async def create_collection(
     body: CollectionCreate,
     session: AsyncSession = Depends(get_session),
 ) -> CollectionOut:
-    catalog = await catalog_repo.get_or_create_default(session)
-    collection = await collection_repo.create(
-        session,
-        catalog_id=catalog.id,
-        slug=body.id,
-        title=body.title,
-        writable_anon=body.writable_anon,
-        metadata=body.metadata,
-    )
-    return CollectionOut(
-        id=collection.slug,
-        title=collection.title,
-        writable_anon=collection.writable_anon,
-        metadata=collection.meta,
-    )
+    return await listing_service.create_collection(session, body)
 
 
 @router.get(
@@ -61,10 +46,15 @@ async def list_collections(session: AsyncSession = Depends(get_session)) -> list
 )
 async def list_item_ids(
     collection_id: str,
-    limit: int = Query(default=1000, ge=1, le=100_000),
+    limit: int | None = Query(default=None, ge=1),
     offset: int = Query(default=0, ge=0),
     session: AsyncSession = Depends(get_session),
     settings: Settings = Depends(get_settings),
 ) -> ItemIdList:
     enforce_max_offset(offset, settings)
-    return await listing_service.list_item_ids(session, collection_id, limit=limit, offset=offset)
+    # Same limit derivation as ogc.get_items, so both read surfaces share one source
+    # of truth (settings.default_limit / settings.max_limit) instead of hardcoding.
+    effective_limit = min(limit or settings.default_limit, settings.max_limit)
+    return await listing_service.list_item_ids(
+        session, collection_id, limit=effective_limit, offset=offset
+    )

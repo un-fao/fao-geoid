@@ -60,7 +60,7 @@ OTHER_SQUARE = "POLYGON((30 30,31 30,31 31,30 31,30 30))"
 
 
 def _place_id(n: int) -> str:
-    # Ordered ids standing in for UUIDv7 mint order (the planner relies on order).
+    # Ordered ids standing in for the planner's lowest-id collision tie-break.
     return str(uuid.UUID(int=n))
 
 
@@ -135,11 +135,20 @@ def _stamp_count(db) -> int:
     return db.execute("SELECT count(*) FROM dedup_recipe_stamp").fetchone()[0]
 
 
-def _run_rehash(url: str, *flags: str) -> subprocess.CompletedProcess:
+def _run_rehash(
+    url: str, *flags: str, force_non_identity: bool = True
+) -> subprocess.CompletedProcess:
+    # The migrated test DB has migration 0004 (deterministic geoid), so the script's
+    # identity guard refuses a plain run. The test data is throwaway non-identity data,
+    # which is exactly --force-non-identity's legitimate use; the guard itself is
+    # exercised separately with force_non_identity=False.
     env = {key: value for key, value in os.environ.items() if not key.startswith("GEOID_")}
     env["GEOID_DATABASE_URL"] = url
+    argv = [sys.executable, str(SCRIPT), "--yes"]
+    if force_non_identity:
+        argv.append("--force-non-identity")
     return subprocess.run(
-        [sys.executable, str(SCRIPT), "--yes", *flags],
+        [*argv, *flags],
         env=env,
         cwd=ROOT,
         capture_output=True,
@@ -270,3 +279,19 @@ def test_noop_run_still_appends_a_stamp(db, _migrated):
     stamped_by, note = _latest_stamp(db)
     assert stamped_by == "rehash-script"
     assert note == "updated 0, skipped 0, unchanged 1"
+
+
+def test_rehash_refuses_on_deterministic_db_without_force(db, _migrated):
+    # Migration 0004 (deterministic geoid) is applied on the migrated DB, so the
+    # identity guard MUST refuse a plain run — recomputing geom_hash would re-mint
+    # identity-derived geoids and break permalinks. A safe default, not a foot-gun.
+    collection_id = _make_collection(db, "guard")
+    _insert_place(db, _place_id(1), collection_id, SQUARE)
+    stamps_before = _stamp_count(db)
+
+    result = _run_rehash(_migrated, force_non_identity=False)
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert "refusing to run" in result.stdout
+    assert "--force-non-identity" in result.stdout
+    # Refused in pre-flight, before any mutation: no stamp row appended.
+    assert _stamp_count(db) == stamps_before
