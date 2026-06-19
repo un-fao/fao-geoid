@@ -18,7 +18,7 @@ internal infrastructure rows (catalog/collection ids), never for geoids.
 
 On read we derive resolvable forms from the bare UUID:
 
-* a URI            ``<base_url>/geoid/<uuid>``
+* a URI            ``<base_url>/<uuid>``
 * an OGC item URL  ``<base_url>/collections/<collection>/items/<uuid>``
 """
 
@@ -165,8 +165,8 @@ def is_uuid7(value: uuid.UUID) -> bool:
 
 
 def uri_for(value: uuid.UUID, base_url: str) -> str:
-    """Derive the durable resolver URI ``<base_url>/geoid/<uuid>``."""
-    return f"{base_url.rstrip('/')}/geoid/{value}"
+    """Derive the durable resolver URI ``<base_url>/<uuid>``."""
+    return f"{base_url.rstrip('/')}/{value}"
 
 
 def item_url_for(value: uuid.UUID, collection: str, base_url: str) -> str:

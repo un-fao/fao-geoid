@@ -43,7 +43,7 @@ async def test_bulk_mints_distinct_resolvable_geoids(client):
     assert len(set(geoids)) == 3
     # Each minted geoid resolves durably and reports itself.
     for geoid in geoids:
-        resolved = await client.get(f"/geoid/{geoid}")
+        resolved = await client.get(f"/{geoid}")
         assert resolved.status_code == 200
         assert resolved.json()["properties"]["geoid"] == geoid
 
@@ -166,7 +166,7 @@ async def test_bulk_accepts_wkt_string_geometry(client):
     body = resp.json()
     assert body["summary"] == {"received": 2, "accepted": 2, "rejected": 0}
     wkt_geoid = next(a["geoid"] for a in body["accepted"] if a["index"] == 1)
-    assert (await client.get(f"/geoid/{wkt_geoid}")).status_code == 200
+    assert (await client.get(f"/{wkt_geoid}")).status_code == 200
 
 
 async def test_bulk_over_limit_returns_413(client):

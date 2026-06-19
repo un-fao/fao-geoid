@@ -66,7 +66,7 @@ class Settings(DatabaseSettings):
         default="",
         description=(
             "Sub-path the API is mounted under behind a reverse proxy (env: "
-            "GEOID_ROOT_PATH), e.g. '/geoid/v1'. Passed to FastAPI(root_path=...) so "
+            "GEOID_ROOT_PATH), e.g. '/geoid'. Passed to FastAPI(root_path=...) so "
             "Swagger/OpenAPI resolve behind the proxy, and prepended to BASE_URL when "
             "deriving public URIs/OGC links. The proxy is expected to strip this prefix "
             "before forwarding."
@@ -145,7 +145,7 @@ class Settings(DatabaseSettings):
 
     @model_validator(mode="after")
     def _normalize_root_path(self) -> Settings:
-        # Accept "geoid/v1", "/geoid/v1", "/geoid/v1/" -> "/geoid/v1"; "" stays "".
+        # Accept "geoid", "/geoid", "/geoid/" -> "/geoid"; "" stays "".
         rp = self.root_path.strip()
         object.__setattr__(self, "root_path", "/" + rp.strip("/") if rp else "")
         return self
@@ -165,7 +165,7 @@ class Settings(DatabaseSettings):
     def base_url_clean(self) -> str:
         """Public base for link derivation: BASE_URL (no trailing slash) + ROOT_PATH.
 
-        When the API sits behind a proxy sub-path (root_path, e.g. '/geoid/v1'), every
+        When the API sits behind a proxy sub-path (root_path, e.g. '/geoid'), every
         minted URI / OGC link must carry that prefix to stay resolvable. root_path is
         already normalised to '' or '/<path>', so this concatenation is safe.
         """

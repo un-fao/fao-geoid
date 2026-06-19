@@ -118,7 +118,7 @@ async def create_items_bulk(
 
 
 @router.get(
-    "/geoid/{geoid}",
+    "/{geoid}",
     response_model=FeatureModel,
     response_class=GeoJSONResponse,
     summary="Durable geoid resolver",

@@ -13,7 +13,7 @@ async def test_post_polygon_mints_geoid_uri(client, unit_square_ccw):
     body = resp.json()
     assert body["collection"] == "public"
     geoid = body["geoid"]
-    assert body["uri"] == f"http://testserver/geoid/{geoid}"
+    assert body["uri"] == f"http://testserver/{geoid}"
     assert body["item_url"] == f"http://testserver/collections/public/items/{geoid}"
     # OGC API - Features Part 4, Requirement 6: a 201 carries a Location header
     # pointing at the new resource (the item endpoint, not the durable resolver).
@@ -31,7 +31,7 @@ async def test_anonymous_post_captures_whisp_client_provenance(client):
     assert resp.status_code == 201
     geoid = resp.json()["geoid"]
 
-    feat = (await client.get(f"/geoid/{geoid}")).json()
+    feat = (await client.get(f"/{geoid}")).json()
     # client-submitted attributes round-trip; provenance records the whisp client.
     assert feat["properties"]["area_ha"] == 1.0
     prov = feat["properties"]["_geoid_provenance"]
@@ -56,7 +56,7 @@ async def test_identical_geometry_returns_409_with_incumbent_geoid(
     assert body["geoid"] == original_geoid
     assert body["collection"] == "public"
     assert body["constraint"] == "uq_geoid_registry_geom_hash"
-    assert body["uri"] == f"http://testserver/geoid/{original_geoid}"
+    assert body["uri"] == f"http://testserver/{original_geoid}"
     assert "message" in body
     # Requirement 6 scopes the Location header to 201 only — a 409 carries none.
     assert "Location" not in second.headers
@@ -120,7 +120,7 @@ async def test_unknown_collection_returns_404(client, unit_square_ccw):
 
 
 async def test_resolve_unknown_geoid_returns_404(client):
-    resp = await client.get("/geoid/019e0000-0000-7000-8000-000000000000")
+    resp = await client.get("/019e0000-0000-7000-8000-000000000000")
     assert resp.status_code == 404
 
 
@@ -140,7 +140,7 @@ async def test_post_wkt_string_mints_geoid(client):
     resp = await client.post("/collections/public/items", json=_wkt_feature(_WKT_SQUARE))
     assert resp.status_code == 201
     geoid = resp.json()["geoid"]
-    feat = (await client.get(f"/geoid/{geoid}")).json()
+    feat = (await client.get(f"/{geoid}")).json()
     assert feat["geometry"]["type"] == "Polygon"
 
 
@@ -200,3 +200,18 @@ async def test_anonymous_write_to_managed_collection_forbidden(
         "/collections/managed/items", headers=admin_headers, json=unit_square_ccw
     )
     assert owned.status_code == 201
+
+
+# --- Root-level resolver catch-all does not shadow literal routes ------------
+
+
+async def test_root_resolver_does_not_shadow_literal_routes(client):
+    # The durable resolver now lives at the app root (`/{geoid}`), a single-segment
+    # UUID catch-all. Literal single-segment routes are registered first, so they win;
+    # only genuinely-unknown single segments fall through to the resolver.
+    assert (await client.get("/conformance")).status_code == 200
+    assert (await client.get("/collections")).status_code == 200
+    # A well-formed but unknown geoid falls through to the resolver -> 404.
+    assert (await client.get("/019e0000-0000-7000-8000-000000000000")).status_code == 404
+    # A non-UUID single segment can't bind the `uuid.UUID` path param -> 422.
+    assert (await client.get("/not-a-uuid")).status_code == 422

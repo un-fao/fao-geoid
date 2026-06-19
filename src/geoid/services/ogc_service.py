@@ -179,7 +179,7 @@ def _feature_links(
     links = [
         Link(href=item_url, rel="self", type=_GEOJSON),
         Link(
-            href=f"{base}/geoid/{geoid}",
+            href=f"{base}/{geoid}",
             rel="alternate",
             type=_GEOJSON,
             title="Durable geoid resolver",
@@ -191,7 +191,7 @@ def _feature_links(
     if predecessor_id is not None:
         links.append(
             Link(
-                href=f"{base}/geoid/{predecessor_id}",
+                href=f"{base}/{predecessor_id}",
                 rel="predecessor-version",
                 type=_GEOJSON,
                 title="Superseded geoid (STAC version extension)",
