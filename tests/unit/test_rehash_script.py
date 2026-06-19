@@ -36,7 +36,7 @@ COLL_B = uuid.UUID(int=0xB)
 
 def _row(n: int, collection_id: uuid.UUID, old_hash: str, new_hash: str) -> object:
     # uuid.UUID(int=n) keeps id ordering aligned with n — the planner only relies
-    # on id order (UUIDv7 = mint-time order in production).
+    # on id order (its collision tie-break is "lowest id wins").
     return rehash.ScanRow(
         id=uuid.UUID(int=n),
         collection_id=collection_id,

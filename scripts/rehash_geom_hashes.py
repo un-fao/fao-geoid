@@ -1,24 +1,36 @@
 #!/usr/bin/env python3
 """Re-hash every ``geoid_registry.geom_hash`` under the live engine (audited, one tx).
 
-Run this when the dedup hash has drifted out from under the stored rows — the
-golden-vector check (``scripts/dedup_vectors.py --check``, also bootstrap's exit-3
-path) failing after a PostGIS/GEOS upgrade is the trigger. Drift never corrupts
-identity (geoids are UUIDv7; the hash is operational dedup only), but stale hashes
-stop deduplicating new submissions against old rows until they are recomputed. The
-dedup hash + its global UNIQUE live on ``geoid_registry`` (sharding-ready); the
-geometry they hash lives on ``place``, so the recompute joins the two.
+DANGER (post-migration 0004): the geoid is now DERIVED from ``geom_hash`` (a
+content-addressed UUIDv8), so the canonicalization recipe is IDENTITY-load-bearing
+and FROZEN. Recomputing ``geom_hash`` against live identity data would silently
+re-mint every geoid and break every permalink — a recipe/GEOS change is an
+*identity-version* event, NOT a survivable rehash. This script therefore REFUSES to
+run on a database that has the deterministic-geoid functions (migration 0004) unless
+``--force-non-identity`` is passed to assert the registry is genuinely non-identity
+data. The legitimate remaining use is a pre-0004 / non-identity registry whose
+``geom_hash`` is operational dedup only.
+
+When it IS safe to run, the trigger is the golden-vector check
+(``scripts/dedup_vectors.py --check``, also bootstrap's exit-3 path) failing after a
+PostGIS/GEOS upgrade: stale hashes stop deduplicating new submissions against old
+rows until they are recomputed. The dedup hash + its global UNIQUE live on
+``geoid_registry`` (sharding-ready); the geometry they hash lives on ``place``, so
+the recompute joins the two.
 
     GEOID_DATABASE_URL='postgresql+asyncpg://geoid:...@127.0.0.1:5432/geoid' \\
-    uv run python scripts/rehash_geom_hashes.py [--dry-run] [--yes]
+    uv run python scripts/rehash_geom_hashes.py [--dry-run] [--yes] [--force-non-identity]
 
 Steps:
     1. config       GEOID_DATABASE_URL only — the APP role: it owns
                     ``geoid_registry``, so it may DISABLE TRIGGER (Cloud SQL's
                     ``postgres`` may not)
-    2. pre-flight   latest dedup_recipe_stamp row (absent → migrate to 0003 first),
-                    live PostGIS/GEOS versions, golden-vector check (informational:
-                    all vectors passing means this run will likely be a no-op)
+    2. pre-flight   REFUSE if migration 0004's deterministic-geoid functions exist
+                    and --force-non-identity was not passed (identity is hash-derived
+                    and frozen — see the DANGER note above); then the latest
+                    dedup_recipe_stamp row (absent → migrate to 0003 first), live
+                    PostGIS/GEOS versions, golden-vector check (informational: all
+                    vectors passing means this run will likely be a no-op)
     3. scan         read-only SELECT recomputing every registry row's hash from
                     ``place.geom`` via ``geoid_geom_hash_default`` (migration 0001
                     pins the ONE global grid inside that wrapper)
@@ -26,8 +38,8 @@ Steps:
                     geometry uniqueness is catalog-wide): within a new_hash
                     group a row already
                     holding the hash unchanged wins (updating past it would
-                    violate uq_geoid_registry_geom_hash); otherwise the earliest
-                    id (UUIDv7 = mint-time order) wins; losers keep their old hash
+                    violate uq_geoid_registry_geom_hash); otherwise the lowest
+                    id wins (a stable deterministic tie-break); losers keep their old hash
                     and are reported as discovered duplicates; planned updates
                     targeting a skipped row's retained hash are cascade-demoted
                     to a fixed point. Rows are never deleted. --dry-run stops here.
@@ -89,6 +101,7 @@ class RehashConfig:
     app_url: str
     dry_run: bool
     assume_yes: bool
+    force_non_identity: bool = False
 
     @property
     def dsn(self) -> str:
@@ -102,7 +115,7 @@ class RehashConfig:
 
 @dataclass(frozen=True)
 class ScanRow:
-    id: uuid.UUID  # orderable; UUIDv7 sorts by mint time
+    id: uuid.UUID  # orderable; the planner's lowest-id collision tie-break
     collection_id: uuid.UUID  # report context only — collisions are global
     old_hash: str  # hex
     new_hash: str  # hex
@@ -136,6 +149,12 @@ def _load_config(argv: list[str] | None = None) -> RehashConfig:
     )
     parser.add_argument("--dry-run", action="store_true", help="scan + plan only; mutate nothing")
     parser.add_argument("--yes", action="store_true", help="skip the confirmation prompt")
+    parser.add_argument(
+        "--force-non-identity",
+        action="store_true",
+        help="proceed even though migration 0004 is applied — ONLY for a registry whose "
+        "geom_hash is NOT identity-bearing (otherwise recomputing it re-mints every geoid)",
+    )
     args = parser.parse_args(argv)
 
     raw_url = os.environ.get("GEOID_DATABASE_URL")
@@ -150,7 +169,12 @@ def _load_config(argv: list[str] | None = None) -> RehashConfig:
         raise ConfigError(f"GEOID_DATABASE_URL is not a valid SQLAlchemy URL: {exc}") from exc
     if url.get_backend_name() != "postgresql":
         raise ConfigError(f"GEOID_DATABASE_URL must be a postgresql URL, got {url.drivername!r}")
-    return RehashConfig(app_url=raw_url, dry_run=args.dry_run, assume_yes=args.yes)
+    return RehashConfig(
+        app_url=raw_url,
+        dry_run=args.dry_run,
+        assume_yes=args.yes,
+        force_non_identity=args.force_non_identity,
+    )
 
 
 def _load_dedup_vectors():
@@ -165,8 +189,38 @@ def _load_dedup_vectors():
     return module
 
 
-def preflight(conn: psycopg.Connection) -> None:
+def _guard_identity_load_bearing(conn: psycopg.Connection, cfg: RehashConfig) -> None:
+    """Refuse to recompute geom_hash on a deterministic-geoid DB (migration 0004).
+
+    Post-0004 the geoid is DERIVED from geom_hash, so the recipe is identity-load-
+    bearing and frozen: recomputing the hash would silently re-mint every geoid and
+    break permalinks. A recipe/GEOS change is an identity-version event, not a
+    survivable rehash. The only safe live use is a genuinely non-identity registry,
+    which the operator asserts with --force-non-identity.
+    """
+    has_deterministic = conn.execute(
+        "SELECT count(*) FROM pg_proc WHERE proname = 'geoid_from_geom_hash'"
+    ).fetchone()[0]
+    if not has_deterministic:
+        return
+    if cfg.force_non_identity:
+        print(
+            "  ⚠ deterministic-geoid functions present (migration 0004); proceeding under "
+            "--force-non-identity — caller asserts geom_hash is NOT identity-bearing here"
+        )
+        return
+    raise StepError(
+        "refusing to run: migration 0004 is applied, so the geoid is DERIVED from "
+        "geom_hash — the recipe is identity-load-bearing and FROZEN. Recomputing "
+        "geom_hash would re-mint geoids and break permalinks (an identity-version event, "
+        "not a rehash). Re-run with --force-non-identity ONLY if this registry is "
+        "genuinely non-identity data."
+    )
+
+
+def preflight(conn: psycopg.Connection, cfg: RehashConfig) -> None:
     print("→ pre-flight")
+    _guard_identity_load_bearing(conn, cfg)
     if conn.execute("SELECT to_regclass('dedup_recipe_stamp')").fetchone()[0] is None:
         raise StepError("dedup_recipe_stamp table missing — run `geoid migrate` to 0003+ first")
     stamp = conn.execute(
@@ -232,7 +286,7 @@ def plan_rehash(rows: Sequence[ScanRow]) -> RehashPlan:
 
     # Group winner per new_hash — catalog-wide: an incumbent already holding the
     # hash unchanged beats everyone (the UPDATE itself would violate
-    # uq_geoid_registry_geom_hash); otherwise the earliest id (= mint time).
+    # uq_geoid_registry_geom_hash); otherwise the lowest id (a stable tie-break).
     winners: dict[str, ScanRow] = {}
     for row in rows:
         incumbent = winners.get(row.new_hash)
@@ -340,7 +394,7 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         with psycopg.connect(cfg.dsn, autocommit=True) as conn:
-            preflight(conn)
+            preflight(conn, cfg)
             rows = scan(conn)
             plan = plan_rehash(rows)
             print(

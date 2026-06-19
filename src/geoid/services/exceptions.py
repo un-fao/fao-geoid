@@ -65,3 +65,18 @@ class GeometryConflictError(GeoidServiceError):
         self.geoid = geoid
         self.collection = collection
         super().__init__("identical geometry already exists in the catalog")
+
+
+class RegistryConsistencyError(GeoidServiceError):
+    """A dedup loser whose incumbent collection never materialised (500).
+
+    Should not happen: the geoid is derived in-statement so a loser always carries
+    it, and ``_resolve_incumbent_slug`` recovers the collection slug across the rare
+    concurrent pre-commit window. A persistent miss means genuine registry/recipe
+    drift — surfaced as a structured 500 (carrying the geoid) instead of an
+    unstructured crash.
+    """
+
+    def __init__(self, geoid: uuid.UUID) -> None:
+        self.geoid = geoid
+        super().__init__(f"registry inconsistency: incumbent collection missing for geoid {geoid}")

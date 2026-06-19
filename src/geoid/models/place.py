@@ -1,4 +1,4 @@
-"""Place ORM model (≈ STAC item) — INSERT-only; ``id`` IS the geoid (UUIDv7).
+"""Place ORM model (≈ STAC item) — INSERT-only; ``id`` IS the geoid (content-addressed UUIDv8).
 
 Immutability is enforced in the database (a ``BEFORE UPDATE OR DELETE`` trigger
 raises), not in Python. The dedup ``geom_hash`` and its global UNIQUE live on
@@ -38,7 +38,8 @@ class Place(Base):
         CheckConstraint("ST_IsValid(geom)", name="ck_place_geom_is_valid"),
     )
 
-    # id == geoid (UUIDv7), minted app-side by the registry service.
+    # id == geoid: a content-addressed UUIDv8 derived DB-side from the geometry by
+    # geoid_id_default (migration 0004), not minted app-side.
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
     collection_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("collection.id"), nullable=False

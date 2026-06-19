@@ -95,3 +95,21 @@ async def test_collection_create_rejects_any_dedup_grid(client, admin_headers):
             json={"id": "v", "metadata": {"dedup_grid": bad}},
         )
         assert resp.status_code == 422, f"dedup_grid={bad!r} was accepted"
+
+
+async def test_create_collection_via_service(session):
+    # 2.1: the route now delegates to listing_service.create_collection. Exercise the
+    # service directly so the service-layer write path is pinned (not just the route),
+    # including the default-catalog resolution and the persisted, listable result.
+    from geoid.schemas.collection import CollectionCreate, CollectionOut
+    from geoid.services import listing_service
+
+    out = await listing_service.create_collection(
+        session, CollectionCreate(id="svc-made", title="Service-made")
+    )
+    assert isinstance(out, CollectionOut)
+    assert out.id == "svc-made"
+    assert out.title == "Service-made"
+
+    listed = await listing_service.list_collections(session)
+    assert "svc-made" in {c.id for c in listed}

@@ -111,3 +111,52 @@ async def test_empty_collection_extent_is_world(client, admin_headers):
     await client.post("/manage/collections", headers=admin_headers, json={"id": "emptyc"})
     desc = (await client.get("/collections/emptyc")).json()
     assert desc["extent"]["spatial"]["bbox"] == [[-180.0, -90.0, 180.0, 90.0]]
+
+
+# --- registry-consistency drift maps to a structured 500 (not an unhandled crash) ---
+
+
+async def test_registry_consistency_drift_returns_structured_500(
+    client, monkeypatch, unit_square_ccw
+):
+    # Force the "should never happen" drift: insert_place reports a dedup loser whose
+    # incumbent collection never materialised (collection_slug=None). The service raises
+    # RegistryConsistencyError and the specific-type handler returns a structured 500 —
+    # cleanly, without tripping the test client's ServerErrorMiddleware re-raise.
+    import uuid
+
+    from geoid.repositories import place_repo
+    from geoid.repositories.place_repo import InsertResult
+
+    async def _drift(*args, **kwargs):
+        return InsertResult(geoid=uuid.uuid4(), created=False, collection_slug=None)
+
+    monkeypatch.setattr(place_repo, "insert_place", _drift)
+
+    resp = await client.post("/collections/public/items", json=unit_square_ccw)
+    assert resp.status_code == 500
+    body = resp.json()
+    assert body["code"] == 500
+    assert body["message"] == "internal registry inconsistency"
+
+
+async def test_bulk_registry_consistency_drift_returns_structured_500(
+    client, monkeypatch, unit_square_ccw
+):
+    # The bulk path's _mint_one carries the same drift guard: a dedup loser with no
+    # incumbent collection aborts the batch with a structured 500 rather than emitting
+    # a malformed reject row.
+    import uuid
+
+    from geoid.repositories import place_repo
+    from geoid.repositories.place_repo import InsertResult
+
+    async def _drift(*args, **kwargs):
+        return InsertResult(geoid=uuid.uuid4(), created=False, collection_slug=None)
+
+    monkeypatch.setattr(place_repo, "insert_place", _drift)
+
+    fc = {"type": "FeatureCollection", "features": [unit_square_ccw]}
+    resp = await client.post("/collections/public/items/bulk", json=fc)
+    assert resp.status_code == 500
+    assert resp.json()["message"] == "internal registry inconsistency"

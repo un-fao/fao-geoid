@@ -152,7 +152,8 @@ def run_mint_probe(client: httpx.Client) -> list[bool]:
         return f"[201] minted (first run against this catalog), geoid={body['geoid']}"
 
     def probe_resolve_geoid() -> str:
-        props = _get_json(client, f"/geoid/{minted['geoid']}").get("properties") or {}
+        # Resolver lives at the app root: BASE already carries the /geoid root_path.
+        props = _get_json(client, f"/{minted['geoid']}").get("properties") or {}
         uri = props.get("uri")
         uri_netloc = urlsplit(uri or "").netloc
         assert uri_netloc == _expected_netloc(), (

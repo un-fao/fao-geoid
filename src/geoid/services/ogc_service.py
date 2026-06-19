@@ -51,7 +51,7 @@ _QUERYABLES_REL = "http://www.opengis.net/def/rel/ogc/1.0/queryables"
 # a closed set (additionalProperties: false) and the filter path rejects names
 # outside the mapping, so the two are pinned equal by a unit test.
 _QUERYABLE_SCHEMAS: dict[str, dict[str, Any]] = {
-    "geoid": {"type": "string", "format": "uuid", "title": "geoid (UUIDv7)"},
+    "geoid": {"type": "string", "format": "uuid", "title": "geoid (UUIDv8)"},
     "external_id": {"type": "string", "title": "Caller-supplied external id"},
     "created_at": {"type": "string", "format": "date-time", "title": "Creation time"},
     "geometry": {"format": "geometry-any", "title": "Place geometry (Polygon/MultiPolygon)"},
