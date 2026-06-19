@@ -151,7 +151,7 @@ squash:
 
 So **`place` carries no global UNIQUE and is partition/shard-ready today.** The
 gating dependency for rungs 2 and 3 is **discharged** — the collision policy in
-`scripts/rehash_geom_hashes.py` (incumbent-unchanged wins, else earliest UUIDv7)
+`scripts/rehash_geom_hashes.py` (incumbent-unchanged wins, else lowest geoid)
 already operates on `geoid_registry.geom_hash`.
 
 ---

@@ -30,7 +30,7 @@ per-module reference for all 47 modules.
 🎓 **Geospatial concepts & standards tutorial:** open [`docs/tutorial.html`](docs/tutorial.html)
 in a browser — an interactive primer on every geospatial idea GeoID relies on (CRS & axis order,
 GeoJSON↔WKB, polygon validity, the dedup hash, spatial indexing, OGC API Features
-& CQL2, UUIDv7), with live widgets and per-section self-tests grounded in the real code.
+& CQL2, the content-addressed UUIDv8 geoid), with live widgets and per-section self-tests grounded in the real code.
 
 📋 **Stakeholder contract (shareable):** open [`docs/contract.html`](docs/contract.html) in a
 browser — definitions & rules, the team's decisions with rationale, the API contract, a fully
@@ -40,7 +40,8 @@ Prose: this file + [`PERFORMANCE.md`](PERFORMANCE.md) + [`docs/DEFINITIONS.md`](
 
 ## The identifier
 
-Every place is minted a **UUIDv7** (RFC 9562), stored bare as the item id. On read we derive:
+Every place is assigned a content-addressed **UUIDv8** (RFC 9562 §5.8) **derived from its canonical
+geometry** (the same `geom_hash` used for dedup), stored bare as the item id. On read we derive:
 
 - a URI — `https://data.fao.org/geoid/<uuid>`
 - a collection-scoped OGC item URL — `…/collections/{coll}/items/<uuid>`
@@ -48,13 +49,17 @@ Every place is minted a **UUIDv7** (RFC 9562), stored bare as the item id. On re
 `POST` returns both. The geoid is **immutable**: `place` is INSERT-only (enforced by a DB trigger);
 corrections mint a *new* geoid linked via `predecessor_id`, and the original resolves forever.
 
-Deduplication is a **separate** concern from identity: a **global** canonical `geom_hash` (see below),
-never the id. One geometry → one geoid across the whole catalog — POSTing an identical geometry fails
-with **409** and the body carries the **incumbent geoid** (plus its uri and collection).
+Identity and deduplication now share **one fingerprint**: the geoid is derived from the same **global**
+canonical `geom_hash` (see below) that enforces uniqueness, so the two can never disagree and the same
+geometry yields the same geoid on every deployment. One geometry → one geoid across the whole catalog —
+POSTing an identical geometry fails with **409** and the body carries the **incumbent geoid** (plus its
+uri and collection).
 
 ## The dedup recipe (load-bearing correctness)
 
-Computed in a `BEFORE INSERT` trigger so the API, `COPY`, and `ogr2ogr` paths can never drift:
+Computed inside the single arbiter-CTE insert (`place_repo.insert_place`) that both the single and bulk
+write paths share, via the one grid-pinned `geoid_geom_hash_default` SQL function, so the hash can never
+drift between paths (and, post-migration 0004, the geoid itself is derived from it):
 
 ```
 geom_hash = sha256( ST_AsBinary(
@@ -71,7 +76,8 @@ geom_hash = sha256( ST_AsBinary(
 - **`ST_Normalize`** — canonical ring / part / hole order.
 - **`'NDR'` endianness pinned** — so a country instance's hash matches central at federation sync.
 
-A single SQL function `geoid_geom_hash(geom, grid)` is the *one* definition, used by both the insert trigger
+A single SQL function `geoid_geom_hash(geom, grid)` — pinned to the global grid by the
+`geoid_geom_hash_default(geom)` wrapper — is the *one* definition, used by both the arbiter-CTE insert
 and the incumbent-lookup query.
 
 ## Quickstart (uv)
@@ -116,9 +122,9 @@ uv run ruff check .
 
 ## Configuration
 
-All configuration is environment-driven (see `.env.example`). The core image imports **no GCP SDK**:
-object storage is behind a `BlobStore` Protocol (`LocalFSStore` default, `GCSStore` via the `gcs` extra),
-so the *same image* is the on-prem artifact via `docker compose`.
+All configuration is environment-driven (see `.env.example`). The core image imports **no GCP SDK** —
+every deployment difference is expressed as configuration — so the *same image* is the on-prem artifact
+via `docker compose`.
 
 ## Licensing
 
