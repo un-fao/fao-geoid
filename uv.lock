@@ -545,7 +545,6 @@ dependencies = [
 [package.optional-dependencies]
 oidc = [
     { name = "authlib" },
-    { name = "httpx" },
 ]
 
 [package.dev-dependencies]
@@ -569,7 +568,6 @@ requires-dist = [
     { name = "geoalchemy2", specifier = ">=0.16" },
     { name = "geojson-pydantic", specifier = ">=2.1,<2.2" },
     { name = "gunicorn", specifier = ">=23.0" },
-    { name = "httpx", marker = "extra == 'oidc'", specifier = ">=0.27" },
     { name = "lark", specifier = ">=1.1" },
     { name = "pydantic", specifier = ">=2.9" },
     { name = "pydantic-settings", specifier = ">=2.6" },
