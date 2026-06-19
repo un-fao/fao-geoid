@@ -37,7 +37,7 @@ async def test_landing_page_has_required_links(client):
 
 async def test_conformance_declares_features_and_cql2(client):
     # The OGC API - Processes surface was removed; /conformance advertises the
-    # Features Part 1/3 + CQL2 read classes. (The items/queryables routes stay
+    # Features Part 1/3 + CQL2 read classes. (The queryables route stays
     # include_in_schema=False — hidden from the API definition but still live.)
     classes = (await client.get("/conformance")).json()["conformsTo"]
     assert any("ogcapi-features-1/1.0/conf/core" in c for c in classes)
@@ -281,6 +281,12 @@ async def test_format_param_advertised_in_openapi_not_f(client):
     names = {p["name"] for p in params}
     assert "format" in names  # the friendly, advertised name
     assert "f" not in names  # the OGC alias is accepted but hidden from the schema
+
+
+async def test_items_listing_is_advertised_in_openapi(client):
+    spec = (await client.get("/openapi.json")).json()
+    assert "/collections/{collection_id}/items" in spec["paths"]
+    assert "get" in spec["paths"]["/collections/{collection_id}/items"]
 
 
 async def test_default_read_is_unchanged_geojson_with_wkt_alternate(client, unit_square_ccw):

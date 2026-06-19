@@ -97,9 +97,6 @@ async def describe_collection(
     response_class=GeoJSONResponse,
     summary="Features (CQL2 + paging)",
     responses={200: {"content": {"text/plain": {}}}},
-    # Phase-1 demo: hidden from the API definition (Processes-only surface).
-    # The route stays live and serving; re-enable = drop include_in_schema.
-    include_in_schema=False,
 )
 async def get_items(
     collection_id: str,
