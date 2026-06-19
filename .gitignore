@@ -38,7 +38,6 @@ htmlcov/
 test-results/
 *.cover
 *.py,cover
-local_scripts/
 
 # Type checking
 .mypy_cache/
@@ -104,11 +103,5 @@ docs/*.html
 
 local-docs/
 
-# Deploy-time bundle (shared modules copied into Cloud Function build context by CI)
-services/dwh-upload-trigger-cf/common/
-
 # Local data
 *.sqlite3
-
-# Local object-store root (LocalFSStore default; bulk-export/by-reference test blobs)
-_blobstore/

@@ -1,13 +1,28 @@
 # BuildKit (DOCKER_BUILDKIT=1) so the Dockerfile's `RUN --mount=...` mounts work;
 # the `builds submit --tag` shortcut runs legacy Docker and rejects them.
+#
+# Layer caching: pull the previous build's `:latest` (best-effort — the first build
+# has nothing to pull) and feed it to `--cache-from`, building with
+# BUILDKIT_INLINE_CACHE=1 so the pushed image embeds reusable cache metadata. `$$`
+# escapes the shell vars from Cloud Build substitution; `${_IMAGE}` is the substitution.
 steps:
   - name: gcr.io/cloud-builders/docker
+    entrypoint: bash
     env:
       - DOCKER_BUILDKIT=1
     args:
-      - build
-      - --tag
-      - ${_IMAGE}
-      - .
+      - -c
+      - |
+        set -euo pipefail
+        IMAGE="${_IMAGE}"
+        CACHE="$${IMAGE%:*}:latest"
+        docker pull "$$CACHE" || true
+        docker build \
+          --tag "$$IMAGE" \
+          --tag "$$CACHE" \
+          --cache-from "$$CACHE" \
+          --build-arg BUILDKIT_INLINE_CACHE=1 \
+          .
+        docker push "$$CACHE"
 images:
   - ${_IMAGE}
