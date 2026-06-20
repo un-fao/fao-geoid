@@ -50,6 +50,7 @@ dev = [
     "testcontainers[postgres]>=4.8",
     "ruff>=0.15",
     "psycopg[binary]>=3.2",
+    "pytest-xdist>=3.8.0",
 ]
 
 [build-system]
