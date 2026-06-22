@@ -23,8 +23,8 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 
 # ---- runtime stage: slim, non-root -----------------------------------------
 FROM python:3.12-slim-bookworm AS runtime
-# shapely/pyproj wheels bundle GEOS/PROJ and asyncpg needs no libpq, so no apt
-# installs are required. ca-certificates for outbound TLS (Secret Manager, etc).
+# shapely wheels bundle GEOS and asyncpg needs no libpq, so no apt installs are
+# required. ca-certificates for outbound TLS (Secret Manager, etc).
 RUN apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates \
     && rm -rf /var/lib/apt/lists/* \

@@ -13,8 +13,8 @@ authoritative value is computed DB-side in the arbiter CTE (migration 0004's SQL
 dedup can never drift; this Python mirror must stay byte-identical for tests/tooling.
 RFC 9562 §6.5 mandates UUIDv8 (not the SHA-1 v5) for SHA-256-based name UUIDs.
 
-:func:`uuid7`/:func:`new_geoid` remain the monotonic UUIDv7 minter, now used only for
-internal infrastructure rows (catalog/collection ids), never for geoids.
+:func:`uuid7` remains the monotonic UUIDv7 minter, now used only for internal
+infrastructure rows (catalog/collection ids), never for geoids.
 
 On read we derive resolvable forms from the bare UUID:
 
@@ -122,16 +122,6 @@ def uuid7(ts_ms: int | None = None) -> uuid.UUID:
     return _assemble(ms_snapshot, counter_snapshot, rand_b)
 
 
-def new_geoid() -> uuid.UUID:
-    """Mint a fresh monotonic UUIDv7 for an internal infrastructure row.
-
-    Geoids are NOT minted here — they are derived from the geometry by
-    :func:`geoid_from_geom_hash`. This remains the id source for catalog/collection
-    rows, which have no natural content to address.
-    """
-    return uuid7()
-
-
 def geoid_from_geom_hash(geom_hash: bytes) -> uuid.UUID:
     """Derive the deterministic geoid (UUIDv8) from a geometry's SHA-256 ``geom_hash``.
 
@@ -152,16 +142,6 @@ def geoid_from_geom_hash(geom_hash: bytes) -> uuid.UUID:
     raw[6] = (raw[6] & 0x0F) | _UUID_V8_VERSION
     raw[8] = (raw[8] & 0x3F) | _VARIANT_RFC4122
     return uuid.UUID(bytes=bytes(raw))
-
-
-def timestamp_ms_of(value: uuid.UUID) -> int:
-    """Extract the embedded Unix-millisecond timestamp from a UUIDv7."""
-    return int.from_bytes(value.bytes[0:6], "big")
-
-
-def is_uuid7(value: uuid.UUID) -> bool:
-    """True iff ``value`` is a version-7 UUID."""
-    return value.version == 7
 
 
 def uri_for(value: uuid.UUID, base_url: str) -> str:

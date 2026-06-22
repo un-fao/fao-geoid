@@ -105,11 +105,6 @@ def test_real_admin_token_in_production_is_allowed():
     assert settings.admin_token == "a-real-secret"
 
 
-def test_invalid_vocab_is_rejected():
-    with pytest.raises(ValidationError):
-        _settings(vocab="bogus")
-
-
 @pytest.mark.parametrize("environment", ["review", "production"])
 def test_database_settings_needs_no_admin_token_outside_development(monkeypatch, environment):
     # The regression pin: the migrate job constructs DatabaseSettings with no
@@ -131,7 +126,7 @@ def test_database_settings_reads_database_url_from_env(monkeypatch):
 
 def test_database_settings_excludes_app_level_fields():
     # Structural pin: app-layer config must not creep onto the DB-layer surface.
-    for field in ("admin_token", "environment", "base_url", "vocab", "bulk_max_features"):
+    for field in ("admin_token", "environment", "base_url", "bulk_max_features"):
         assert field not in DatabaseSettings.model_fields
 
 
