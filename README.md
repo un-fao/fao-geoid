@@ -145,12 +145,19 @@ which recomputes them from `place.geom` in one audited transaction.
 > failing parity gate.
 
 **2. DB teardown wipe** (reset data while keeping schema + the seeded `public` collection). The
-`place` triggers block ordinary `DELETE`/`TRUNCATE`, so disable triggers for the session as admin:
+`place`/`geoid_registry`/`change_log` triggers block ordinary `DELETE`/`TRUNCATE`. On managed
+Postgres (Cloud SQL) **no login role is a true superuser**, so `SET session_replication_role` is
+refused — instead disable the guard triggers by **table ownership**, connected as the role that
+owns the tables (the app role, e.g. `geoid`):
 
 ```sql
-SET session_replication_role = replica;
-TRUNCATE place, geoid_registry, change_log;
-SET session_replication_role = DEFAULT;   -- keeps catalog/collection seed + schema
+ALTER TABLE place          DISABLE TRIGGER USER;
+ALTER TABLE geoid_registry DISABLE TRIGGER USER;
+ALTER TABLE change_log     DISABLE TRIGGER USER;
+TRUNCATE place, geoid_registry, change_log;   -- no CASCADE: the two hinges carry no inbound FKs
+ALTER TABLE place          ENABLE TRIGGER USER;
+ALTER TABLE geoid_registry ENABLE TRIGGER USER;
+ALTER TABLE change_log     ENABLE TRIGGER USER;  -- keeps catalog/collection seed + schema
 ```
 
 ## Licensing
