@@ -4,9 +4,15 @@ on:
   push:
     branches: [main]
 
+# Cancel a superseded lint run when rapid pushes stack up (mirrors ci.yml).
+concurrency:
+  group: pre-commit-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   pre-commit:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-python@v6

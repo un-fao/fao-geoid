@@ -13,6 +13,7 @@ concurrency:
 jobs:
   test:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     env:
       # sys.monitoring core: the legacy C tracer misses async ASGI handlers, so
       # without this the coverage number is badly under-reported (see conftest).
