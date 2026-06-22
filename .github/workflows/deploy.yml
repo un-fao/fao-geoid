@@ -36,6 +36,7 @@ jobs:
   lint:
     name: pre-commit
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-python@v6
@@ -49,6 +50,7 @@ jobs:
   test:
     name: tests
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     env:
       # sys.monitoring core: the legacy C tracer misses async ASGI handlers, so
       # without this the coverage number is badly under-reported (see conftest).
@@ -80,20 +82,22 @@ jobs:
           --cov-report=term-missing
           --cov-fail-under=80
 
-  deploy:
-    needs: [lint, test]
-    runs-on: ubuntu-latest
-    # A release event -> production; a push (to the review branch) -> review. The selected
-    # GitHub Environment supplies all vars.*/secrets below, so the job body is unchanged.
+  # Build the image in PARALLEL with lint+test (no `needs:`) instead of after the test
+  # gate — the build doesn't depend on test results, so overlapping it shaves the 86s
+  # build off the critical path. `deploy` still gates on lint+test+build, so nothing
+  # ships unless the suite is green; a built-but-untested :{sha} image is simply never
+  # deployed. :latest is used ONLY as the Cloud Build layer cache source, never for deploy.
+  build:
+    # Same target selection as deploy: release -> production, push -> review. Required so
+    # the environment-scoped vars.* below resolve.
     environment: ${{ github.event_name == 'release' && 'production' || 'review' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
     env:
-      TARGET_ENV: ${{ github.event_name == 'release' && 'production' || 'review' }}
       PROJECT: ${{ vars.GCP_PROJECT_ID }}
       REGION: ${{ vars.GCP_REGION }}
       ARTIFACT_REGISTRY: ${{ vars.ARTIFACT_REGISTRY }}
       SERVICE: ${{ vars.SERVICE_NAME }}
-      RUN_SERVICE_ACCOUNT: ${{ vars.RUN_SERVICE_ACCOUNT }}
-      CLOUD_SQL_INSTANCE: ${{ vars.CLOUD_SQL_INSTANCE }}
     steps:
       - uses: actions/checkout@v6
 
@@ -124,6 +128,41 @@ jobs:
             --project "$PROJECT" \
             --suppress-logs
 
+  deploy:
+    needs: [lint, test, build]
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    # A release event -> production; a push (to the review branch) -> review. The selected
+    # GitHub Environment supplies all vars.*/secrets below, so the job body is unchanged.
+    environment: ${{ github.event_name == 'release' && 'production' || 'review' }}
+    env:
+      TARGET_ENV: ${{ github.event_name == 'release' && 'production' || 'review' }}
+      PROJECT: ${{ vars.GCP_PROJECT_ID }}
+      REGION: ${{ vars.GCP_REGION }}
+      ARTIFACT_REGISTRY: ${{ vars.ARTIFACT_REGISTRY }}
+      SERVICE: ${{ vars.SERVICE_NAME }}
+      RUN_SERVICE_ACCOUNT: ${{ vars.RUN_SERVICE_ACCOUNT }}
+      CLOUD_SQL_INSTANCE: ${{ vars.CLOUD_SQL_INSTANCE }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Authenticate to Google Cloud (WIF)
+        uses: google-github-actions/auth@v3
+        with:
+          workload_identity_provider: ${{ vars.WORKLOAD_ID_PROVIDER }}
+          service_account: ${{ vars.ACTIONS_SERVICE_ACCOUNT }}
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v3
+
+      - name: Resolve image reference
+        run: |
+          echo "IMAGE=${REGION}-docker.pkg.dev/${PROJECT}/${ARTIFACT_REGISTRY}/${SERVICE}:${{ github.sha }}" >> "$GITHUB_ENV"
+
+      # The image is built+pushed by the parallel `build` job above (deploy needs: build),
+      # so it's already in Artifact Registry under :{sha}. Deploy only resolves the same
+      # deterministic ref (no rebuild) and ships it.
+
       # Idempotent `alembic upgrade head`, blocking: --wait fails the step (and the
       # deploy) if the migration job exits non-zero. --max-retries 0 = no silent retry.
       - name: Run migrations (Cloud Run Job)
@@ -138,7 +177,7 @@ jobs:
             --subnet "${{ vars.VPC_SUBNET }}" \
             --vpc-egress private-ranges-only \
             --set-secrets GEOID_DATABASE_URL=geoid-database-url:latest \
-            --set-env-vars GEOID_ENVIRONMENT=$TARGET_ENV \
+            --set-env-vars GEOID_ENVIRONMENT="$TARGET_ENV" \
             --command geoid --args migrate \
             --max-retries 0
           gcloud run jobs execute "${SERVICE}-upgrade-head" \
