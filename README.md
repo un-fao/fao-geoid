@@ -126,6 +126,33 @@ All configuration is environment-driven (see `.env.example`). The core image imp
 every deployment difference is expressed as configuration — so the *same image* is the on-prem artifact
 via `docker compose`.
 
+## Destructive operations (operator-only, run manually)
+
+These are **not shipped as runnable scripts** — they permanently alter the append-only registry and
+must only be run by a DB admin (`cloudsqlsuperuser`) over the Cloud SQL Auth Proxy. The tooling lives
+in `local-scripts/` (git-ignored, not in the image); the full runbook is `local-docs/DEPLOYMENT.md §14`.
+
+**1. geom_hash rehash / drift-recovery.** If `bootstrap_db.py`'s golden-vector parity gate (or
+`scripts/dedup_vectors.py --check`) reports drift, the stored `geoid_registry.geom_hash` values were
+computed on a PostGIS/GEOS stack that no longer matches. Recovery = `local-scripts/rehash_geom_hashes.py`,
+which recomputes them from `place.geom` in one audited transaction.
+
+> ⚠️ **Guard:** since migration `0004` the geoid is *derived from* `geom_hash`, so the recipe is
+> **identity-load-bearing and frozen**. Recomputing `geom_hash` on a DB that already holds real geoids
+> would **re-mint every identity**. The script refuses on a deterministic-geoid DB unless forced; the
+> only safe time to run it is to repair drift detected **before any data is loaded** on a new stack.
+> A genuine recipe/GEOS change is an *identity-version event*, not a rehash — do not load data on a
+> failing parity gate.
+
+**2. DB teardown wipe** (reset data while keeping schema + the seeded `public` collection). The
+`place` triggers block ordinary `DELETE`/`TRUNCATE`, so disable triggers for the session as admin:
+
+```sql
+SET session_replication_role = replica;
+TRUNCATE place, geoid_registry, change_log;
+SET session_replication_role = DEFAULT;   -- keeps catalog/collection seed + schema
+```
+
 ## Licensing
 
 - **Code:** Apache-2.0 (`LICENSE`)

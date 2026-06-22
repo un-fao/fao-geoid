@@ -453,8 +453,9 @@ def check_hash_vectors(conn: psycopg.Connection) -> list[str]:
         )
     problems = [
         f"golden vector {failure.name!r} drifted — expected {failure.expected}, got "
-        f"{failure.actual}; stored hashes are stale on this stack: freeze writes and "
-        "run scripts/rehash_geom_hashes.py (runbook: local-docs/DEPLOYMENT.md §14)"
+        f"{failure.actual}; stored hashes are stale on this stack: freeze writes and run the "
+        "operator-only geom_hash rehash (README › Destructive operations; runbook: "
+        "local-docs/DEPLOYMENT.md §14)"
         for failure in report.strict_failures
     ]
     for problem in problems:
@@ -613,8 +614,8 @@ def verify(cfg: BootstrapConfig) -> list[str]:
             recipe_version or "<absent>",
             recipe_version == "v1",
             f"latest dedup_recipe_stamp.recipe_version is {recipe_version!r}, expected 'v1' "
-            "— migrate to 0003+ (and re-stamp via scripts/rehash_geom_hashes.py if the "
-            "recipe ever changed)",
+            "— migrate to 0003+ (and re-stamp via the operator-only rehash procedure, "
+            "README › Destructive operations, if the recipe ever changed)",
         ),
         (
             "catalogs / collections",
