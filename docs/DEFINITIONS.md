@@ -56,13 +56,10 @@ How they nest:
 catalog ─< collection ─< place (each place carries one geoid)
 ```
 
-> **Terminology note.** The shipped default vocabulary is the OGC/STAC-aligned
-> **catalog / collection / item** (`GEOID_VOCAB=stac`): the top-level container
-> is a "catalog" (the STAC term — also the internal table name) and each place
-> is surfaced as an "item" (the OGC API Features term; the table is `place`).
-> The surface vocabulary is a configuration choice (`GEOID_VOCAB`, with `fao` =
-> workspace/collection/item still available as a label-only alias), not a
-> data-model difference.
+> **Terminology note.** GeoID surfaces the OGC/STAC-aligned **catalog / collection /
+> item** vocabulary: the top-level container is a "catalog" (the STAC term — also the
+> internal table name) and each place is surfaced as an "item" (the OGC API Features
+> term; the table is `place`). This is surface terminology, not a data-model difference.
 
 ## Bulk write (many places in one request)
 

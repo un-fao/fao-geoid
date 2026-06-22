@@ -1,15 +1,12 @@
-"""Unit tests for provenance shaping and vocabulary aliasing."""
+"""Unit tests for provenance shaping."""
 
 from __future__ import annotations
 
 import pytest
 
-from geoid.domain import provenance, vocab
+from geoid.domain import provenance
 
 pytestmark = pytest.mark.unit
-
-
-# --- provenance -------------------------------------------------------------
 
 
 def test_extract_client_from_whisp_block():
@@ -47,39 +44,3 @@ def test_build_provenance_merges_extra():
     )
     assert prov["created_by"] == "admin"
     assert prov["submitted_properties"] == {"area_ha": 3.2}
-
-
-# --- vocab ------------------------------------------------------------------
-
-
-def test_stac_vocab_is_the_default_and_matches_ogc_terms():
-    # OGC/STAC-aligned terminology: catalog / collection / item.
-    assert vocab.DEFAULT_VOCAB == "stac"
-    v = vocab.get_vocab("stac")
-    assert v.label("catalog") == "catalog"
-    assert v.label("collection") == "collection"
-    assert v.label("place") == "item"
-    assert v.item_type == "item"
-    assert v.plural("place") == "items"
-    assert v.plural("catalog") == "catalogs"
-
-
-def test_fao_vocab_labels():
-    v = vocab.get_vocab("fao")
-    assert v.label("catalog") == "workspace"
-    assert v.label("place") == "item"
-    assert v.item_type == "item"
-    assert v.plural("place") == "items"
-    assert v.plural("catalog") == "workspaces"
-
-
-def test_neutral_vocab_labels():
-    v = vocab.get_vocab("neutral")
-    assert v.label("catalog") == "catalog"
-    assert v.label("place") == "place"
-    assert v.plural("place") == "places"
-
-
-def test_unknown_vocab_falls_back_to_default():
-    v = vocab.get_vocab("klingon")
-    assert v.name == vocab.DEFAULT_VOCAB

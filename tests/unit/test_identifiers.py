@@ -15,17 +15,21 @@ pytestmark = pytest.mark.unit
 _FROZEN_NS = 1_780_000_000_000_000_000  # an arbitrary fixed instant, in nanoseconds
 
 
-def test_new_geoid_is_version_7_and_rfc4122_variant():
-    value = identifiers.new_geoid()
+def _embedded_ms(v: uuid.UUID) -> int:
+    """Extract the UUIDv7 embedded ms timestamp (the minter's behavioral assertion)."""
+    return int.from_bytes(v.bytes[0:6], "big")
+
+
+def test_uuid7_is_version_7_and_rfc4122_variant():
+    value = identifiers.uuid7()
     assert value.version == 7
     assert value.variant == uuid.RFC_4122
-    assert identifiers.is_uuid7(value)
 
 
 def test_embedded_timestamp_round_trips():
     ts_ms = 1_780_000_000_000
     value = identifiers.uuid7(ts_ms=ts_ms)
-    assert identifiers.timestamp_ms_of(value) == ts_ms
+    assert _embedded_ms(value) == ts_ms
 
 
 def test_uuid7_is_time_ordered_across_increasing_timestamps():
@@ -37,7 +41,7 @@ def test_uuid7_is_time_ordered_across_increasing_timestamps():
 
 
 def test_minting_is_unique_in_bulk():
-    minted = {identifiers.new_geoid() for _ in range(2000)}
+    minted = {identifiers.uuid7() for _ in range(2000)}
     assert len(minted) == 2000
 
 
@@ -56,7 +60,7 @@ def test_item_url_is_collection_scoped():
 
 
 def test_derive_identifiers_bundle_includes_item_url_when_collection_given():
-    value = identifiers.new_geoid()
+    value = identifiers.uuid7()
     bundle = identifiers.derive_identifiers(
         value, base_url="https://data.fao.org", collection="public"
     )
@@ -66,7 +70,7 @@ def test_derive_identifiers_bundle_includes_item_url_when_collection_given():
 
 
 def test_derive_identifiers_omits_item_url_without_collection():
-    value = identifiers.new_geoid()
+    value = identifiers.uuid7()
     bundle = identifiers.derive_identifiers(value, base_url="https://data.fao.org")
     assert "item_url" not in bundle
 
@@ -103,7 +107,7 @@ def test_clock_rollback_holds_timestamp_and_stays_monotonic(monkeypatch):
     # Assert: byte order strictly increases, embedded timestamp never decreases
     for earlier, later in itertools.pairwise(minted):
         assert earlier.bytes < later.bytes
-        assert identifiers.timestamp_ms_of(later) >= identifiers.timestamp_ms_of(earlier)
+        assert _embedded_ms(later) >= _embedded_ms(earlier)
 
 
 def test_counter_overflow_advances_synthetic_ms_without_duplicates(monkeypatch):
@@ -119,7 +123,7 @@ def test_counter_overflow_advances_synthetic_ms_without_duplicates(monkeypatch):
     assert len(set(minted)) == 5000
     for earlier, later in itertools.pairwise(minted):
         assert earlier.bytes < later.bytes
-    assert identifiers.timestamp_ms_of(minted[-1]) > _FROZEN_NS // 1_000_000
+    assert _embedded_ms(minted[-1]) > _FROZEN_NS // 1_000_000
 
 
 def test_concurrent_minting_yields_unique_ids():
@@ -153,7 +157,7 @@ def test_explicit_ts_ms_bypasses_monotonic_state(monkeypatch):
     value = identifiers.uuid7(ts_ms=1_780_000_000_000)
 
     # Assert: the override is honored and the shared state is untouched
-    assert identifiers.timestamp_ms_of(value) == 1_780_000_000_000
+    assert _embedded_ms(value) == 1_780_000_000_000
     assert identifiers._last_ms == 123
     assert identifiers._counter == 7
 

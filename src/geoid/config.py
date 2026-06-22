@@ -92,12 +92,6 @@ class Settings(DatabaseSettings):
         description="This instance's id, stamped into provenance + originating_instance.",
     )
 
-    # --- API vocabulary (OGC/STAC-aligned — catalog/collection/item — is the
-    #     "stac" preset and the shipped default) -----------------------------
-    vocab: Literal["fao", "stac", "neutral"] = Field(
-        default="stac", description='Surface vocabulary: "stac" (default), "fao", or "neutral".'
-    )
-
     # --- Geometry dedup precision ------------------------------------------
     dedup_grid_default: float = Field(
         default=1e-7,

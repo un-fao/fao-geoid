@@ -8,7 +8,6 @@ one default catalog via :func:`get_or_create_default`.
 
 from __future__ import annotations
 
-import uuid
 from typing import Any
 
 from sqlalchemy import select
@@ -23,10 +22,6 @@ DEFAULT_CATALOG_SLUG = "geoid"
 async def get_by_slug(session: AsyncSession, slug: str) -> Catalog | None:
     stmt = select(Catalog).where(Catalog.slug == slug)
     return (await session.execute(stmt)).scalar_one_or_none()
-
-
-async def get_by_id(session: AsyncSession, catalog_id: uuid.UUID) -> Catalog | None:
-    return await session.get(Catalog, catalog_id)
 
 
 async def create(

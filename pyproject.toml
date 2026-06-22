@@ -12,7 +12,6 @@ dependencies = [
     # Web framework + server
     "fastapi>=0.115,<1.0",
     "uvicorn[standard]>=0.32",
-    "gunicorn>=23.0",
     # Async DB stack
     "sqlalchemy[asyncio]>=2.0.36",
     "asyncpg>=0.30",
@@ -24,18 +23,9 @@ dependencies = [
     "pydantic-settings>=2.6",
     # Geometry + CQL2 filtering
     "shapely>=2.0",
-    "pyproj>=3.6",
     "pygeofilter>=0.3,<0.4",
     "lark>=1.1",
-    # Stdlib-friendly extras
-    "python-dateutil>=2.9",
 ]
-
-[project.optional-dependencies]
-# Post-demo OIDC resource-server auth (Keycloak / FAO IdP); MVP uses a static token.
-# httpx (authlib's async client) is already provided by the dev group, so it is not
-# duplicated here; add it explicitly when the OIDC seam is actually wired.
-oidc = ["authlib>=1.3"]
 
 [project.scripts]
 geoid = "geoid.cli:main"
