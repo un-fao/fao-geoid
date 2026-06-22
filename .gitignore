@@ -102,6 +102,7 @@ graphify-out/
 docs/*.html
 
 local-docs/
+local-scripts/
 
 # Local data
 *.sqlite3

@@ -3,14 +3,14 @@
 SUPERSEDED IN PART BY 0004 (2026-06-18): the paragraph below describing drift as
 "survivable" and the geoid as "UUIDv7, independent of the hash" is NO LONGER TRUE —
 from migration 0004 the geoid is DERIVED from ``geom_hash`` (deterministic UUIDv8), so
-the recipe is identity-load-bearing and frozen, and ``scripts/rehash_geom_hashes.py``
+the recipe is identity-load-bearing and frozen, and ``local-scripts/rehash_geom_hashes.py``
 must NOT be run against live identity data (it would re-mint geoids). See ADR-004 and
 0004's docstring. (This note is the only edit to an applied migration — comment only.)
 
 ``geoid_geom_hash`` is GEOS-bound (``ST_ReducePrecision`` + ``ST_Normalize``), so
 its output can drift across PostGIS/GEOS builds. Drift is survivable — the hash is
 operational dedup, not identity (the geoid is UUIDv7, independent of the hash), and
-``scripts/rehash_geom_hashes.py`` can recompute the stored ``geoid_registry.geom_hash``
+``local-scripts/rehash_geom_hashes.py`` can recompute the stored ``geoid_registry.geom_hash``
 under a new stack — but an operator must be able to answer
 "which stack were the stored hashes computed under?" after an engine upgrade.
 ``dedup_recipe_stamp`` is that record:
@@ -24,13 +24,13 @@ under a new stack — but an operator must be able to answer
   ``postgis_full`` is the full forensic string). These change on instance
   upgrades/migrations while recipe_version stays 'v1'.
 - ``stamped_by``   'migration:0003' for this initial stamp; 'rehash-script' for
-  rows appended by ``scripts/rehash_geom_hashes.py`` after a re-hash (or a
+  rows appended by ``local-scripts/rehash_geom_hashes.py`` after a re-hash (or a
   verified no-op) on a new stack.
 
 Reading the table: the LATEST row is the stack the current ``geoid_registry.geom_hash``
 values are valid under. If the live ``postgis_geos_version()`` series differs from
 it, run the golden-vector check (``scripts/dedup_vectors.py --check``) and, on
-drift, the audited re-hash procedure (``scripts/rehash_geom_hashes.py``,
+drift, the audited re-hash procedure (``local-scripts/rehash_geom_hashes.py``,
 runbook: local-docs/DEPLOYMENT.md §14).
 
 Design note (D1): this table is ops bookkeeping, not a data-integrity hinge — it

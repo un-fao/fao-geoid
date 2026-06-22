@@ -1,11 +1,12 @@
 name: deploy
 
-# Build -> migrate -> deploy to Cloud Run on every push to main. Keyless WIF auth
-# (no SA JSON in GitHub). Migrations run as a blocking Cloud Run Job before the
-# service is updated, so a failed `alembic upgrade head` fails the deploy.
+# Build -> migrate -> deploy to Cloud Run. Push to the review branch -> review (path-filtered);
+# publishing a GitHub Release -> production (always, a release event is a tag ref).
+# Keyless WIF auth (no SA JSON in GitHub). Migrations run as a blocking Cloud Run Job
+# before the service is updated, so a failed `alembic upgrade head` fails the deploy.
 on:
   push:
-    branches: [main]
+    branches: [review]
     paths:
       - "src/**"
       - "migrations/**"
@@ -14,6 +15,8 @@ on:
       - "pyproject.toml"
       - "uv.lock"
       - ".github/workflows/deploy.yml"
+  release:
+    types: [published]
 
 # Never cancel a deploy mid-flight (a half-applied migration + old revision is worse
 # than a queued run); serialize instead.
@@ -80,8 +83,11 @@ jobs:
   deploy:
     needs: [lint, test]
     runs-on: ubuntu-latest
-    environment: review
+    # A release event -> production; a push (to the review branch) -> review. The selected
+    # GitHub Environment supplies all vars.*/secrets below, so the job body is unchanged.
+    environment: ${{ github.event_name == 'release' && 'production' || 'review' }}
     env:
+      TARGET_ENV: ${{ github.event_name == 'release' && 'production' || 'review' }}
       PROJECT: ${{ vars.GCP_PROJECT_ID }}
       REGION: ${{ vars.GCP_REGION }}
       ARTIFACT_REGISTRY: ${{ vars.ARTIFACT_REGISTRY }}
@@ -126,7 +132,7 @@ jobs:
             --subnet "${{ vars.VPC_SUBNET }}" \
             --vpc-egress private-ranges-only \
             --set-secrets GEOID_DATABASE_URL=geoid-database-url:latest \
-            --set-env-vars GEOID_ENVIRONMENT=review \
+            --set-env-vars GEOID_ENVIRONMENT=$TARGET_ENV \
             --command geoid --args migrate \
             --max-retries 0
           gcloud run jobs execute "${SERVICE}-migrate" \
@@ -146,7 +152,7 @@ jobs:
             --subnet "${{ vars.VPC_SUBNET }}" \
             --vpc-egress private-ranges-only \
             --set-secrets GEOID_DATABASE_URL=geoid-database-url:latest,GEOID_ADMIN_TOKEN=geoid-admin-token:latest \
-            --set-env-vars "^@^GEOID_ENVIRONMENT=review@GEOID_BASE_URL=${{ vars.GEOID_BASE_URL }}@GEOID_ROOT_PATH=${{ vars.GEOID_ROOT_PATH }}@GEOID_INSTANCE_ID=${{ vars.GEOID_INSTANCE_ID }}@GEOID_PUBLIC_COLLECTION=${{ vars.GEOID_PUBLIC_COLLECTION }}" \
+            --set-env-vars "^@^GEOID_ENVIRONMENT=$TARGET_ENV@GEOID_BASE_URL=${{ vars.GEOID_BASE_URL }}@GEOID_ROOT_PATH=${{ vars.GEOID_ROOT_PATH }}@GEOID_INSTANCE_ID=${{ vars.GEOID_INSTANCE_ID }}@GEOID_PUBLIC_COLLECTION=${{ vars.GEOID_PUBLIC_COLLECTION }}" \
             --port 8000 \
             --allow-unauthenticated \
             --execution-environment gen2 \

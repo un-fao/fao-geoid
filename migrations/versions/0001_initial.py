@@ -160,7 +160,7 @@ def upgrade() -> None:
 
     # --- The canonical dedup recipe — ONE definition, wrapped by
     #     geoid_geom_hash_default (below) and used by the arbiter insert, the
-    #     incumbent-lookup query, and scripts/rehash_geom_hashes.py. -----------
+    #     incumbent-lookup query, and local-scripts/rehash_geom_hashes.py. -----------
     # geom_hash = sha256( ST_AsBinary(
     #               ST_Normalize( ST_ReducePrecision( ST_MakeValid(geom), grid ) ),
     #               'NDR' ) )
@@ -188,7 +188,7 @@ def upgrade() -> None:
     # geoid_geom_hash_default(geom) = geoid_geom_hash(geom, 1e-7). 1e-7 deg ≈
     # 1cm/vertex — exact-match semantics (the grid absorbs float jitter only, it
     # does not merge nearby shapes). The grid literal is pinned HERE so the app's
-    # arbiter insert, the incumbent lookup, and scripts/rehash_geom_hashes.py all
+    # arbiter insert, the incumbent lookup, and local-scripts/rehash_geom_hashes.py all
     # call this wrapper and no grid ever crosses from config;
     # GEOID_DEDUP_GRID_DEFAULT must mirror this literal (a unit test pins the two
     # equal), so retuning is a migration event, never a config-only change.
