@@ -111,18 +111,24 @@ jobs:
           echo "IMAGE=${REGION}-docker.pkg.dev/${PROJECT}/${ARTIFACT_REGISTRY}/${SERVICE}:${{ github.sha }}" >> "$GITHUB_ENV"
 
       # cloudbuild.yaml enables BuildKit; the `--tag` shortcut can't (see that file).
+      # --suppress-logs: the least-privilege Actions SA isn't a project Viewer, so gcloud
+      # refuses to stream the default-bucket logs and exits 1 *before* the build finishes
+      # (a false failure — the build itself succeeds). Suppressing the stream keeps the
+      # step synchronous: it still polls to completion and fails if the build fails. Build
+      # logs remain in the Cloud Build console (URL printed by the command).
       - name: Build and push image (Cloud Build)
         run: |
           gcloud builds submit \
             --config cloudbuild.yaml \
             --substitutions _IMAGE="$IMAGE" \
-            --project "$PROJECT"
+            --project "$PROJECT" \
+            --suppress-logs
 
       # Idempotent `alembic upgrade head`, blocking: --wait fails the step (and the
       # deploy) if the migration job exits non-zero. --max-retries 0 = no silent retry.
       - name: Run migrations (Cloud Run Job)
         run: |
-          gcloud run jobs deploy "${SERVICE}-migrate" \
+          gcloud run jobs deploy "${SERVICE}-upgrade-head" \
             --image "$IMAGE" \
             --region "$REGION" \
             --project "$PROJECT" \
@@ -135,7 +141,7 @@ jobs:
             --set-env-vars GEOID_ENVIRONMENT=$TARGET_ENV \
             --command geoid --args migrate \
             --max-retries 0
-          gcloud run jobs execute "${SERVICE}-migrate" \
+          gcloud run jobs execute "${SERVICE}-upgrade-head" \
             --region "$REGION" \
             --project "$PROJECT" \
             --wait
