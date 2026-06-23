@@ -15,7 +15,9 @@ Env:
                        every returned link/uri must carry its host (catches the
                        BASE_URL misconfiguration, the #1 launch risk)
     GEOID_COLLECTION   default public
-    GEOID_ADMIN_TOKEN  required only when minting into a managed (non-anon) collection
+    GEOID_ADMIN_TOKEN  enables the admin-gated collection read checks (GET /collections,
+                       GET /collections/{id}); also required to mint into a managed
+                       (non-anon) collection. Without it those read checks are skipped.
 
 Exit codes: 0 all checks passed · 1 one or more failed (CI / Cloud Run job friendly)
 """
@@ -55,8 +57,14 @@ def _expected_netloc() -> str:
     return urlsplit(BASE).netloc
 
 
-def _get_json(client: httpx.Client, path: str, *, expect_type: str | None = None) -> dict:
-    resp = client.get(f"{BASE}{path}")
+def _get_json(
+    client: httpx.Client,
+    path: str,
+    *,
+    expect_type: str | None = None,
+    headers: dict[str, str] | None = None,
+) -> dict:
+    resp = client.get(f"{BASE}{path}", headers=headers or {})
     assert resp.status_code == 200, f"GET {path} → {resp.status_code}: {resp.text[:200]}"
     if expect_type:
         ctype = resp.headers.get("content-type", "")
@@ -88,40 +96,31 @@ def check_conformance(client: httpx.Client) -> str:
 
 
 def check_collections(client: httpx.Client) -> str:
-    ids = [c.get("id") for c in _get_json(client, "/collections").get("collections", [])]
+    # /collections is admin-gated — send the admin token.
+    ids = [
+        c.get("id")
+        for c in _get_json(client, "/collections", headers=_headers()).get("collections", [])
+    ]
     assert COLLECTION in ids, f"collection {COLLECTION!r} not in {ids}"
     return f"{len(ids)} collections, {COLLECTION!r} present"
 
 
 def check_collection_desc(client: httpx.Client) -> str:
-    body = _get_json(client, f"/collections/{COLLECTION}")
+    body = _get_json(client, f"/collections/{COLLECTION}", headers=_headers())
     assert body.get("id") == COLLECTION, f"unexpected collection id {body.get('id')!r}"
     return f"id={body['id']!r}"
 
 
-def check_items(client: httpx.Client) -> str:
-    body = _get_json(client, f"/collections/{COLLECTION}/items?limit=1")
-    missing = {"numberMatched", "numberReturned", "timeStamp"} - body.keys()
-    assert not missing, f"OGC envelope keys missing: {sorted(missing)}"
-    return f"numberMatched={body['numberMatched']} (DB reachable through the API)"
-
-
-def check_queryables(client: httpx.Client) -> str:
-    body = _get_json(
-        client, f"/collections/{COLLECTION}/queryables", expect_type="application/schema+json"
-    )
-    properties = body.get("properties") or {}
-    assert properties, "queryables advertises no properties"
-    return f"{len(properties)} queryable fields, application/schema+json"
-
-
+# Public read checks (no token, safe against production).
 READ_CHECKS: tuple[tuple[str, Callable[[httpx.Client], str]], ...] = (
     ("landing links", check_landing),
     ("conformance", check_conformance),
+)
+
+# Admin-gated read checks — only run when GEOID_ADMIN_TOKEN is set.
+ADMIN_READ_CHECKS: tuple[tuple[str, Callable[[httpx.Client], str]], ...] = (
     ("collections list", check_collections),
     ("collection describe", check_collection_desc),
-    ("items (DB round-trip)", check_items),
-    ("queryables", check_queryables),
 )
 
 
@@ -220,6 +219,12 @@ def main() -> int:
             print(f"✗ cannot reach GeoID at {BASE} ({exc})")
             return 1
         results = [_run_check(name, lambda fn=fn: fn(client)) for name, fn in READ_CHECKS]
+        if ADMIN_TOKEN:
+            results += [
+                _run_check(name, lambda fn=fn: fn(client)) for name, fn in ADMIN_READ_CHECKS
+            ]
+        else:
+            print("  – collection read checks skipped (no GEOID_ADMIN_TOKEN; they are admin-gated)")
         if args.mint:
             results += run_mint_probe(client)
 

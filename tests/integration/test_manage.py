@@ -32,12 +32,14 @@ async def test_create_collection(client, admin_headers):
 
 
 async def test_create_collection_id_round_trips_in_url(client, admin_headers):
-    # The 404 trap is gone: the response `id` is exactly the URL segment.
+    # The 404 trap is gone: the response `id` is exactly the URL segment. The OGC
+    # describe surface is admin-gated, so the round-trip GET carries the admin header.
     coll = await client.post(
         "/manage/collections", headers=admin_headers, json={"id": "land-parcels"}
     )
     collection_id = coll.json()["id"]
-    assert (await client.get(f"/collections/{collection_id}/items")).status_code == 200
+    resp = await client.get(f"/collections/{collection_id}", headers=admin_headers)
+    assert resp.status_code == 200
 
 
 async def test_duplicate_collection_id_returns_409(client, admin_headers):
@@ -64,24 +66,6 @@ async def test_list_collections_slice(client, admin_headers):
     body = (await client.get("/manage/collections", headers=admin_headers)).json()
     # The bootstrap `public` collection is always present alongside the two created here.
     assert {c["id"] for c in body} == {"public", "a", "b"}
-
-
-async def test_list_item_ids_slice(client, admin_headers, unit_square_ccw, other_square):
-    await client.post("/collections/public/items", json=unit_square_ccw)
-    await client.post("/collections/public/items", json=other_square)
-
-    body = (await client.get("/manage/collections/public/item-ids", headers=admin_headers)).json()
-    assert body["numberMatched"] == 2
-    assert body["numberReturned"] == 2
-    assert len(body["item_ids"]) == 2
-
-
-async def test_list_item_ids_offset_beyond_cap_returns_400(client, admin_headers):
-    resp = await client.get(
-        "/manage/collections/public/item-ids?offset=999999999", headers=admin_headers
-    )
-    assert resp.status_code == 400
-    assert "offset" in resp.json()["detail"]
 
 
 async def test_collection_create_rejects_any_dedup_grid(client, admin_headers):

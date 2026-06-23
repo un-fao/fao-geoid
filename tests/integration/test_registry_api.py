@@ -14,10 +14,10 @@ async def test_post_polygon_mints_geoid_uri(client, unit_square_ccw):
     assert body["collection"] == "public"
     geoid = body["geoid"]
     assert body["uri"] == f"http://testserver/{geoid}"
-    assert body["item_url"] == f"http://testserver/collections/public/items/{geoid}"
+    assert "item_url" not in body  # the collection-scoped item read route was removed
     # OGC API - Features Part 4, Requirement 6: a 201 carries a Location header
-    # pointing at the new resource (the item endpoint, not the durable resolver).
-    assert resp.headers["Location"] == body["item_url"]
+    # pointing at the new resource — the durable resolver, the only resolution path.
+    assert resp.headers["Location"] == body["uri"]
 
 
 async def test_anonymous_post_captures_whisp_client_provenance(client):
@@ -210,7 +210,9 @@ async def test_root_resolver_does_not_shadow_literal_routes(client):
     # UUID catch-all. Literal single-segment routes are registered first, so they win;
     # only genuinely-unknown single segments fall through to the resolver.
     assert (await client.get("/conformance")).status_code == 200
-    assert (await client.get("/collections")).status_code == 200
+    # /collections is a literal route (now admin-gated) -> 401, NOT the resolver's
+    # 422 — proving the literal route still wins over the `/{geoid}` catch-all.
+    assert (await client.get("/collections")).status_code == 401
     # A well-formed but unknown geoid falls through to the resolver -> 404.
     assert (await client.get("/019e0000-0000-7000-8000-000000000000")).status_code == 404
     # A non-UUID single segment can't bind the `uuid.UUID` path param -> 422.

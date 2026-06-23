@@ -49,14 +49,3 @@ class CollectionOut(BaseModel):
     title: str | None = None
     writable_anon: bool = False
     metadata: dict[str, Any] = Field(default_factory=dict)
-
-
-class ItemIdList(BaseModel):
-    """1.2 slice: list of item-ids (geoids) in a collection."""
-
-    collection: str
-    number_matched: int = Field(alias="numberMatched")
-    number_returned: int = Field(alias="numberReturned")
-    item_ids: list[str]
-
-    model_config = {"populate_by_name": True}

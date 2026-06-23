@@ -20,7 +20,6 @@ def _isolate_env(monkeypatch):
         "GEOID_OIDC_ISSUER",
         "GEOID_OIDC_JWKS_URL",
         "GEOID_DEDUP_GRID_DEFAULT",
-        "GEOID_MAX_OFFSET",
         "GEOID_ADMIN_TOKEN",
         "GEOID_ENVIRONMENT",
         "GEOID_ROOT_PATH",
@@ -74,12 +73,6 @@ def test_dedup_grid_default_is_1cm():
 def test_dedup_grid_default_env_override(monkeypatch):
     monkeypatch.setenv("GEOID_DEDUP_GRID_DEFAULT", "0.0005")
     assert _settings().dedup_grid_default == 0.0005
-
-
-def test_max_offset_default_and_rejects_negative():
-    assert _settings().max_offset == 100_000
-    with pytest.raises(ValidationError):
-        _settings(max_offset=-1)
 
 
 def test_bulk_max_features_default_is_1000():

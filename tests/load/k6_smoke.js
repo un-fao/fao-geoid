@@ -1,12 +1,11 @@
 // k6 load test for GeoID — demonstrates correct dedup under load + a credible
-// scaling story (single-POST p95, dedup-lookup p95, OGC read p95). Not billion-scale.
+// scaling story (single-POST p95, dedup-lookup p95). Not billion-scale.
 //
 //   GEOID_BASE_URL=http://localhost:8000 k6 run tests/load/k6_smoke.js
 //
 // Scenarios:
 //   mint  — POST unique polygons         (single-POST hot path)
-//   dedup — POST the SAME polygon hourly  (dedup-lookup hot path; expects 200 dedup)
-//   read  — GET items + a single feature  (OGC read path)
+//   dedup — POST the SAME polygon hourly  (dedup-lookup hot path)
 
 import http from 'k6/http';
 import { check } from 'k6';
@@ -22,12 +21,10 @@ export const options = {
   scenarios: {
     mint: { executor: 'constant-vus', vus: 20, duration: '30s', exec: 'mint' },
     dedup: { executor: 'constant-vus', vus: 10, duration: '30s', exec: 'dedup' },
-    read: { executor: 'constant-vus', vus: 20, duration: '30s', exec: 'read' },
   },
   thresholds: {
     'http_req_duration{op:mint}': ['p(95)<500'],
     'http_req_duration{op:dedup}': ['p(95)<300'],
-    'http_req_duration{op:read}': ['p(95)<300'],
     http_req_failed: ['rate<0.01'],
   },
 };
@@ -64,9 +61,4 @@ export function dedup() {
   });
   const ok = check(res, { 'dedup 200/201': (r) => r.status === 200 || r.status === 201 });
   if (ok && res.status === 200) dedupHits.add(1);
-}
-
-export function read() {
-  const res = http.get(`${ITEMS}?limit=50`, { tags: { op: 'read' } });
-  check(res, { 'read 200': (r) => r.status === 200 });
 }

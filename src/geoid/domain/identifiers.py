@@ -16,10 +16,9 @@ RFC 9562 §6.5 mandates UUIDv8 (not the SHA-1 v5) for SHA-256-based name UUIDs.
 :func:`uuid7` remains the monotonic UUIDv7 minter, now used only for internal
 infrastructure rows (catalog/collection ids), never for geoids.
 
-On read we derive resolvable forms from the bare UUID:
+On read we derive the resolvable form from the bare UUID:
 
 * a URI            ``<base_url>/<uuid>``
-* an OGC item URL  ``<base_url>/collections/<collection>/items/<uuid>``
 """
 
 from __future__ import annotations
@@ -149,26 +148,6 @@ def uri_for(value: uuid.UUID, base_url: str) -> str:
     return f"{base_url.rstrip('/')}/{value}"
 
 
-def item_url_for(value: uuid.UUID, collection: str, base_url: str) -> str:
-    """Derive the collection-scoped OGC API Features item URL."""
-    return f"{base_url.rstrip('/')}/collections/{collection}/items/{value}"
-
-
-def derive_identifiers(
-    value: uuid.UUID,
-    *,
-    base_url: str,
-    collection: str | None = None,
-) -> dict[str, str]:
-    """Bundle the two (or three) resolvable forms returned by POST / GET.
-
-    Returns ``geoid``, ``uri`` and, when ``collection`` is given, the
-    collection-scoped ``item_url``.
-    """
-    out = {
-        "geoid": str(value),
-        "uri": uri_for(value, base_url),
-    }
-    if collection is not None:
-        out["item_url"] = item_url_for(value, collection, base_url)
-    return out
+def derive_identifiers(value: uuid.UUID, *, base_url: str) -> dict[str, str]:
+    """Bundle the resolvable forms returned by POST / GET: ``geoid`` and ``uri``."""
+    return {"geoid": str(value), "uri": uri_for(value, base_url)}

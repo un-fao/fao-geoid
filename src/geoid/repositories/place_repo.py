@@ -23,10 +23,8 @@ import uuid
 from dataclasses import dataclass
 from typing import Any
 
-from sqlalchemy import Select, func, select, text
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
-
-from geoid.models import Place
 
 # Geometry built identically everywhere: GeoJSON -> geometry, SRID pinned to 4326.
 _GEOM_EXPR = "ST_SetSRID(ST_GeomFromGeoJSON(:geojson), 4326)"
@@ -232,81 +230,6 @@ async def get_by_external_id(
         .first()
     )
     return dict(row) if row else None
-
-
-def _base_item_query(collection_id: uuid.UUID) -> Select[Any]:
-    return select(
-        Place.id.label("geoid"),
-        Place.external_id,
-        Place.provenance,
-        Place.created_at,
-        Place.predecessor_id,
-        Place.originating_instance,
-        func.ST_AsGeoJSON(Place.geom).label("geometry"),
-    ).where(Place.collection_id == collection_id)
-
-
-def queryable_field_mapping() -> dict[str, Any]:
-    """Map CQL2 queryable names to ORM columns (incl. geometry for spatial ops).
-
-    This set IS the public filter contract: the queryables document advertises
-    exactly these names with ``additionalProperties: false``, and anything else
-    is rejected with 400 — a unit test pins the two in sync.
-    """
-    return {
-        "geoid": Place.id,
-        "external_id": Place.external_id,
-        "created_at": Place.created_at,
-        "geometry": Place.geom,
-    }
-
-
-async def list_items(
-    session: AsyncSession,
-    collection_id: uuid.UUID,
-    *,
-    cql_clause: Any | None = None,
-    limit: int = 100,
-    offset: int = 0,
-) -> tuple[list[dict[str, Any]], int]:
-    """Return (rows, number_matched) for a collection with an optional CQL2 filter."""
-    query = _base_item_query(collection_id)
-
-    if cql_clause is not None:
-        query = query.where(cql_clause)
-
-    # COUNT(*) OVER () gives the full filtered total from the same snapshot as the
-    # page, avoiding the count/data race a separate count query had.
-    query = query.add_columns(func.count().over().label("total"))
-    query = query.order_by(Place.created_at.asc(), Place.id.asc()).limit(limit).offset(offset)
-
-    rows = [dict(m) for m in (await session.execute(query)).mappings().all()]
-    number_matched = rows[0]["total"] if rows else 0
-    for row in rows:
-        row.pop("total")  # drop the synthetic window column
-    return rows, number_matched
-
-
-async def list_item_ids(
-    session: AsyncSession, collection_id: uuid.UUID, *, limit: int, offset: int
-) -> tuple[list[uuid.UUID], int]:
-    """1.2 slice: ids only, ordered, with a total count."""
-    stmt = (
-        select(Place.id)
-        .where(Place.collection_id == collection_id)
-        .order_by(Place.created_at.asc(), Place.id.asc())
-        .limit(limit)
-        .offset(offset)
-    )
-    ids = [r[0] for r in (await session.execute(stmt)).all()]
-    total = int(
-        (
-            await session.execute(
-                select(func.count()).select_from(Place).where(Place.collection_id == collection_id)
-            )
-        ).scalar_one()
-    )
-    return ids, total
 
 
 async def collection_extent(

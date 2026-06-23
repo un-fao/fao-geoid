@@ -4,14 +4,12 @@
     # the stack must be running
     uv run python scripts/loadtest.py --scenario all --concurrency 16 --duration 10
     uv run python scripts/loadtest.py --scenario mint  --concurrency 32 --duration 20
-    uv run python scripts/loadtest.py --scenario read  --concurrency 16 --duration 10
 
 Scenarios
     mint  — POST a unique polygon each time   (single-POST hot path; expects 201)
     dedup — POST the SAME polygon every time   (conflict-lookup hot path; expects
                                                 409 after the first 201 — global
                                                 dedup rejects duplicates)
-    read  — GET items?limit=50                 (OGC read path; expects 200)
 
 NOTE: a local PostGIS running under amd64 emulation on Apple Silicon is several
 times slower than native — treat these numbers as a pessimistic LOWER BOUND and
@@ -59,16 +57,11 @@ async def _dedup(client: httpx.AsyncClient) -> httpx.Response:
     return await client.post(f"{BASE}/collections/{COLLECTION}/items", json=_DEDUP_BODY)
 
 
-async def _read(client: httpx.AsyncClient) -> httpx.Response:
-    return await client.get(f"{BASE}/collections/{COLLECTION}/items?limit=50")
-
-
 # (request fn, success statuses): dedup duplicates are *expected* to 409 — that
 # IS the measured hot path (arbiter conflict + incumbent lookup).
 SCENARIOS = {
     "mint": (_mint, {201}),
     "dedup": (_dedup, {201, 409}),
-    "read": (_read, {200}),
 }
 
 
@@ -146,8 +139,8 @@ async def main() -> int:
 
     print(f"GeoID load test → {BASE} (collection={COLLECTION})")
     print("NOTE: local PostGIS may be amd64-emulated → numbers are a pessimistic lower bound.")
-    # mint first (populates the DB), then read, then dedup
-    order = ["mint", "read", "dedup"] if args.scenario == "all" else [args.scenario]
+    # mint first (populates the DB), then dedup
+    order = ["mint", "dedup"] if args.scenario == "all" else [args.scenario]
     for name in order:
         await run_scenario(name, args.concurrency, args.duration)
     return 0

@@ -1,14 +1,16 @@
 """OGC API Features response assembly (pure shaping; no DB access).
 
-Builds landing page, conformance, collection descriptions, and GeoJSON
-feature/feature-collection envelopes with HATEOAS links, mirroring DynaStore.
+Builds landing page, conformance, collection descriptions, and the single GeoJSON
+feature envelope (resolver / external-id lookup) with HATEOAS links. The item
+listing / filtering / queryables surface has been removed, so the paging and CQL2
+shaping helpers are gone with it.
 """
 
 from __future__ import annotations
 
 import json
 import uuid
-from datetime import UTC, datetime
+from datetime import datetime
 from typing import Any, TypedDict
 
 from geoid.config import Settings
@@ -18,49 +20,29 @@ from geoid.schemas.ogc import (
     CollectionDesc,
     ConformanceDeclaration,
     Extent,
-    FeatureCollectionModel,
     FeatureModel,
     LandingPage,
     Link,
     SpatialExtent,
 )
 
-# OGC API - Features Part 1/3 + CQL2 — the listing/filtering read surface.
-# Phase-1 demo: the queryables route is include_in_schema=False (hidden from the
-# API definition) but still live; /conformance advertises these classes.
-_FEATURES_CLASSES = [
+# OGC API - Features Part 1: Core + OAS30 + GeoJSON. The item read surface
+# (Features listing / CQL2 filtering / queryables) has been removed, so Part 3
+# (filter/queryables) and CQL2 are no longer advertised. Core/OAS30/GeoJSON still
+# hold honestly: the landing page, /conformance, the collection-describe surface,
+# and the GeoJSON resolver output.
+CONFORMANCE_CLASSES = [
     "http://www.opengis.net/spec/ogcapi-features-1/1.0/conf/core",
     "http://www.opengis.net/spec/ogcapi-features-1/1.0/conf/oas30",
     "http://www.opengis.net/spec/ogcapi-features-1/1.0/conf/geojson",
-    "http://www.opengis.net/spec/ogcapi-features-3/1.0/conf/queryables",
-    "http://www.opengis.net/spec/ogcapi-features-3/1.0/conf/filter",
-    "http://www.opengis.net/spec/ogcapi-features-3/1.0/conf/features-filter",
-    "http://www.opengis.net/spec/cql2/1.0/conf/cql2-text",
-    "http://www.opengis.net/spec/cql2/1.0/conf/cql2-json",
 ]
-
-CONFORMANCE_CLASSES = _FEATURES_CLASSES
 
 _GEOJSON = "application/geo+json"
 _JSON = "application/json"
-_SCHEMA_JSON = "application/schema+json"
-_QUERYABLES_REL = "http://www.opengis.net/def/rel/ogc/1.0/queryables"
-
-# JSON-Schema fragments for the CQL2 queryables. Must mirror
-# ``place_repo.queryable_field_mapping()`` exactly — the queryables document is
-# a closed set (additionalProperties: false) and the filter path rejects names
-# outside the mapping, so the two are pinned equal by a unit test.
-_QUERYABLE_SCHEMAS: dict[str, dict[str, Any]] = {
-    "geoid": {"type": "string", "format": "uuid", "title": "geoid (UUIDv8)"},
-    "external_id": {"type": "string", "title": "Caller-supplied external id"},
-    "created_at": {"type": "string", "format": "date-time", "title": "Creation time"},
-    "geometry": {"format": "geometry-any", "title": "Place geometry (Polygon/MultiPolygon)"},
-}
 
 
 class ItemRow(TypedDict, total=False):
-    """A place read row. ``total=False``: the list path omits ``collection_slug``
-    (injected per page), the single-item path selects it directly."""
+    """A place read row (single-item / resolver / external-id lookup path)."""
 
     geoid: uuid.UUID
     geometry: str | None
@@ -70,10 +52,6 @@ class ItemRow(TypedDict, total=False):
     predecessor_id: uuid.UUID | None
     originating_instance: str | None
     collection_slug: str
-
-
-def now_iso() -> str:
-    return datetime.now(UTC).isoformat().replace("+00:00", "Z")
 
 
 def landing_page(settings: Settings) -> LandingPage:
@@ -132,60 +110,22 @@ def collection_desc(
         extent=extent,
         links=[
             Link(href=f"{base}/collections/{slug}", rel="self", type=_JSON),
-            Link(
-                href=f"{base}/collections/{slug}/items",
-                rel="items",
-                type=_GEOJSON,
-                title="Features",
-            ),
-            Link(
-                href=f"{base}/collections/{slug}/queryables",
-                rel=_QUERYABLES_REL,
-                type=_SCHEMA_JSON,
-                title="Queryables (CQL2 filterable fields)",
-            ),
             Link(href=f"{base}/collections", rel="parent", type=_JSON),
         ],
     )
-
-
-def queryables(
-    settings: Settings, *, collection_id: str, queryable_names: set[str]
-) -> dict[str, Any]:
-    """The OGC Part-3 queryables resource: a JSON Schema over the CQL2 fields.
-
-    ``queryable_names`` comes from ``place_repo.queryable_field_mapping()`` — the
-    advertised set and the working set are identical (closed schema, unknown
-    names 400), which a unit test enforces.
-    """
-    properties = {
-        name: dict(schema) for name, schema in _QUERYABLE_SCHEMAS.items() if name in queryable_names
-    }
-    return {
-        "$schema": "https://json-schema.org/draft/2020-12/schema",
-        "$id": f"{settings.base_url_clean}/collections/{collection_id}/queryables",
-        "type": "object",
-        "title": f"Queryables for collection '{collection_id}'",
-        "properties": properties,
-        "additionalProperties": False,
-    }
 
 
 def _feature_links(
     settings: Settings, *, geoid: uuid.UUID, collection: str, predecessor_id: uuid.UUID | None
 ) -> list[Link]:
     base = settings.base_url_clean
-    item_url = f"{base}/collections/{collection}/items/{geoid}"
+    # The durable resolver is the only resolution path, so it IS the feature's self
+    # link (the collection-scoped /items/{geoid} route was removed).
+    resolver_url = f"{base}/{geoid}"
     links = [
-        Link(href=item_url, rel="self", type=_GEOJSON),
-        Link(
-            href=f"{base}/{geoid}",
-            rel="alternate",
-            type=_GEOJSON,
-            title="Durable geoid resolver",
-        ),
+        Link(href=resolver_url, rel="self", type=_GEOJSON),
         # WKT is a vendor-extension encoding, advertised per OGC alternate links.
-        Link(href=f"{item_url}?f=wkt", rel="alternate", type=WKT_MEDIA_TYPE, title="WKT"),
+        Link(href=f"{resolver_url}?f=wkt", rel="alternate", type=WKT_MEDIA_TYPE, title="WKT"),
         Link(href=f"{base}/collections/{collection}", rel="collection", type=_JSON),
     ]
     if predecessor_id is not None:
@@ -198,14 +138,6 @@ def _feature_links(
             )
         )
     return links
-
-
-def _with_collection_slug(row: ItemRow, collection: str) -> ItemRow:
-    """Inject ``collection_slug`` into a list-path row (returns a new dict); the
-    guard enforces the split read-row contract documented on ``ItemRow``."""
-    if "collection_slug" in row:
-        raise ValueError("list rows must not already carry collection_slug")
-    return {**row, "collection_slug": collection}
 
 
 def build_feature(settings: Settings, row: ItemRow) -> FeatureModel:
@@ -241,69 +173,7 @@ def build_feature(settings: Settings, row: ItemRow) -> FeatureModel:
     return FeatureModel(id=str(geoid), geometry=geometry, properties=properties, links=links)
 
 
-def build_feature_collection(
-    settings: Settings,
-    *,
-    rows: list[ItemRow],
-    collection: str,
-    number_matched: int,
-    limit: int,
-    offset: int,
-    query_suffix: str,
-) -> FeatureCollectionModel:
-    """Assemble a feature collection with self/next/prev paging links."""
-    base = settings.base_url_clean
-    items_url = f"{base}/collections/{collection}/items"
-    features = [build_feature(settings, _with_collection_slug(r, collection)) for r in rows]
-
-    self_qs = _paging_qs(limit, offset, query_suffix)
-    links = [
-        Link(href=f"{items_url}?{self_qs}", rel="self", type=_GEOJSON),
-        # WKT alternate of this same page (vendor extension; bare text/plain).
-        Link(
-            href=f"{items_url}?{self_qs}&f=wkt",
-            rel="alternate",
-            type=WKT_MEDIA_TYPE,
-            title="WKT",
-        ),
-        Link(href=f"{base}/collections/{collection}", rel="collection", type=_JSON),
-    ]
-    # Never advertise a link the server's own offset cap would 400 — the walk
-    # simply ends at the cap (this also makes GEOID_MAX_OFFSET=0 a coherent
-    # "no deep paging" switch instead of bricking every next link).
-    if offset + limit < number_matched and offset + limit <= settings.max_offset:
-        links.append(
-            Link(
-                href=f"{items_url}?{_paging_qs(limit, offset + limit, query_suffix)}",
-                rel="next",
-                type=_GEOJSON,
-            )
-        )
-    if offset > 0:
-        prev_offset = max(0, offset - limit)
-        links.append(
-            Link(
-                href=f"{items_url}?{_paging_qs(limit, prev_offset, query_suffix)}",
-                rel="prev",
-                type=_GEOJSON,
-            )
-        )
-
-    return FeatureCollectionModel(
-        features=features,
-        links=links,
-        timeStamp=now_iso(),
-        numberMatched=number_matched,
-        numberReturned=len(features),
-    )
-
-
-def _paging_qs(limit: int, offset: int, query_suffix: str) -> str:
-    qs = f"limit={limit}&offset={offset}"
-    return f"{qs}&{query_suffix}" if query_suffix else qs
-
-
-# --- WKT vendor-extension shaping (kept in the service/domain seam) ----------
+# --- WKT vendor-extension shaping (resolver / external-id WKT path) -----------
 
 
 def feature_to_wkt(feature: FeatureModel) -> str:
@@ -311,29 +181,6 @@ def feature_to_wkt(feature: FeatureModel) -> str:
     if feature.geometry is None:
         return ""
     return encode_geometry(feature.geometry, GeometryFormat.WKT)
-
-
-def collection_to_wkt(fc: FeatureCollectionModel) -> str:
-    """A feature collection as newline-delimited WKT, one geometry per line."""
-    return "\n".join(feature_to_wkt(f) for f in fc.features if f.geometry is not None)
-
-
-def _link_header_value(link: Link) -> str:
-    parts = [f"<{link.href}>", f'rel="{link.rel}"']
-    if link.type:
-        parts.append(f'type="{link.type}"')
-    if link.title:
-        parts.append(f'title="{link.title}"')
-    return "; ".join(parts)
-
-
-def links_to_header(links: list[Link]) -> str:
-    """Serialise links to an RFC 8288 ``Link`` header value.
-
-    A bare-WKT body can't carry HATEOAS links, so paging (self/next/prev) and the
-    GeoJSON alternate ride in the ``Link`` header instead (OGC ``/rec/core/link-header``).
-    """
-    return ", ".join(_link_header_value(link) for link in links)
 
 
 def feature_geojson_alternate_header(feature: FeatureModel) -> str:

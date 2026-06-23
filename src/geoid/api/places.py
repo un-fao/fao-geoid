@@ -47,8 +47,8 @@ router = APIRouter(tags=["registry"])
             "headers": {
                 "Location": {
                     "description": (
-                        "URI of the newly minted feature (OGC API - Features Part 4, "
-                        "Requirement 6: a 201 carries a Location header)."
+                        "Durable resolver URI of the newly minted geoid (OGC API - "
+                        "Features Part 4, Requirement 6: a 201 carries a Location header)."
                     ),
                     "schema": {"type": "string", "format": "uri"},
                 }
@@ -83,7 +83,7 @@ async def create_item(
         collection=collection,
         feature=feature,
     )
-    response.headers["Location"] = result.item_url
+    response.headers["Location"] = result.uri
     return result
 
 

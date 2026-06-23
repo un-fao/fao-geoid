@@ -40,8 +40,8 @@ def test_report_summary_counts_add_up():
     report = BulkReport(
         summary=BulkSummary(received=3, accepted=2, rejected=1),
         accepted=[
-            BulkAccepted(index=0, geoid="g0", uri="u0", item_url="i0"),
-            BulkAccepted(index=1, geoid="g1", uri="u1", item_url="i1", external_id="x1"),
+            BulkAccepted(index=0, geoid="g0", uri="u0"),
+            BulkAccepted(index=1, geoid="g1", uri="u1", external_id="x1"),
         ],
         rejected=[
             BulkRejected(

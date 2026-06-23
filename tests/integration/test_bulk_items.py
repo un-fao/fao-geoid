@@ -10,6 +10,9 @@ unknown collection, 403 anonymous-into-non-writable, and a 422 envelope error).
 from __future__ import annotations
 
 import pytest
+from sqlalchemy import func, select
+
+from geoid.models import Collection, Place
 
 pytestmark = pytest.mark.integration
 
@@ -188,7 +191,7 @@ async def test_bulk_unknown_collection_404(client):
     assert resp.status_code == 404
 
 
-async def test_bulk_anonymous_into_non_writable_collection_403(client, admin_headers):
+async def test_bulk_anonymous_into_non_writable_collection_403(client, admin_headers, session):
     await client.post(
         "/manage/collections",
         headers=admin_headers,
@@ -200,6 +203,14 @@ async def test_bulk_anonymous_into_non_writable_collection_403(client, admin_hea
     )
     assert resp.status_code == 403
     assert resp.json()["collection"] == "locked"
-    # Fail-fast: the 403 happens before any insert, so nothing was written.
-    listing = await client.get("/manage/collections/locked/item-ids", headers=admin_headers)
-    assert listing.json()["numberMatched"] == 0
+    # Fail-fast: the 403 happens before any insert, so nothing was written. (The
+    # item-ids listing is gone, so confirm via a direct ORM row count instead.)
+    count = (
+        await session.execute(
+            select(func.count())
+            .select_from(Place)
+            .join(Collection, Place.collection_id == Collection.id)
+            .where(Collection.slug == "locked")
+        )
+    ).scalar_one()
+    assert count == 0
