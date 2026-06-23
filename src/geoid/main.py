@@ -24,7 +24,7 @@ provenance — served over **OGC API Features**.
 
 * **Write / registry** — `POST /collections/{id}/items` → `{geoid, uri}`
 * **Bulk write** — `POST /collections/{id}/items/bulk` (a GeoJSON FeatureCollection,
-  synchronous, partial success → a per-feature report)
+  processed in-request, returns a per-feature report)
 * **Resolve** — `GET /{uuid}`, `GET /collections/{id}/external/{external_id}`
 * **Health** — `GET /health` (DB connectivity probe)
 """

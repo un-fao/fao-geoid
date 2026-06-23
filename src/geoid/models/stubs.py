@@ -1,11 +1,11 @@
-"""Stubbed tables (HINGE seams, no logic for the demo).
+"""Stubbed tables (HINGE seams, not yet implemented).
 
 ``authority_assertion`` — a claim of authority *over* a place, append-only, never a
 mutable column *on* the place. This is the architectural answer to "anonymous yet
 authority-tracked". ``api_key`` — the future API-key / usage-tracking surface.
 
 Both tables exist (so links and queries are forward-compatible) but carry no
-behaviour in Phase 1.
+behaviour yet.
 """
 
 from __future__ import annotations

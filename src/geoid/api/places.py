@@ -91,7 +91,10 @@ async def create_item(
     "/collections/{collection_id}/items/bulk",
     response_model=BulkReport,
     status_code=status.HTTP_200_OK,
-    summary="Bulk-mint geoids from a GeoJSON FeatureCollection (synchronous, partial success)",
+    summary=(
+        "Bulk-mint geoids from a GeoJSON FeatureCollection; "
+        "processed in-request, returns a per-feature report"
+    ),
 )
 async def create_items_bulk(
     collection_id: str,

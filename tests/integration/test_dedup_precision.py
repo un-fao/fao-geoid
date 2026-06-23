@@ -1,5 +1,5 @@
-"""Release-1 coordinate-precision behaviour: ONE global dedup grid (~1cm,
-1e-7 deg/vertex — exact-match semantics per the reviewer's ruling), pinned in the
+"""Coordinate-precision behaviour: ONE global dedup grid (~1cm,
+1e-7 deg/vertex — exact-match semantics), pinned in the
 BEFORE-INSERT trigger by migration 0001. Geometry uniqueness is catalog-wide,
 and an identical submission fails with a 409 carrying the incumbent geoid.
 

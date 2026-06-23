@@ -109,8 +109,9 @@ class MintResponse(BaseModel):
 class GeometryConflictResponse(BaseModel):
     """409 body when an identical geometry already exists anywhere in the catalog.
 
-    Mirrors the ``_error()`` envelope (``code``/``message`` + extras). The
-    ``constraint`` field discriminates this conflict from the external_id 409.
+    Uses the standard error envelope (``code``/``message``) plus the incumbent's
+    identifiers. The ``constraint`` field discriminates this conflict from the
+    external_id 409.
     """
 
     code: int = Field(description="HTTP status code (409).")
@@ -138,11 +139,9 @@ BulkRejectReason = Literal[
 class BulkFeatureCollection(BaseModel):
     """A GeoJSON FeatureCollection (RFC 7946 §3.3) submitted to the bulk route.
 
-    ``features`` are RAW dicts, NOT ``PlaceCreate`` — each is validated INSIDE the
-    per-feature loop (``PlaceCreate.model_validate``) so one malformed feature
-    becomes a single rejected row rather than a 422 that sinks the whole request at
-    FastAPI's body boundary. The envelope itself is still validated up front: an
-    empty ``features`` list or a wrong ``type`` is a 422.
+    Each feature is validated individually, so one malformed feature is rejected on
+    its own rather than failing the whole request. An empty ``features`` list or a
+    wrong ``type`` is rejected up front with 422.
     """
 
     type: Literal["FeatureCollection"]

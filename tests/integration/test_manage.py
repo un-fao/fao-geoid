@@ -1,4 +1,4 @@
-"""Integration tests for the management slice (1.2)."""
+"""Integration tests for the management slice."""
 
 from __future__ import annotations
 

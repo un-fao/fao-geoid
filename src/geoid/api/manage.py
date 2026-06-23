@@ -30,7 +30,7 @@ async def create_collection(
 @router.get(
     "/collections",
     response_model=list[CollectionOut],
-    summary="List collections (1.2)",
+    summary="List collections",
 )
 async def list_collections(session: AsyncSession = Depends(get_session)) -> list[CollectionOut]:
     return await listing_service.list_collections(session)
