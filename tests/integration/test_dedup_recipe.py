@@ -3,7 +3,7 @@
 Tests the authoritative ``geoid_geom_hash`` SQL function directly (the same
 function the arbiter insert and the incumbent-lookup use, via the
 ``geoid_geom_hash_default`` wrapper), across the
-canonicalization permutations called out in the plan: ring-start rotation,
+canonicalization permutations: ring-start rotation,
 winding direction, hole order, part order, and sub-grid float jitter must all
 collapse to the SAME hash; genuinely different geometry must NOT.
 """
@@ -15,7 +15,7 @@ from sqlalchemy import text
 
 pytestmark = pytest.mark.integration
 
-_DEFAULT_GRID = 1e-7  # Release-1 default: ~1cm/vertex (exact-match per Remi's ruling)
+_DEFAULT_GRID = 1e-7  # default: ~1cm/vertex (exact-match semantics)
 
 
 async def _hash(session, wkt: str, grid: float = _DEFAULT_GRID) -> str:
@@ -85,7 +85,7 @@ async def test_hash_is_sha256_32_bytes(session):
 
 async def test_dedup_is_global_across_collections(client, admin_headers, unit_square_ccw):
     # The SAME geometry in two different collections → 409 carrying the first
-    # geoid: one geometry → one geoid across the whole catalog (Remi's ruling).
+    # geoid: one geometry → one geoid across the whole catalog.
     await client.post(
         "/manage/collections",
         headers=admin_headers,

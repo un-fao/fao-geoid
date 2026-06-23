@@ -4,7 +4,8 @@ OGC API Features addresses collections by a flat ``{collectionId}``; we treat th
 collection ``slug`` as that id. Slug uniqueness is per-catalog (the DB
 constraint), so a multi-catalog deployment could in principle have a slug
 collision — :func:`get_by_slug` resolves the first match and the single default
-catalog makes this unambiguous in Phase 1. Pass ``catalog_id`` to scope it.
+catalog makes this unambiguous in the default single-catalog deployment. Pass
+``catalog_id`` to scope it.
 """
 
 from __future__ import annotations

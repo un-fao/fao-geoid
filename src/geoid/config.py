@@ -99,7 +99,7 @@ class Settings(DatabaseSettings):
         description=(
             "The ONE global coordinate-precision grid (ST_ReducePrecision gridsize, "
             "decimal degrees) for geometry dedup. 1e-7 ≈ 1cm/vertex — exact-match "
-            "semantics (float-jitter immunity only), per Remi's security ruling. "
+            "semantics (float-jitter immunity only). "
             "Documented canonical value: the app never passes it to the DB (the grid "
             "is pinned inside the geoid_geom_hash_default() wrapper, migration 0001); "
             "a unit test pins this equal to that wrapper literal, so retunes are "
@@ -118,8 +118,7 @@ class Settings(DatabaseSettings):
         ),
     )
 
-    # --- Unified auth service seam (Release-1 stretch goal; Eduardo's team,
-    #     expected to be OIDC — confirm before wiring). Inert until enabled;
+    # --- Unified auth service seam (expected to be OIDC). Inert until enabled;
     #     the oidc_* names are kept deliberately to avoid a second rename. ----
     oidc_issuer: str | None = Field(default=None)
     oidc_jwks_url: str | None = Field(default=None)

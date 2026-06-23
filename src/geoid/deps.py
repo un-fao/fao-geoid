@@ -4,10 +4,9 @@ Auth (temporary stopgap): anonymous requests are allowed everywhere the *data
 layer* permits them (the reserved ``public`` collection); a single static
 ``GEOID_ADMIN_TOKEN`` bearer unlocks create/manage/list. The body of
 :func:`require_principal` is the one place that later delegates to the FAO
-unified auth service (Eduardo's team — expected to be OIDC, hence the kept
-``OIDC_ISSUER`` / ``OIDC_JWKS_URL`` knobs; confirm before wiring), so every
-route keeps depending on the same callable. Wiring it is a Release-1 stretch
-goal gated on that service being available.
+unified auth service (expected to be OIDC, hence the kept ``OIDC_ISSUER`` /
+``OIDC_JWKS_URL`` knobs), so every route keeps depending on the same callable.
+Wiring it is a future enhancement gated on that service being available.
 """
 
 from __future__ import annotations
@@ -80,9 +79,9 @@ async def require_principal(
 ) -> Principal:
     """Resolve the caller's identity. Anonymous is a valid (non-error) outcome.
 
-    SEAM: this is where Release-1's stretch-goal auth lands — delegation to the
-    FAO unified auth service (Eduardo's team, expected to be OIDC). When that
-    service is wired and ``settings.oidc_enabled`` becomes true, validate the
+    SEAM: this is where delegation to the FAO unified auth service (expected to
+    be OIDC) lands. When that service is wired and ``settings.oidc_enabled``
+    becomes true, validate the
     token against the configured issuer/JWKS here and map claims -> roles. Until
     then the temporary static-token path is authoritative and does not depend on
     FAO's (unverified) IdP.

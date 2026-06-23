@@ -57,8 +57,8 @@ class GeometryConflictError(GeoidServiceError):
     """An identical geometry already exists in the catalog (global dedup, 409).
 
     Carries the incumbent geoid + its collection so the 409 body can point the
-    client at the existing registration (Remi/Ken's ruling: the insert fails
-    AND the response names the existing geoid).
+    client at the existing registration: the insert fails AND the response names
+    the existing geoid.
     """
 
     def __init__(self, geoid: uuid.UUID, collection: str) -> None:

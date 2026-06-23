@@ -66,7 +66,7 @@ def test_oidc_enabled_with_issuer_and_jwks():
 
 
 def test_dedup_grid_default_is_1cm():
-    # Remi's exact-match ruling: 1e-7 deg/vertex ≈ 1 cm — float-jitter immunity only.
+    # Exact-match ruling: 1e-7 deg/vertex ≈ 1 cm — float-jitter immunity only.
     assert _settings().dedup_grid_default == 1e-7
 
 
