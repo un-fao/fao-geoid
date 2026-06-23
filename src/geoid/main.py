@@ -34,7 +34,6 @@ _TAGS_METADATA = [
     {"name": "health", "description": "App health check"},
     {"name": "registry", "description": "Write and resolution endpoints"},
     {"name": "manage", "description": "Admin-gated management endpoints"},
-    {"name": "ogc", "description": "OGC API Features read surface"},
 ]
 
 
@@ -71,7 +70,7 @@ def create_app() -> FastAPI:
     # Probe surface first, then the read surface (OGC) at the root, the registry,
     # and management routers. /health is a literal path — no OGC collision.
     app.include_router(health.router)
-    app.include_router(ogc.router)
+    app.include_router(ogc.router, include_in_schema=False)  # live, but hidden from /docs
     app.include_router(places.router)
     app.include_router(manage.router)
 
