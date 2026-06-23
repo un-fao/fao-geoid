@@ -197,12 +197,14 @@ jobs:
             --subnet "${{ vars.VPC_SUBNET }}" \
             --vpc-egress private-ranges-only \
             --set-secrets GEOID_DATABASE_URL=geoid-database-url:latest,GEOID_ADMIN_TOKEN=geoid-admin-token:latest \
-            --set-env-vars "^@^GEOID_ENVIRONMENT=$TARGET_ENV@GEOID_BASE_URL=${{ vars.GEOID_BASE_URL }}@GEOID_ROOT_PATH=${{ vars.GEOID_ROOT_PATH }}@GEOID_INSTANCE_ID=${{ vars.GEOID_INSTANCE_ID }}@GEOID_PUBLIC_COLLECTION=${{ vars.GEOID_PUBLIC_COLLECTION }}" \
+            --set-env-vars "^@^GEOID_ENVIRONMENT=$TARGET_ENV@GEOID_BASE_URL=${{ vars.GEOID_BASE_URL }}@GEOID_ROOT_PATH=${{ vars.GEOID_ROOT_PATH }}@GEOID_INSTANCE_ID=${{ vars.GEOID_INSTANCE_ID }}@GEOID_PUBLIC_COLLECTION=${{ vars.GEOID_PUBLIC_COLLECTION }}@GEOID_BULK_MAX_FEATURES=2500" \
             --port 8000 \
             --allow-unauthenticated \
             --execution-environment gen2 \
             --min-instances 0 \
             --max-instances 4 \
+            --memory 1Gi \
+            --timeout 600 \
             --cpu-boost
 
       - name: Install uv (for the smoke script)
