@@ -12,8 +12,8 @@ is the **write path** — *mint an immutable geoid → deduplicate by canonical 
 ```
 QGIS / ogr / Whisp / Ground ──►  GeoID FastAPI (one image)
                                   ├─ POST place → mint geoid + dedup + provenance   ◄── the product
-                                  ├─ GET by geoid / by (external_id, collection)
-                                  ├─ OGC API Features read (landing, conformance, collections, items, queryables)
+                                  ├─ GET by geoid / by (external_id, collection)   ◄── the only reads
+                                  ├─ OGC landing + conformance (public); collections list/describe (admin)
                                   └─ /docs (Swagger)
                                           │
                                           ▼
@@ -29,8 +29,8 @@ per-module reference for all 47 modules.
 
 🎓 **Geospatial concepts & standards tutorial:** open [`docs/tutorial.html`](docs/tutorial.html)
 in a browser — an interactive primer on every geospatial idea GeoID relies on (CRS & axis order,
-GeoJSON↔WKB, polygon validity, the dedup hash, spatial indexing, OGC API Features
-& CQL2, the content-addressed UUIDv8 geoid), with live widgets and per-section self-tests grounded in the real code.
+GeoJSON↔WKB, polygon validity, the dedup hash, spatial indexing, OGC API Features,
+the content-addressed UUIDv8 geoid), with live widgets and per-section self-tests grounded in the real code.
 
 📋 **Stakeholder contract (shareable):** open [`docs/contract.html`](docs/contract.html) in a
 browser — definitions & rules, the team's decisions with rationale, the API contract, a fully
@@ -44,9 +44,9 @@ Every place is assigned a content-addressed **UUIDv8** (RFC 9562 §5.8) **derive
 geometry** (the same `geom_hash` used for dedup), stored bare as the item id. On read we derive:
 
 - a URI — `https://data.fao.org/geoid/<uuid>`
-- a collection-scoped OGC item URL — `…/collections/{coll}/items/<uuid>`
 
-`POST` returns both. The geoid is **immutable**: `place` is INSERT-only (enforced by a DB trigger);
+`POST` returns the geoid and its URI, and a 201 `Location` header pointing at that resolver URI. The
+geoid is **immutable**: `place` is INSERT-only (enforced by a DB trigger);
 corrections mint a *new* geoid linked via `predecessor_id`, and the original resolves forever.
 
 Identity and deduplication now share **one fingerprint**: the geoid is derived from the same **global**
@@ -102,14 +102,14 @@ Open `http://localhost:8000/docs` for Swagger, `http://localhost:8000/` for the 
 ## Try it with sample data
 
 With the stack running, seed the dummy EUDR/Whisp-style plots in `samples/` and watch
-mint → dedup → validation → OGC read → bulk export in one command:
+mint → dedup → validation → resolve in one command:
 
 ```bash
 uv run python scripts/seed_samples.py
 ```
 
 Expected: 5 plots minted, a reversed-winding duplicate rejected with 409 + the incumbent geoid, a
-self-intersecting polygon rejected (422), CQL2 queries, and a 5-feature bulk export.
+self-intersecting polygon rejected (422), and the first plot resolved by its geoid.
 See `samples/README.md` for details.
 
 ## Tests

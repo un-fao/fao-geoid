@@ -118,19 +118,6 @@ class Settings(DatabaseSettings):
         ),
     )
 
-    # --- Read paging guard rails -------------------------------------------
-    default_limit: int = Field(default=100, ge=1)
-    max_limit: int = Field(default=10_000, ge=1)
-    max_offset: int = Field(
-        default=100_000,
-        ge=0,
-        description=(
-            "Upper bound on the offset paging parameter; a deep OFFSET forces the DB "
-            "to scan and discard that many rows per request. rel=next links stop at "
-            "the cap, so 0 cleanly disables deep paging."
-        ),
-    )
-
     # --- Unified auth service seam (Release-1 stretch goal; Eduardo's team,
     #     expected to be OIDC — confirm before wiring). Inert until enabled;
     #     the oidc_* names are kept deliberately to avoid a second rename. ----

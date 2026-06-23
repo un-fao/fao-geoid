@@ -116,15 +116,10 @@ async def create_place(
             raise RegistryConsistencyError(result.geoid)
         raise GeometryConflictError(geoid=result.geoid, collection=result.collection_slug)
 
-    ids = derive_identifiers(
-        result.geoid,
-        base_url=settings.base_url_clean,
-        collection=collection.slug,
-    )
+    ids = derive_identifiers(result.geoid, base_url=settings.base_url_clean)
     return MintResponse(
         geoid=ids["geoid"],
         uri=ids["uri"],
-        item_url=ids["item_url"],
         collection=collection.slug,
         external_id=external_id,
     )
@@ -253,9 +248,7 @@ async def _mint_one(
                 index,
             )
             raise RegistryConsistencyError(result.geoid)
-        ids = derive_identifiers(
-            result.geoid, base_url=settings.base_url_clean, collection=result.collection_slug
-        )
+        ids = derive_identifiers(result.geoid, base_url=settings.base_url_clean)
         return BulkRejected(
             index=index,
             reason="geometry_conflict",
@@ -266,14 +259,11 @@ async def _mint_one(
             external_id=external_id,
         )
 
-    ids = derive_identifiers(
-        result.geoid, base_url=settings.base_url_clean, collection=collection.slug
-    )
+    ids = derive_identifiers(result.geoid, base_url=settings.base_url_clean)
     return BulkAccepted(
         index=index,
         geoid=ids["geoid"],
         uri=ids["uri"],
-        item_url=ids["item_url"],
         external_id=external_id,
     )
 

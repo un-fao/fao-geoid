@@ -19,15 +19,9 @@ class GeoJSONResponse(JSONResponse):
     media_type = "application/geo+json"
 
 
-class SchemaJSONResponse(JSONResponse):
-    """OGC Part-3 queryables are a JSON Schema document, served as schema+json."""
-
-    media_type = "application/schema+json"
-
-
 class WKTResponse(PlainTextResponse):
     """Bare WKT geometry as ``text/plain`` (its own honest media type — WKT is not
-    smuggled into a JSON envelope). One geometry per line for a feature collection."""
+    smuggled into a JSON envelope). Used for the single-feature resolver WKT path."""
 
     media_type = "text/plain"
 

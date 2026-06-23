@@ -84,32 +84,25 @@ def _square_at(x, y, s=0.5):
 # --- #6 GeoJSON content type -------------------------------------------------
 
 
-async def test_items_response_is_geojson_media_type(client, unit_square_ccw):
-    await client.post("/collections/public/items", json=unit_square_ccw)
-    resp = await client.get("/collections/public/items")
-    assert resp.headers["content-type"].startswith("application/geo+json")
-
-
-async def test_item_and_resolver_are_geojson_media_type(client, unit_square_ccw):
+async def test_resolver_is_geojson_media_type(client, unit_square_ccw):
     geoid = (await client.post("/collections/public/items", json=unit_square_ccw)).json()["geoid"]
-    item = await client.get(f"/collections/public/items/{geoid}")
     resolver = await client.get(f"/{geoid}")
-    assert item.headers["content-type"].startswith("application/geo+json")
     assert resolver.headers["content-type"].startswith("application/geo+json")
 
 
 # --- #7 real collection extent ----------------------------------------------
 
 
-async def test_collection_extent_reflects_data(client):
+async def test_collection_extent_reflects_data(client, admin_headers):
+    # The OGC describe surface is admin-gated now.
     await client.post("/collections/public/items", json=_square_at(10.0, 20.0, s=1.0))
-    desc = (await client.get("/collections/public")).json()
+    desc = (await client.get("/collections/public", headers=admin_headers)).json()
     assert desc["extent"]["spatial"]["bbox"][0] == [10.0, 20.0, 11.0, 21.0]
 
 
 async def test_empty_collection_extent_is_world(client, admin_headers):
     await client.post("/manage/collections", headers=admin_headers, json={"id": "emptyc"})
-    desc = (await client.get("/collections/emptyc")).json()
+    desc = (await client.get("/collections/emptyc", headers=admin_headers)).json()
     assert desc["extent"]["spatial"]["bbox"] == [[-180.0, -90.0, 180.0, 90.0]]
 
 

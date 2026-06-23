@@ -1,5 +1,5 @@
-"""Unit contracts on ogc_service: paging links honor the offset cap, and the
-advertised queryables set is pinned to the live CQL2 field mapping."""
+"""Unit contracts on ogc_service: the single feature's links + WKT shaping, and
+the trimmed conformance set (the listing/filtering/queryables surface is gone)."""
 
 from __future__ import annotations
 
@@ -9,7 +9,6 @@ from datetime import UTC, datetime
 import pytest
 
 from geoid.config import Settings
-from geoid.repositories.place_repo import queryable_field_mapping
 from geoid.services import ogc_service
 
 pytestmark = pytest.mark.unit
@@ -28,9 +27,9 @@ def _item_row() -> dict:
 
 @pytest.fixture(autouse=True)
 def _isolate_env(monkeypatch):
-    # Same rationale as test_config.py: integration fixtures export GEOID_* into
-    # os.environ; clear what these assertions depend on.
-    for key in ("GEOID_MAX_OFFSET", "GEOID_ENVIRONMENT", "GEOID_ADMIN_TOKEN", "GEOID_BASE_URL"):
+    # Integration fixtures export GEOID_* into os.environ; clear what these
+    # assertions depend on so unit tests are order-independent.
+    for key in ("GEOID_ENVIRONMENT", "GEOID_ADMIN_TOKEN", "GEOID_BASE_URL"):
         monkeypatch.delenv(key, raising=False)
 
 
@@ -38,43 +37,14 @@ def _settings(**overrides) -> Settings:
     return Settings(_env_file=None, **overrides)
 
 
-def _links(settings, *, number_matched, limit, offset):
-    fc = ogc_service.build_feature_collection(
-        settings,
-        rows=[],
-        collection="c",
-        number_matched=number_matched,
-        limit=limit,
-        offset=offset,
-        query_suffix="",
-    )
-    return {link.rel for link in fc.links}
+# --- the single feature's self link is the durable resolver ------------------
 
 
-def test_next_link_emitted_below_the_offset_cap():
-    settings = _settings(max_offset=150)
-    assert "next" in _links(settings, number_matched=1000, limit=100, offset=0)
-
-
-def test_next_link_suppressed_when_it_would_exceed_the_cap():
-    # offset=100, limit=100 -> next would be offset 200 > max_offset 150: the
-    # server must not advertise a link its own guard rejects with 400.
-    settings = _settings(max_offset=150)
-    assert "next" not in _links(settings, number_matched=1000, limit=100, offset=100)
-
-
-def test_max_offset_zero_disables_paging_links_coherently():
-    settings = _settings(max_offset=0)
-    assert "next" not in _links(settings, number_matched=10, limit=5, offset=0)
-
-
-def test_advertised_queryables_exactly_match_the_live_filter_mapping():
-    # The queryables document is a CLOSED schema (additionalProperties: false)
-    # and unknown names 400 — so advertised and working sets must be identical.
-    assert set(ogc_service._QUERYABLE_SCHEMAS) == set(queryable_field_mapping())
-
-
-# --- WKT vendor-extension advertising + encoding -----------------------------
+def test_build_feature_self_link_is_the_resolver():
+    feature = ogc_service.build_feature(_settings(), _item_row())
+    self_link = next(link for link in feature.links if link.rel == "self")
+    assert self_link.href.endswith("/019e0000-0000-7000-8000-000000000001")
+    assert "/items/" not in self_link.href
 
 
 def _wkt_alternate(links) -> object | None:
@@ -87,23 +57,8 @@ def test_build_feature_advertises_wkt_alternate():
     feature = ogc_service.build_feature(_settings(), _item_row())
     alt = _wkt_alternate(feature.links)
     assert alt is not None
-    assert alt.href.endswith("/items/019e0000-0000-7000-8000-000000000001?f=wkt")
+    assert alt.href.endswith("/019e0000-0000-7000-8000-000000000001?f=wkt")
     assert alt.title == "WKT"
-
-
-def test_build_feature_collection_advertises_wkt_alternate():
-    fc = ogc_service.build_feature_collection(
-        _settings(),
-        rows=[],
-        collection="public",
-        number_matched=0,
-        limit=10,
-        offset=0,
-        query_suffix="",
-    )
-    alt = _wkt_alternate(fc.links)
-    assert alt is not None
-    assert "f=wkt" in alt.href
 
 
 def test_feature_to_wkt_returns_valid_wkt():
@@ -116,11 +71,16 @@ def test_feature_to_wkt_handles_null_geometry():
     assert ogc_service.feature_to_wkt(feature) == ""
 
 
-def test_wkt_is_not_a_conformance_class():
-    # WKT is a documented vendor extension — it adds NO conformance class and does
-    # not touch /conformance. Pin the set so nobody silently advertises it.
-    # The 8 classes are OGC API - Features Part 1/3 + CQL2 (the read surface).
-    assert len(ogc_service.CONFORMANCE_CLASSES) == 8
-    joined = " ".join(ogc_service.CONFORMANCE_CLASSES).lower()
+def test_conformance_keeps_core_drops_filter_and_cql2():
+    # The item read surface (listing/filtering/queryables) was removed, so Part 3
+    # (filter/queryables) and CQL2 are no longer advertised. Core/OAS30/GeoJSON stay.
+    classes = ogc_service.CONFORMANCE_CLASSES
+    assert len(classes) == 3
+    joined = " ".join(classes).lower()
+    assert "conf/core" in joined
+    assert "oas30" in joined
+    assert "geojson" in joined
+    assert "cql2" not in joined
+    assert "filter" not in joined
+    assert "queryables" not in joined
     assert "wkt" not in joined
-    assert "text/plain" not in joined

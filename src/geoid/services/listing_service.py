@@ -5,9 +5,8 @@ from __future__ import annotations
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from geoid.models import Collection
-from geoid.repositories import catalog_repo, collection_repo, place_repo
-from geoid.schemas.collection import CollectionCreate, CollectionOut, ItemIdList
-from geoid.services.exceptions import CollectionNotFoundError
+from geoid.repositories import catalog_repo, collection_repo
+from geoid.schemas.collection import CollectionCreate, CollectionOut
 
 
 def _collection_out(collection: Collection) -> CollectionOut:
@@ -42,18 +41,3 @@ async def create_collection(session: AsyncSession, body: CollectionCreate) -> Co
 async def list_collections(session: AsyncSession) -> list[CollectionOut]:
     collections = await collection_repo.list_all(session)
     return [_collection_out(c) for c in collections]
-
-
-async def list_item_ids(
-    session: AsyncSession, collection_slug: str, *, limit: int, offset: int
-) -> ItemIdList:
-    collection = await collection_repo.get_by_slug(session, collection_slug)
-    if collection is None:
-        raise CollectionNotFoundError(collection_slug)
-    ids, total = await place_repo.list_item_ids(session, collection.id, limit=limit, offset=offset)
-    return ItemIdList(
-        collection=collection_slug,
-        numberMatched=total,
-        numberReturned=len(ids),
-        item_ids=[str(i) for i in ids],
-    )

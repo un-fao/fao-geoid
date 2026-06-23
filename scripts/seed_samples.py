@@ -79,17 +79,6 @@ def main() -> int:
         resp = _post(client, invalid)
         print(f"  [{resp.status_code}] {resp.json().get('reason')}")
 
-        print("\n== OGC read ==")
-        items = client.get(f"{BASE}/collections/{COLLECTION}/items?limit=100").json()
-        print(f"  all items                 → numberMatched={items['numberMatched']}")
-        cql = client.get(
-            f"{BASE}/collections/{COLLECTION}/items?filter=external_id='GH-COCOA-001'"
-        ).json()
-        print(f"  CQL2 external_id=GH-COCOA-001 → numberMatched={cql['numberMatched']}")
-
-        desc = client.get(f"{BASE}/collections/{COLLECTION}").json()
-        print(f"  collection extent (real)  → {desc['extent']['spatial']['bbox'][0]}")
-
         if first_geoid:
             # Resolver lives at the app root (BASE already includes any /geoid root_path).
             props = client.get(f"{BASE}/{first_geoid}").json()["properties"]

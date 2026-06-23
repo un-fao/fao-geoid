@@ -14,8 +14,8 @@
 > (see §8). The heavier async pipeline (OGC API - Processes/Jobs, the `ingest_job`
 > queue, `ingest-worker`, GCS export) was **removed as overkill** for the actual
 > requirement; the set-based `COPY`-staging ladder below stays the recorded plan for
-> *if* volumes ever reach millions. The *deferred* columnar/keyset items remain the
-> "soon", not the "now".
+> *if* volumes ever reach millions. The *deferred* columnar (DuckDB/Parquet) items
+> remain the "soon", not the "now".
 
 ---
 
@@ -27,13 +27,14 @@ specific access patterns; do not replace it.**
 PostGIS uniquely owns geometry validation (`ST_IsValid` / `ST_MakeValid`), the
 SHA-256 normalized-geometry dedup recipe
 (`sha256(ST_AsBinary(ST_Normalize(ST_ReducePrecision(ST_MakeValid(geom), 1e-7)), 'NDR'))`),
-GiST spatial filtering (`ST_Intersects` / `ST_Within`), trigger-enforced
-immutability, and the OGC OLTP read surface. **Nothing in DuckDB or Redis replaces
-those.** Every augmentation below is *additive* and *threshold-triggered* — adopted
-when a named metric crosses a named line, never speculatively.
+trigger-enforced immutability, and the OGC point-lookup read surface (the durable
+resolver `GET /{geoid}` + external-id lookup; no item listing/filtering is exposed).
+**Nothing in DuckDB or Redis replaces those.** Every augmentation below is *additive*
+and *threshold-triggered* — adopted when a named metric crosses a named line, never
+speculatively.
 
 **The single most important finding is not about throughput.** Demo-scale RPS is
-already met (~530–590 write RPS, ~330 read RPS on one emulated instance —
+already met (~530–590 write RPS on one emulated instance —
 [`PERFORMANCE.md`](../PERFORMANCE.md)). GeoID's hardest scaling problem *was*
 preserving its **global geometry-dedup invariant** — a `UNIQUE` on `geom_hash`,
 which is a *non-partition* column — once `place` is partitioned or sharded. **That
@@ -52,8 +53,8 @@ most "scale Postgres" advice starts.
 
 | Rung | Trigger to climb | Move | GeoID specifics |
 |---|---|---|---|
-| **0 — now** | < ~100 GB; demo RPS met | Tuned indexes + bounded pool | Already done: composite paging index (migration 0002), one-round-trip write happy path, batched extents, streaming export. Next cheap wins: **keyset paging**, **approximate `numberMatched`**, **PgBouncer** once `max-instances × (pool+overflow)` nears Cloud SQL `max_connections`. |
-| **1** | Read pressure on the OGC surface | **Read replicas** | OGC `GET` is replica-safe; `POST` stays on the primary. Needs a read/write session split in `db.py`. Watch **read-your-writes**: route a writer's own immediate read back to the primary. |
+| **0 — now** | < ~100 GB; demo RPS met | Tuned indexes + bounded pool | Already done: one-round-trip write happy path, batched extents, streaming export. (The composite paging index of migration 0002 is retained but now unused — the items listing it backed was removed.) Next cheap win: **PgBouncer** once `max-instances × (pool+overflow)` nears Cloud SQL `max_connections`. |
+| **1** | Read pressure on the resolver | **Read replicas** | The resolver `GET /{geoid}` + external-id lookups are replica-safe; `POST` stays on the primary. Needs a read/write session split in `db.py`. Watch **read-your-writes**: route a writer's own immediate read back to the primary. |
 | **2** | `place` too large / write volume saturates one table | **Partition `place`** (native declarative, hash by `collection_id`) | **Already unblocked:** a partitioned-table unique must include the partition key (§3), so global `UNIQUE(geom_hash)` cannot live on a partitioned `place` — but it no longer does. Global geometry-uniqueness already lives on the **unpartitioned `geoid_registry`** (`uq_geoid_registry_geom_hash`, since `0001`); partitioning `place` needs no schema relocation. |
 | **3** | Single primary saturated (CPU / IOPS / connections) | **Citus** — `place` distributed by `collection_id`, `geoid_registry` as a **reference table** | Same constraint as rung 2: a Citus distributed unique must include the distribution column. Global dedup already lives on `geoid_registry`; rung 3 only makes that table a **replicated reference table** so its `UNIQUE` is enforced cluster-wide. Mirrors Instagram's logical-shards pattern (§4). |
 | **Parallel track** | OLAP / billion-row export / analytical scans | **Columnar offload** (DuckDB / Parquet) | Runs *off* the primary. Periodic Parquet snapshots to GCS via a future snapshot job (an object-storage seam re-introduced if/when this is built). Never burden the OLTP primary with analytical full scans. Independent of rungs 1–3 — adopt whenever analytical read demand appears. |
@@ -182,9 +183,11 @@ was cross-checked against the primary
   time-sortable IDs so `ORDER BY id` ≈ `ORDER BY created_at`. GeoID deliberately gives
   up that PK property: the geoid is a **deterministic, content-addressed UUIDv8**
   (ADR-004), so it is *not* time-ordered and distributes randomly in the b-tree (the
-  cost of federation-stable identity — see ADR-004's consequences). Time-ordered
-  paging instead leans entirely on the composite index `(collection_id, created_at,
-  id)`, which is why that index — not the PK — is the load-bearing paging structure.
+  cost of federation-stable identity — see ADR-004's consequences). When an item
+  listing existed, time-ordered paging leaned on the composite index
+  `(collection_id, created_at, id)` rather than the PK; that listing has since been
+  removed (no enumeration is exposed), so the index (migration 0002) is now
+  unused-but-retained.
 - **Caveat:** the geoid does **not** embed a shard id. Routing is therefore by
   `collection_id`, not by parsing the geoid — you cannot recover the shard from the
   identifier the way Instagram's IDs encode it.
@@ -205,10 +208,10 @@ registry hinge rather than by throughput.
 
 | Tool | Verdict | Role / when |
 |---|---|---|
-| **PostgreSQL + PostGIS** | **Keep — system of record.** | All writes, geometry validation, the dedup recipe, GiST spatial filtering, OGC OLTP reads, and the `change_log` event log. Non-negotiable; everything else orbits it. |
+| **PostgreSQL + PostGIS** | **Keep — system of record.** | All writes, geometry validation, the dedup recipe, the OGC point-lookup reads (resolver + external-id), and the `change_log` event log. Non-negotiable; everything else orbits it. |
 | **Parallelism / bulk loading** | **Adopt for bulk ingest — highest near-term value.** | `COPY` into an **UNLOGGED/TEMP staging table** (asyncpg `copy_records_to_table`), then one set-based `INSERT … SELECT … ON CONFLICT DO NOTHING` — orders of magnitude faster than per-row `INSERT` at millions of rows. **PgBouncer** (transaction pool) for connection fan-out (set asyncpg `statement_cache_size=0` when that pooler lands — already flagged in `PERFORMANCE.md`). Postgres **parallel query** for analytical counts/exports. Async job queue via `SELECT … FOR UPDATE SKIP LOCKED` — no new infrastructure. |
 | **DuckDB** | **Adopt later — OLAP/export complement, never a replacement.** | Bulk *fetch* and analytics at billions of rows: periodic **Parquet snapshots** of `place` / `geoid_registry` to GCS (via a re-introduced object-storage seam), queried by DuckDB far faster than OFFSET pagination — and **off the primary**. Optional `pg_duckdb` on a read replica. **Never** for writes, validation, or topology — it does not own the geometry recipe. |
-| **Redis / caching** | **Adopt later — accelerator that must fail-open.** | (a) **Cache-aside** for OGC reads: because `place` is immutable, invalidation is trivial — bump a per-collection version key on insert; `GET /…/items/{geoid}` is effectively cache-forever. (b) **Bloom filter** of known `geom_hash` to pre-skip dedup DB hits during bulk ingest — the DB `UNIQUE` stays the source of truth. **Redis down ⇒ fall back to Postgres** (slower, still correct). Not needed at demo scale. |
+| **Redis / caching** | **Adopt later — accelerator that must fail-open.** | (a) **Cache-aside** for resolver reads: because `place` is immutable, `GET /{geoid}` is effectively cache-forever (the geoid is content-addressed, so the entry never goes stale). (b) **Bloom filter** of known `geom_hash` to pre-skip dedup DB hits during bulk ingest — the DB `UNIQUE` stays the source of truth. **Redis down ⇒ fall back to Postgres** (slower, still correct). Not needed at demo scale. |
 
 The shape of the verdict: **one authoritative engine, a fast bulk-load path on top
 of it, and two optional accelerators (columnar reads, cache) that are correctness-
@@ -276,9 +279,9 @@ Each **DEFERRED** decision names its trigger metric and links to the matching
 
 ### Deferred (with trigger metric)
 
-- **ADR-005 — Read replicas.** *Trigger:* OGC read RPS sustained near primary CPU
-  limits, or read latency p95 regressing under write load. *Link:* `PERFORMANCE.md`
-  → "Read replicas".
+- **ADR-005 — Read replicas.** *Trigger:* resolver/external-id read RPS sustained
+  near primary CPU limits, or read latency p95 regressing under write load. *Link:*
+  `PERFORMANCE.md` → "Read replicas".
 - **ADR-006 — Partition `place` (native, hash by `collection_id`).** *Trigger:*
   `place` size or single-table write volume degrades planning/vacuum; ≳ ~100 GB or
   ~1e8 rows as a rule of thumb. *Prereq:* ADR-003 — **complete** (the registry
@@ -292,15 +295,14 @@ Each **DEFERRED** decision names its trigger metric and links to the matching
   billion-row export demand that would force full scans on the OLTP primary.
   *Link:* this document is the system-of-record for the columnar decision; the
   `PERFORMANCE.md` pointer (added this pass) routes readers here.
-- **ADR-009 — Redis cache-aside + `geom_hash` bloom filter.** *Trigger:* OGC read
-  RPS or bulk-ingest dedup-probe volume exceeds what tuned Postgres serves within
-  latency budget. *Link:* as ADR-008, recorded here with a `PERFORMANCE.md` pointer.
-- **ADR-010 — Keyset (seek) paging to replace OFFSET.** *Trigger:* deep enumeration
-  needs to exceed `GEOID_MAX_OFFSET`, or OFFSET-depth latency regresses. *Link:*
-  `PERFORMANCE.md` → "Keyset/cursor paging".
-- **ADR-011 — Approximate / optional `numberMatched`.** *Trigger:* a collection
-  grows too large to `COUNT(*)` exactly within the request budget. *Link:*
-  `PERFORMANCE.md` → "Approximate / optional `numberMatched`".
+- **ADR-009 — Redis cache-aside + `geom_hash` bloom filter.** *Trigger:* resolver
+  read RPS or bulk-ingest dedup-probe volume exceeds what tuned Postgres serves
+  within latency budget. *Link:* as ADR-008, recorded here with a `PERFORMANCE.md` pointer.
+- **ADR-010 — Keyset (seek) paging to replace OFFSET. WITHDRAWN (2026-06-23).** The
+  item listing this addressed was removed (no enumeration is exposed), so OFFSET
+  paging no longer exists to replace.
+- **ADR-011 — Approximate / optional `numberMatched`. WITHDRAWN (2026-06-23).** No
+  listing surface returns `numberMatched` anymore, so there is nothing to approximate.
 
 ---
 
@@ -316,7 +318,7 @@ write is now **one route**.
 
 **The route.** `POST /collections/{id}/items/bulk` takes a GeoJSON `FeatureCollection`
 (RFC 7946 §3.3) and returns **HTTP 200** with a `BulkReport{ summary{received,
-accepted, rejected}, accepted[{index, geoid, uri, item_url, external_id}],
+accepted, rejected}, accepted[{index, geoid, uri, external_id}],
 rejected[{index, reason, detail, geoid?, uri?, collection?, external_id?}] }`.
 `GEOID_BULK_MAX_FEATURES` (default **1000**) caps the body — a write bound **errors
 413**, never truncates. Per-feature **partial success** is the contract: one bad
@@ -338,8 +340,8 @@ abort risks before the insert) remains the **recorded plan** for a future
 millions-of-rows load, alongside an async `SELECT … FOR UPDATE SKIP LOCKED` job queue
 and an export process. None of it is built today — the synchronous route covers the
 requirement, and the ladder is re-openable without re-deciding. Still deferred from
-§5/§7: keyset paging to retire OFFSET (ADR-010); DuckDB-off-primary Parquet snapshots
-(ADR-008); approximate `numberMatched` (ADR-011).
+§5/§7: DuckDB-off-primary Parquet snapshots (ADR-008). (ADR-010 keyset paging and
+ADR-011 approximate `numberMatched` were withdrawn — no listing surface remains.)
 
 ---
 

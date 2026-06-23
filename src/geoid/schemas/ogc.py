@@ -1,8 +1,6 @@
-"""OGC API Features response models — DynaStore-shaped envelopes.
+"""OGC API Features response models — landing, conformance, collections, feature.
 
-The read surface mirrors FAO's DynaStore response shapes (``numberMatched`` /
-``numberReturned`` / ``timeStamp`` on collections; HATEOAS ``links`` everywhere)
-so existing QGIS / ogr clients consume a GeoID collection unchanged.
+HATEOAS ``links`` everywhere; a feature's ``self`` link is the durable resolver.
 """
 
 from __future__ import annotations
@@ -59,12 +57,3 @@ class FeatureModel(BaseModel):
     geometry: dict[str, Any] | None
     properties: dict[str, Any] = Field(default_factory=dict)
     links: list[Link] = Field(default_factory=list)
-
-
-class FeatureCollectionModel(BaseModel):
-    type: Literal["FeatureCollection"] = "FeatureCollection"
-    features: list[FeatureModel] = Field(default_factory=list)
-    links: list[Link] = Field(default_factory=list)
-    timeStamp: str
-    numberMatched: int
-    numberReturned: int

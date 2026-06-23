@@ -102,7 +102,6 @@ class MintResponse(BaseModel):
         "the canonical, immutable identifier."
     )
     uri: str = Field(description="Durable resolver URI, e.g. https://data.fao.org/geoid/<uuid>.")
-    item_url: str = Field(description="Collection-scoped OGC API Features item URL.")
     collection: str = Field(description="Collection slug the place was minted into.")
     external_id: str | None = Field(default=None)
 
@@ -156,7 +155,6 @@ class BulkAccepted(BaseModel):
     index: int = Field(description="Zero-based position in the submitted features array.")
     geoid: str
     uri: str
-    item_url: str
     external_id: str | None = None
 
 

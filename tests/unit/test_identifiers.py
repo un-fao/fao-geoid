@@ -53,26 +53,10 @@ def test_uri_derivation_strips_trailing_slash():
     )
 
 
-def test_item_url_is_collection_scoped():
-    value = uuid.UUID("019e9976-974c-7d01-b2b6-299f41d9d29c")
-    url = identifiers.item_url_for(value, "public", "https://data.fao.org")
-    assert url == "https://data.fao.org/collections/public/items/" + str(value)
-
-
-def test_derive_identifiers_bundle_includes_item_url_when_collection_given():
-    value = identifiers.uuid7()
-    bundle = identifiers.derive_identifiers(
-        value, base_url="https://data.fao.org", collection="public"
-    )
-    assert bundle["geoid"] == str(value)
-    assert bundle["uri"].endswith(str(value))
-    assert bundle["item_url"].endswith(f"/collections/public/items/{value}")
-
-
-def test_derive_identifiers_omits_item_url_without_collection():
+def test_derive_identifiers_bundles_geoid_and_resolver_uri():
     value = identifiers.uuid7()
     bundle = identifiers.derive_identifiers(value, base_url="https://data.fao.org")
-    assert "item_url" not in bundle
+    assert bundle == {"geoid": str(value), "uri": f"https://data.fao.org/{value}"}
 
 
 def test_same_ms_mints_are_strictly_increasing(monkeypatch):

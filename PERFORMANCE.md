@@ -8,10 +8,19 @@
 >    several times slower than native — run the harness on the target infra
 >    (Cloud Run + Cloud SQL) for representative figures.
 > 2. **The demo target is already met.** A single emulated instance sustains
->    **~530–590 RPS** on the write paths and **~330 RPS** on reads at p50 ≈ 12–43 ms
->    — well past the plan's "a few hundred RPS on one instance" goal. So the work
->    below is about *scale-invariance and headroom*, not chasing raw RPS, in line
->    with the plan's "ship correct first, scale later".
+>    **~530–590 RPS** on the write paths at p50 ≈ 12–15 ms — well past the plan's
+>    "a few hundred RPS on one instance" goal. So the work below is about
+>    *scale-invariance and headroom*, not chasing raw RPS, in line with the plan's
+>    "ship correct first, scale later".
+> 3. **The OGC item read/listing surface was removed (2026-06-23).** There is no
+>    items listing, CQL2 filtering, queryables, single-feature `GET /items/{geoid}`,
+>    or `item-ids` enumeration — a stakeholder requirement forbids exposing any
+>    surface that enumerates/filters/searches a collection's geometries. So the
+>    `read` scenario, the composite paging index (migration 0002, now **unused but
+>    retained** — applied migrations are never edited), and the keyset-paging /
+>    approximate-`numberMatched` roadmap items below are **historical**: they
+>    measured / targeted a surface that no longer exists. The surviving reads are the
+>    point-lookup resolver `GET /{geoid}` and `GET /collections/{id}/external/{external_id}`.
 
 ## How to measure
 
@@ -19,17 +28,16 @@
 # stack up (GEOID_DB_PORT avoids a local 5432 clash)
 GEOID_DB_PORT=5433 docker compose up -d --build
 
-# self-contained async harness (no k6/locust needed) — mint / dedup / read
+# self-contained async harness (no k6/locust needed) — mint / dedup
 uv run python scripts/loadtest.py --scenario all --concurrency 16 --duration 10
 
 # k6 (preferred for real runs) and Locust scripts also provided
 GEOID_BASE_URL=http://localhost:8000 k6 run tests/load/k6_smoke.js
 ```
 
-The three hot paths: **mint** (POST unique polygon → 201), **dedup** (POST identical
+The two hot paths: **mint** (POST unique polygon → 201) and **dedup** (POST identical
 geometry → 409 carrying the incumbent geoid; the harness counts 409 as success for
-this scenario — it IS the measured path: arbiter conflict + incumbent lookup),
-**read** (`GET items?limit=50`).
+this scenario — it IS the measured path: arbiter conflict + incumbent lookup).
 
 ## Baseline (emulated lower bound, concurrency=16, 8 s)
 
@@ -37,29 +45,26 @@ this scenario — it IS the measured path: arbiter conflict + incumbent lookup),
 |-------|-----:|-------:|-------:|-------:|
 | mint  | ~579 |   11.4 |  103.6 |  221   |
 | dedup | ~550 |   14.7 |   97.7 |  251   |
-| read  | ~327 |   42.9 |   73.3 |  160   |
 
-`read` is measured against **34,289 rows in one collection** (after bulk-seeding);
-it stayed at ~73 ms p95 despite an 8× data increase — see the index result below.
+(A `read` row appeared here historically, against a 34,289-row collection; the OGC
+items listing it measured has since been removed — see caveat 3.)
 
 > **mint / dedup re-measured 2026-06-15** after the global geometry-dedup UNIQUE
 > moved to `geoid_registry` (the write is now a one-statement arbiter CTE). Warm-run
 > numbers match the prior baseline (~554 / ~590) within emulated run-to-run
 > variance — **no write-path regression** (same three tables written, same one
 > round-trip). A cold *first* run on the fresh volume dipped to ~370 mint RPS; that
-> is fresh-cache warmup, not the relocation. The `read` row is retained from the
-> 34,289-row measurement — the relocation does not touch the read path, and this
-> run's read was against a near-empty collection.
+> is fresh-cache warmup, not the relocation.
 
 ## Live review environment (network-bound) — 2026-06-15
 
 Heavy run against the **deployed review service** (`https://data.review.fao.org/geoid`;
 Cloud Run gen2 min-0 / max-4 + Cloud SQL `db-custom-2-4096`, PostGIS 3.6.0 / GEOS 3.11.4),
-**concurrency=64, 60 s/scenario**, order read→dedup→mint (read warms the min-0 instances):
+**concurrency=64, 60 s/scenario** (the original run also drove a now-removed `read`
+scenario first, which warmed the min-0 instances; its row is dropped here):
 
 | Path  | RPS   | p50 ms | p95 ms | p99 ms | max ms  | errors |
 |-------|------:|-------:|-------:|-------:|--------:|-------:|
-| read  | 148.2 |  315.0 |  897.1 | 1714.3 |  2698.6 |      0 |
 | dedup | 145.2 |  373.3 |  567.4 |  876.2 | 15198.7 |      0 |
 | mint  | 190.4 |  308.6 |  454.5 |  800.1 |  2225.9 |      0 |
 
@@ -67,10 +72,9 @@ This is a **separate baseline from the emulated local numbers above** — it inc
 internet RTT, Cloud Run request-concurrency + autoscale (max 4), and Cloud SQL, so the two
 are **not comparable**. **Zero errors** at c=64 despite c > max-instances (no saturation
 failures, no cold-start 5xx). **mint p95 454 ms meets the <500 ms demo target even live.**
-`read`/`dedup` p95 exceed the *local* 300 ms targets — expected over the network: the `read`
-phase absorbed the min-0 cold-start (its inflated p90/p99 tail), and the lone 15 s `dedup`
-max is a single autoscale outlier (p99 only 876 ms). Treat these as the live reference and
-re-run after any infra change.
+`dedup` p95 (567 ms) exceeds the *local* 300 ms target — expected over the network; the lone
+15 s `dedup` max is a single autoscale outlier (p99 only 876 ms). Treat these as the live
+reference and re-run after any infra change.
 
 ## Correctness under load (a stress test, not just throughput)
 
@@ -83,10 +87,14 @@ under concurrency — the load-bearing dedup guarantee. A companion test fires 1
 
 ## Optimizations applied (with evidence)
 
-### 1. Composite paging index — the load-bearing read fix (migration 0002)
+### 1. Composite paging index — HISTORICAL (the items listing it backed was removed)
+
+> This optimisation backed the OGC items listing, which has since been removed
+> (caveat 3). The index (migration 0002) is **retained but unused** — applied
+> migrations are never edited. The measurement below is kept for the record.
 
 `CREATE INDEX place_collection_created_id_idx ON place (collection_id, created_at, id)`
-backs `WHERE collection_id=:c ORDER BY created_at, id LIMIT/OFFSET`. EXPLAIN ANALYZE
+backed `WHERE collection_id=:c ORDER BY created_at, id LIMIT/OFFSET`. EXPLAIN ANALYZE
 of the page-1 query at 34,289 rows:
 
 | | Plan | Exec time | Buffers |
@@ -160,17 +168,6 @@ processes.
 
 Intentionally **not** built now (YAGNI; the plan defers scaling):
 
-- **Keyset/cursor paging** to replace OFFSET (OFFSET cost grows with depth; the
-  composite index already makes the keyset variant an O(limit) range scan). In the
-  interim, `GEOID_MAX_OFFSET` (default 100k) caps offset depth on both the public
-  items endpoint and the admin item-ids listing, and `rel=next` links stop at the
-  cap. Consequence: full id enumeration of a collection larger than
-  `max_offset + limit` needs the cap raised until keyset paging lands.
-- **Approximate / optional `numberMatched`** (the OGC spec allows omitting it) via
-  `pg_class.reltuples` or a maintained per-collection counter, for collections too
-  large to count exactly per request.
-- **`ST_Subdivide`** derived index for collections holding very large / high-vertex
-  polygons (keeps GiST `ST_Intersects` selective).
 - **A vertex-count guard** (`ST_NPoints`) to reject or async-queue pathological
   geometries.
 - **Partition `place` by `collection_id` → Citus shard** (the `geoid_registry`
@@ -179,8 +176,9 @@ Intentionally **not** built now (YAGNI; the plan defers scaling):
   `place` carries no global UNIQUE and this stays additive: under Citus
   `geoid_registry` becomes a *reference table*, since Citus requires unique keys to
   include the distribution column).
-- **Read replicas** for the OGC read path (the write path needs the primary; the
-  read path is replica-safe).
+- **Read replicas** for the read path — the durable resolver `GET /{geoid}` and
+  external-id point lookups (the write path needs the primary; these reads are
+  replica-safe).
 - **Federation pull-feed** over the monotonic `change_log.seq` cursor.
 - **Batch geoid lookup** — `POST /geoid/lookup` taking a list of geoids with a
   configurable cap (FAO DynaStore uses 10k), partitioning malformed UUIDs out

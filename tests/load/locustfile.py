@@ -4,7 +4,7 @@
     locust -f tests/load/locustfile.py --host http://localhost:8000
 
 Then open http://localhost:8089 and drive load. Tasks are weighted to emphasise
-the mint + dedup-lookup hot paths while exercising the OGC read surface.
+the mint + dedup-lookup hot paths.
 """
 
 from __future__ import annotations
@@ -53,7 +53,3 @@ class GeoIDUser(HttpUser):
                 resp.success()
             else:
                 resp.failure(f"unexpected status {resp.status_code}")
-
-    @task(4)
-    def read_items(self) -> None:
-        self.client.get(f"{_ITEMS}?limit=50", name="GET items")

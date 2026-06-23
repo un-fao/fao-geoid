@@ -1,6 +1,6 @@
 [project]
 name = "geoid"
-version = "0.1.2"
+version = "0.2.0"
 description = "GeoID — global federated registry minting immutable, secure identifiers for geospatial places (OGC API Features over PostGIS)."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -21,10 +21,8 @@ dependencies = [
     "geojson-pydantic>=2.1,<2.2",
     "pydantic>=2.9",
     "pydantic-settings>=2.6",
-    # Geometry + CQL2 filtering
+    # Geometry (WKT vendor-extension codec)
     "shapely>=2.0",
-    "pygeofilter>=0.3,<0.4",
-    "lark>=1.1",
 ]
 
 [project.scripts]
