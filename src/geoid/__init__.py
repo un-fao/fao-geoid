@@ -7,4 +7,12 @@ provenance, and accept anonymous contributions. The read path is standard OGC AP
 Features over PostGIS.
 """
 
-__version__ = "0.1.0"
+from importlib.metadata import PackageNotFoundError, version
+
+try:
+    # Single source of truth: the version in pyproject.toml, read from the installed
+    # package metadata so it is never hand-maintained here (and never drifts, the way
+    # the old hardcoded literal silently lagged the released tag).
+    __version__ = version("geoid")
+except PackageNotFoundError:  # uninstalled source tree — no dist metadata to read
+    __version__ = "0.0.0+unknown"
