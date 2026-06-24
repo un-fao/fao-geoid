@@ -6,11 +6,17 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-06-24
+
 ### Added
 - Accept Point and MultiPoint geometries (in addition to Polygon/MultiPolygon);
   lines and GeometryCollection remain unsupported. Identity reuses the frozen v1
   recipe at the same 1e-7 tolerance, so a point dedups exactly as a polygon vertex
   does (409 + incumbent on a match). See ADR-005.
+
+### Changed
+- GeoID is now explicitly 2D-only: a geometry carrying a Z (elevation) coordinate
+  is rejected with a 422 instead of being silently accepted. See ADR-006.
 
 ## [0.2.1] - 2026-06-23
 
