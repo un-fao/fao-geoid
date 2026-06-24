@@ -68,8 +68,8 @@ def test_decode_rejects_garbage_string():
 
 
 def test_decode_geometrycollection_succeeds_at_codec_level():
-    # The codec parses any valid WKT; non-polygonal types (incl. GeometryCollection)
-    # are rejected one layer up by the schema's Polygon|MultiPolygon discriminator,
+    # The codec parses any valid WKT; unsupported types (lines, GeometryCollection)
+    # are rejected one layer up by the schema's SupportedGeometry discriminator,
     # not here — keeping the codec format-only and the rejection uniform with GeoJSON.
     result = decode_geometry("GEOMETRYCOLLECTION(POINT(1 2))")
     assert result["type"] == "GeometryCollection"

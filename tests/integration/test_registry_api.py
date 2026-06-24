@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import uuid
+
 import pytest
 
 pytestmark = pytest.mark.integration
@@ -104,13 +106,52 @@ async def test_invalid_self_intersecting_polygon_returns_422_with_reason(client)
     assert "reason" in resp.json()
 
 
-async def test_point_geometry_rejected_422(client):
+async def test_point_geometry_mints_geoid(client):
     point = {
         "type": "Feature",
         "geometry": {"type": "Point", "coordinates": [0, 0]},
         "properties": {},
     }
     resp = await client.post("/collections/public/items", json=point)
+    assert resp.status_code == 201
+    geoid = resp.json()["geoid"]
+    assert uuid.UUID(geoid).version == 8
+    feat = (await client.get(f"/{geoid}")).json()
+    assert feat["geometry"]["type"] == "Point"
+
+
+async def test_multipoint_geometry_mints_geoid(client):
+    mp = {
+        "type": "Feature",
+        "geometry": {"type": "MultiPoint", "coordinates": [[0, 0], [5, 5]]},
+        "properties": {},
+    }
+    resp = await client.post("/collections/public/items", json=mp)
+    assert resp.status_code == 201
+    feat = (await client.get(f"/{resp.json()['geoid']}")).json()
+    assert feat["geometry"]["type"] == "MultiPoint"
+
+
+async def test_linestring_rejected_422(client):
+    line = {
+        "type": "Feature",
+        "geometry": {"type": "LineString", "coordinates": [[0, 0], [1, 1]]},
+        "properties": {},
+    }
+    resp = await client.post("/collections/public/items", json=line)
+    assert resp.status_code == 422
+
+
+async def test_geometrycollection_rejected_422(client):
+    gc = {
+        "type": "Feature",
+        "geometry": {
+            "type": "GeometryCollection",
+            "geometries": [{"type": "Point", "coordinates": [0, 0]}],
+        },
+        "properties": {},
+    }
+    resp = await client.post("/collections/public/items", json=gc)
     assert resp.status_code == 422
 
 
@@ -179,9 +220,11 @@ async def test_post_ewkt_returns_422(client):
     assert resp.status_code == 422
 
 
-async def test_post_wkt_point_returns_422(client):
+async def test_post_wkt_point_mints_geoid(client):
     resp = await client.post("/collections/public/items", json=_wkt_feature("POINT(1 2)"))
-    assert resp.status_code == 422
+    assert resp.status_code == 201
+    feat = (await client.get(f"/{resp.json()['geoid']}")).json()
+    assert feat["geometry"]["type"] == "Point"
 
 
 async def test_anonymous_write_to_managed_collection_forbidden(

@@ -8,7 +8,7 @@ Constraint→HTTP mapping (DB is the source of truth; switch on constraint_name)
                                               raised as GeometryConflictError by
                                               the service; the IntegrityError
                                               branch is only a backstop
-    invalid / non-polygon geometry         -> 422 with ST_IsValidReason
+    invalid / unsupported-type / empty geom -> 422 with ST_IsValidReason
     immutability (restrict_violation)       -> 409
 """
 
@@ -139,7 +139,7 @@ def register_exception_handlers(app: FastAPI) -> None:
         if sqlstate == SQLSTATE_CHECK_VIOLATION:
             return _error(
                 status.HTTP_422_UNPROCESSABLE_CONTENT,
-                "geometry violates a database check (polygon-only / ST_IsValid)",
+                "geometry violates a database check (supported-type / not-empty / ST_IsValid)",
                 constraint=constraint,
             )
         if sqlstate == SQLSTATE_RESTRICT_VIOLATION:

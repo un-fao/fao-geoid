@@ -212,6 +212,38 @@ VECTOR_CASES: tuple[VectorCase, ...] = (
         "(D4): stored rows are always valid (CHECK constraint), so MakeValid drift "
         "can never change a stored hash",
     ),
+    # --- Point / MultiPoint (ADR-005) ---------------------------------------
+    # Points reuse the frozen v1 recipe verbatim at the same 1e-7 grid. Axis-aligned
+    # integer coords are GEOS-stable, so these are strict.
+    VectorCase(
+        name="point_origin",
+        wkt="POINT(0 0)",
+        grid=1e-7,
+        note="canonical point at the origin — the Point analogue of baseline_unit_square",
+    ),
+    VectorCase(
+        name="point_subgrid_jitter",
+        wkt="POINT(0.00000001 0)",
+        grid=1e-7,
+        same_as="point_origin",
+        note="1e-8 jitter, below the 1e-7 grid — ST_ReducePrecision absorbs it for a "
+        "point exactly as for a polygon vertex (the client's 'same tolerance'). 1e-8 "
+        "mirrors subgrid_jitter; 5e-8 would sit on the half-cell tie and snap up.",
+    ),
+    VectorCase(
+        name="multipoint_canonical",
+        wkt="MULTIPOINT(0 0,5 5)",
+        grid=1e-7,
+        note="two-point multipoint",
+    ),
+    VectorCase(
+        name="multipoint_order_swapped",
+        wkt="MULTIPOINT(5 5,0 0)",
+        grid=1e-7,
+        same_as="multipoint_canonical",
+        note="components in the other order — ST_Normalize collapses it (pinned by the "
+        "generator self-check; ADR-005)",
+    ),
 )
 
 

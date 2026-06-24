@@ -44,9 +44,11 @@ from geoid.services.exceptions import (
 
 logger = logging.getLogger(__name__)
 
-# Geometry validity (ST_IsValid) and polygon-only are enforced by CHECK constraints
-# on the INSERT (SQLSTATE 23514). Polygon-only + lon/lat bounds + RFC 7946 structure
-# are ALSO enforced earlier by the PlaceCreate pydantic schema (422 before the DB).
+# Geometry validity (ST_IsValid), supported-type (Point/MultiPoint/Polygon/
+# MultiPolygon — lines and GeometryCollection rejected), and non-empty are enforced
+# by CHECK constraints on the INSERT (SQLSTATE 23514). The supported-type gate +
+# lon/lat bounds + RFC 7946 structure are ALSO enforced earlier by the PlaceCreate
+# pydantic schema (422 before the DB).
 
 
 async def create_place(

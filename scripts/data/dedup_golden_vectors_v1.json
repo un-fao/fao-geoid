@@ -3,7 +3,7 @@
   "generated_on": {
     "postgis_full_version": "POSTGIS=\"3.6.0 3.6.0\" [EXTENSION] PGSQL=\"170\" GEOS=\"3.11.4-CAPI-1.17.4\" PROJ=\"7.2.0\" (compiled against PROJ 0.0.63) LIBXML=\"2.9.10\" LIBJSON=\"0.17\" LIBPROTOBUF=\"1.5.2\" WAGYU=\"0.5.0 (Internal)\"",
     "generated_at": "2026-06-15T14:40:00+00:00",
-    "note": "Re-baselined to the Cloud SQL production stack (PostGIS 3.6.0 / GEOS 3.11.4), computed via Cloud SQL Studio on 2026-06-15. Cloud SQL is the system of record where geoids actually mint. The local CI image (postgis/postgis:17-3.5, GEOS 3.9.0) reproduces every STRICT vector but NOT the GEOS-build-sensitive ones (cell_straddle_high, grid9e5_*), which are therefore advisory; production parity is gated by scripts/dedup_vectors.py --check against the real target."
+    "note": "Re-baselined to the Cloud SQL production stack (PostGIS 3.6.0 / GEOS 3.11.4), computed via Cloud SQL Studio on 2026-06-15. Cloud SQL is the system of record where geoids actually mint. The local CI image (postgis/postgis:17-3.5, GEOS 3.9.0) reproduces every STRICT vector but NOT the GEOS-build-sensitive ones (cell_straddle_high, grid9e5_*), which are therefore advisory; production parity is gated by scripts/dedup_vectors.py --check against the real target. ADR-005 (2026-06-24) appended the four Point/MultiPoint vectors (point_*, multipoint_*); these reuse the frozen v1 recipe and are GEOS-stable (strict), so the existing prod digests are untouched and the appended digests reproduce on both stacks — confirmed by scripts/dedup_vectors.py --check against Cloud SQL."
   },
   "vectors": [
     {
@@ -158,6 +158,42 @@
       "strict": false,
       "same_as": null,
       "note": "self-intersecting bowtie exercising the ST_MakeValid leg \u2014 ADVISORY only (D4): stored rows are always valid (CHECK constraint), so MakeValid drift can never change a stored hash"
+    },
+    {
+      "name": "point_origin",
+      "wkt": "POINT(0 0)",
+      "grid": 1e-07,
+      "sha256": "ef93c98cbe28c31e59face8df8d3cd4b86ef6c5642b315af96a66e435b4a148f",
+      "strict": true,
+      "same_as": null,
+      "note": "canonical point at the origin \u2014 the Point analogue of baseline_unit_square"
+    },
+    {
+      "name": "point_subgrid_jitter",
+      "wkt": "POINT(0.00000001 0)",
+      "grid": 1e-07,
+      "sha256": "ef93c98cbe28c31e59face8df8d3cd4b86ef6c5642b315af96a66e435b4a148f",
+      "strict": true,
+      "same_as": "point_origin",
+      "note": "1e-8 jitter, below the 1e-7 grid \u2014 ST_ReducePrecision absorbs it for a point exactly as for a polygon vertex (the client's 'same tolerance'). 1e-8 mirrors subgrid_jitter; 5e-8 would sit on the half-cell tie and snap up."
+    },
+    {
+      "name": "multipoint_canonical",
+      "wkt": "MULTIPOINT(0 0,5 5)",
+      "grid": 1e-07,
+      "sha256": "a77ad3f9e110ff12367020a27ec77b019df2cdbe6d86367eadfee55e73020abb",
+      "strict": true,
+      "same_as": null,
+      "note": "two-point multipoint"
+    },
+    {
+      "name": "multipoint_order_swapped",
+      "wkt": "MULTIPOINT(5 5,0 0)",
+      "grid": 1e-07,
+      "sha256": "a77ad3f9e110ff12367020a27ec77b019df2cdbe6d86367eadfee55e73020abb",
+      "strict": true,
+      "same_as": "multipoint_canonical",
+      "note": "components in the other order \u2014 ST_Normalize collapses it (pinned by the generator self-check; ADR-005)"
     }
   ]
 }

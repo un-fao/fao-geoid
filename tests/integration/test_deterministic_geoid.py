@@ -25,6 +25,20 @@ def _polygon_feature(coords: list[list[list[float]]]) -> dict:
     }
 
 
+def _feature(coords, geom_type: str) -> dict:
+    return {
+        "type": "Feature",
+        "geometry": {"type": geom_type, "coordinates": coords},
+        "properties": {},
+    }
+
+
+# Pinned, cross-deployment geoids for the GEOS-stable point golden vectors
+# (scripts/data/dedup_golden_vectors_v1.json: point_origin / multipoint_canonical).
+PINNED_POINT_GEOID = "ef93c98c-be28-831e-99fa-ce8df8d3cd4b"
+PINNED_MULTIPOINT_GEOID = "a77ad3f9-e110-8f12-b670-20a27ec77b01"
+
+
 async def test_minted_geoid_is_version_8_and_derived_from_stored_hash(
     client, session, unit_square_ccw
 ):
@@ -52,6 +66,22 @@ async def test_baseline_unit_square_mints_the_pinned_geoid(client):
     resp = await client.post("/collections/public/items", json=feature)
     assert resp.status_code == 201
     assert resp.json()["geoid"] == "c624e284-23aa-8c24-85c0-cda6e2ecab95"
+
+
+async def test_baseline_point_mints_the_pinned_geoid(client):
+    # Points reuse the frozen v1 recipe verbatim (ADR-005), so POINT(0 0) mints a
+    # fixed, cross-deployment geoid just like the unit square does.
+    resp = await client.post("/collections/public/items", json=_feature([0, 0], "Point"))
+    assert resp.status_code == 201
+    assert resp.json()["geoid"] == PINNED_POINT_GEOID
+
+
+async def test_baseline_multipoint_mints_the_pinned_geoid(client):
+    resp = await client.post(
+        "/collections/public/items", json=_feature([[0, 0], [5, 5]], "MultiPoint")
+    )
+    assert resp.status_code == 201
+    assert resp.json()["geoid"] == PINNED_MULTIPOINT_GEOID
 
 
 async def test_winding_independent_input_mints_the_same_pinned_geoid(client):

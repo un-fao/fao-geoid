@@ -11,7 +11,7 @@ from __future__ import annotations
 from sqlalchemy.exc import DBAPIError, IntegrityError
 
 # PostgreSQL SQLSTATEs the write path discriminates on.
-SQLSTATE_CHECK_VIOLATION = "23514"  # invalid / non-polygon geometry (DB CHECK)
+SQLSTATE_CHECK_VIOLATION = "23514"  # invalid / unsupported-type / empty geometry (DB CHECK)
 SQLSTATE_RESTRICT_VIOLATION = "23001"  # raised by the immutability trigger
 
 
