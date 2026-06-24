@@ -71,6 +71,18 @@ async def test_different_geometry_mints_distinct_geoid(client, unit_square_ccw, 
     assert a.json()["geoid"] != b.json()["geoid"]
 
 
+async def test_3d_point_rejected_422(client):
+    # 2D-only is enforced at the Python validator (pre-DB), so this is stack-
+    # independent — it passes on the local stack, which previously *accepted* 3D.
+    feature = {
+        "type": "Feature",
+        "geometry": {"type": "Point", "coordinates": [0, 0, 5]},
+        "properties": {},
+    }
+    resp = await client.post("/collections/public/items", json=feature)
+    assert resp.status_code == 422
+
+
 async def test_resolve_by_external_id(client):
     feature = {
         "type": "Feature",

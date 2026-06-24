@@ -36,6 +36,16 @@ def iter_positions(coordinates: Any) -> Iterator[tuple[float, float]]:
             yield from iter_positions(item)
 
 
+def _has_z(coordinates: Any) -> bool:
+    """True if any leaf position carries a 3rd (Z) ordinate. GeoID is 2D-only."""
+    if isinstance(coordinates, (list, tuple)) and coordinates:
+        head = coordinates[0]
+        if isinstance(head, (int, float)):
+            return len(coordinates) > 2
+        return any(_has_z(item) for item in coordinates)
+    return False
+
+
 class PlaceCreate(Feature[SupportedGeometry, dict[str, Any] | None]):
     """Incoming GeoJSON Feature for a place.
 
@@ -73,6 +83,11 @@ class PlaceCreate(Feature[SupportedGeometry, dict[str, Any] | None]):
             # hash to a constant per-type WKB and falsely dedup unrelated rows onto one
             # geoid. Reject here with a clear message; ck_place_geom_not_empty backstops.
             raise ValueError("geometry is empty: it carries no coordinates")
+        if _has_z(self.geometry.coordinates):
+            raise ValueError(
+                "3D (Z) coordinates are not supported: GeoID is 2D-only "
+                "(strip the altitude/elevation ordinate and resubmit)"
+            )
         for lon, lat in positions:
             if not (_LON_MIN <= lon <= _LON_MAX) or not (_LAT_MIN <= lat <= _LAT_MAX):
                 raise ValueError(

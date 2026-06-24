@@ -9,7 +9,7 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError
 
-from geoid.schemas.place import PlaceCreate, geometry_to_geojson, iter_positions
+from geoid.schemas.place import PlaceCreate, _has_z, geometry_to_geojson, iter_positions
 
 pytestmark = pytest.mark.unit
 
@@ -248,3 +248,81 @@ def test_wkt_and_geojson_produce_identical_hash_text():
     from_wkt = PlaceCreate.model_validate(_wkt_feature("POLYGON((10 10,11 10,11 11,10 11,10 10))"))
     from_geojson = PlaceCreate.model_validate(_VALID_POLYGON)
     assert geometry_to_geojson(from_wkt) == geometry_to_geojson(from_geojson)
+
+
+# --- 2D-only: any Z ordinate is rejected at the boundary (422) ---------------
+
+
+def test_rejects_3d_point():
+    with pytest.raises(ValidationError):
+        PlaceCreate.model_validate(
+            {
+                "type": "Feature",
+                "geometry": {"type": "Point", "coordinates": [0, 0, 5]},
+                "properties": {},
+            }
+        )
+
+
+def test_rejects_3d_polygon():
+    with pytest.raises(ValidationError):
+        PlaceCreate.model_validate(
+            {
+                "type": "Feature",
+                "geometry": {
+                    "type": "Polygon",
+                    "coordinates": [[[0, 0, 5], [1, 0, 5], [1, 1, 5], [0, 1, 5], [0, 0, 5]]],
+                },
+                "properties": {},
+            }
+        )
+
+
+def test_rejects_3d_multipoint():
+    with pytest.raises(ValidationError):
+        PlaceCreate.model_validate(
+            {
+                "type": "Feature",
+                "geometry": {"type": "MultiPoint", "coordinates": [[0, 0, 5], [5, 5, 5]]},
+                "properties": {},
+            }
+        )
+
+
+def test_rejects_mixed_2d_3d_vertices():
+    # A single Z-bearing ring vertex among 2D ones must still be rejected — proves
+    # the any-leaf detection, not just an all-or-nothing first-vertex check.
+    with pytest.raises(ValidationError):
+        PlaceCreate.model_validate(
+            {
+                "type": "Feature",
+                "geometry": {
+                    "type": "Polygon",
+                    "coordinates": [[[0, 0], [1, 0], [1, 1, 5], [0, 1], [0, 0]]],
+                },
+                "properties": {},
+            }
+        )
+
+
+def test_rejects_3d_wkt_string():
+    # WKT 3D decodes to a Z-bearing coordinate dict via the mode="before" validator,
+    # then hits the same mode="after" 2D-only check — proves WKT coverage.
+    with pytest.raises(ValidationError):
+        PlaceCreate.model_validate(_wkt_feature("POINT Z (1 2 5)"))
+
+
+@pytest.mark.parametrize(
+    ("coordinates", "expected"),
+    [
+        ([0, 0, 5], True),  # point
+        ([[[0, 0, 5], [1, 0, 5], [0, 0, 5]]], True),  # polygon ring
+        ([[[[0, 0, 5]]]], True),  # multipolygon
+        ([[0, 0], [1, 1, 5]], True),  # mixed 2D/3D leaves
+        ([0, 0], False),  # 2D point
+        ([[[0, 0], [1, 0], [0, 0]]], False),  # 2D polygon ring
+        ([], False),  # empty
+    ],
+)
+def test_has_z_detects_any_3d_leaf(coordinates, expected):
+    assert _has_z(coordinates) is expected

@@ -85,6 +85,10 @@ outright rather than silently truncating it.
 > per-feature bulk) and *returned* as WKT (`?f=wkt` or `Accept: text/plain`); a WKT
 > shape and its equivalent GeoJSON are the same geometry and mint the same geoid.
 
+> **Coordinates are 2D.** Every coordinate is `(longitude, latitude)`; a 3rd
+> (Z / altitude / elevation) ordinate is **rejected with a 422** — GeoID is a 2D
+> footprint gazetteer. Strip the altitude and resubmit.
+
 > **Scope (Release 1).** File uploads, asynchronous jobs, bulk export/download, and
 > completion notifications are **deferred** to a later stage. The single synchronous
 > body covers the current requirement (hundreds-to-thousands of geometries).
