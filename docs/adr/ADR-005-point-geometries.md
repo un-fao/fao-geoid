@@ -60,12 +60,11 @@ retroactively closes the same hole for polygons).
 - **(+)** Point/MultiPoint mint content-addressed UUIDv8 geoids and dedup identically to polygons; same
   geometry within `1e-7` → same geoid → 409 + incumbent.
 - **(=)** Two pre-existing, out-of-scope behaviors carry over **unchanged** from polygons. (1) **3D (Z)
-  coordinates are not supported**: on the deployed Cloud SQL stack (PostGIS 3.6 / GEOS 3.11.4) a geometry
-  carrying a Z ordinate is rejected at the DB boundary with **422** (`"unparseable GeoJSON geometry"`) —
-  GeoID is 2D-only, and this was **verified live on review** to be identical for points and polygons.
-  (Caveat, like the GEOS-sensitive golden vectors: the local CI image — PostGIS 3.5 — happens to *accept*
-  3D, so this rejection is only assertable against the production-equivalent stack, not in the local
-  integration suite.) (2) A geometry whose vertices all collapse under `1e-7` to nothing would
+  coordinates are not supported**: a geometry carrying a Z ordinate is rejected explicitly at the Python
+  validator (GeoID is 2D-only) with a clear **422**, the same trust boundary that rejects lines/
+  GeometryCollection — stack-independent and unit-tested (no longer the prod-only, untestable DB artifact
+  it once was; see [ADR-006](ADR-006-2d-only.md)). (2) A geometry whose vertices all collapse under
+  `1e-7` to nothing would
   canonicalize to empty — now blocked for every type by `ck_place_geom_not_empty`.
 - **(=)** No identity event: existing polygon geoids are byte-for-byte unchanged; the golden corpus only
   gains appended point vectors at `recipe_version "v1"`.
