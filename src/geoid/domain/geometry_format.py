@@ -64,9 +64,10 @@ class WktCodec:
 
     ``decode`` keeps any Z ordinate (3D WKT) — geojson-pydantic accepts
     ``Position3D`` for GeoJSON today too, so stripping Z would make WKT and GeoJSON
-    asymmetric; don't "fix" it. Non-polygonal but parseable input (Point, LineString,
-    GeometryCollection) decodes to a dict and is then rejected by the schema's
-    ``Polygon | MultiPolygon`` discriminator, uniform with a GeoJSON Point.
+    asymmetric; don't "fix" it. Point/MultiPoint/Polygon/MultiPolygon decode to a
+    dict the schema accepts; an unsupported but parseable input (LineString,
+    MultiLineString, GeometryCollection) decodes to a dict and is then rejected by
+    the schema's supported-geometry discriminator, uniform with a GeoJSON line.
     """
 
     def decode(self, raw: dict | str) -> dict:

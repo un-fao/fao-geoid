@@ -43,15 +43,16 @@ class InsertResult:
     collection_slug: str | None = None  # the INCUMBENT's collection when created=False
 
 
-_POLYGONAL = ("POLYGON", "MULTIPOLYGON")
+_SUPPORTED_GEOM_TYPES = ("POINT", "MULTIPOINT", "POLYGON", "MULTIPOLYGON")
 
 
 async def geometry_invalid_reason(session: AsyncSession, geojson: str) -> str:
     """Human-readable reason a geometry failed the DB CHECK — ERROR PATH ONLY.
 
     Called only after an insert raised a 23514 check violation, so the geometry
-    already parsed; this recovers ST_IsValidReason (and flags a non-polygon type)
-    for the 422 body. Keeping it off the happy path is the write-path optimization.
+    already parsed; this recovers ST_IsValidReason (and flags an unsupported type —
+    a line or GeometryCollection) for the 422 body. Keeping it off the happy path
+    is the write-path optimization.
     """
     stmt = text(
         f"SELECT GeometryType(g) AS t, ST_IsValidReason(g) AS reason "
@@ -60,7 +61,7 @@ async def geometry_invalid_reason(session: AsyncSession, geojson: str) -> str:
     row = (await session.execute(stmt, {"geojson": geojson})).mappings().first()
     if row is None:
         return "invalid geometry"
-    if row["t"] not in _POLYGONAL:
+    if row["t"] not in _SUPPORTED_GEOM_TYPES:
         return f"unsupported geometry type: {row['t']}"
     return row["reason"] or "invalid geometry"
 

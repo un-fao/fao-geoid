@@ -1,4 +1,8 @@
-"""Unit tests for ingest validation (RFC 7946 + lon/lat bounds + polygon-only)."""
+"""Unit tests for ingest validation (RFC 7946 + lon/lat bounds + supported types).
+
+Supported geometry types: Point, MultiPoint, Polygon, MultiPolygon. Lines and
+GeometryCollection are rejected at the schema boundary (422).
+"""
 
 from __future__ import annotations
 
@@ -36,6 +40,14 @@ def test_iter_positions_walks_multipolygon():
     assert len(positions) == 8
 
 
+def test_iter_positions_walks_point():
+    assert list(iter_positions([3.0, 4.0])) == [(3.0, 4.0)]
+
+
+def test_iter_positions_walks_multipoint():
+    assert list(iter_positions([[0, 0], [5, 5]])) == [(0.0, 0.0), (5.0, 5.0)]
+
+
 def test_accepts_valid_polygon_and_extracts_external_id_from_feature_id():
     feature = PlaceCreate.model_validate({**_VALID_POLYGON, "id": "plot-1"})
     assert feature.geometry.type == "Polygon"
@@ -61,23 +73,81 @@ def test_accepts_multipolygon():
     assert feature.geometry.type == "MultiPolygon"
 
 
-def test_rejects_point_geometry():
-    with pytest.raises(ValidationError):
-        PlaceCreate.model_validate(
-            {
-                "type": "Feature",
-                "geometry": {"type": "Point", "coordinates": [0, 0]},
-                "properties": {},
-            }
-        )
+def test_accepts_point_geometry():
+    feature = PlaceCreate.model_validate(
+        {
+            "type": "Feature",
+            "geometry": {"type": "Point", "coordinates": [0, 0]},
+            "properties": {},
+        }
+    )
+    assert feature.geometry.type == "Point"
+
+
+def test_accepts_multipoint():
+    feature = PlaceCreate.model_validate(
+        {
+            "type": "Feature",
+            "geometry": {"type": "MultiPoint", "coordinates": [[0, 0], [5, 5]]},
+            "properties": {},
+        }
+    )
+    assert feature.geometry.type == "MultiPoint"
 
 
 def test_rejects_linestring_geometry():
+    # Lines stay rejected by the supported-geometry discriminator.
     with pytest.raises(ValidationError):
         PlaceCreate.model_validate(
             {
                 "type": "Feature",
                 "geometry": {"type": "LineString", "coordinates": [[0, 0], [1, 1]]},
+                "properties": {},
+            }
+        )
+
+
+def test_rejects_multilinestring():
+    with pytest.raises(ValidationError):
+        PlaceCreate.model_validate(
+            {
+                "type": "Feature",
+                "geometry": {"type": "MultiLineString", "coordinates": [[[0, 0], [1, 1]]]},
+                "properties": {},
+            }
+        )
+
+
+def test_rejects_empty_multipoint():
+    # RFC 7946 sets no minimum for MultiPoint; an empty one must not reach the DB as
+    # a constant per-type WKB. geojson-pydantic rejects coordinates: [] at the schema.
+    with pytest.raises(ValidationError):
+        PlaceCreate.model_validate(
+            {
+                "type": "Feature",
+                "geometry": {"type": "MultiPoint", "coordinates": []},
+                "properties": {},
+            }
+        )
+
+
+def test_rejects_point_out_of_bounds():
+    with pytest.raises(ValidationError):
+        PlaceCreate.model_validate(
+            {
+                "type": "Feature",
+                "geometry": {"type": "Point", "coordinates": [200, 0]},
+                "properties": {},
+            }
+        )
+
+
+def test_rejects_multipoint_out_of_bounds():
+    with pytest.raises(ValidationError):
+        PlaceCreate.model_validate(
+            {
+                "type": "Feature",
+                "geometry": {"type": "MultiPoint", "coordinates": [[0, 0], [0, 200]]},
                 "properties": {},
             }
         )
@@ -143,13 +213,13 @@ def test_wkt_feature_id_becomes_external_id():
     assert feature.external_id == "plot-wkt"
 
 
-def test_rejects_wkt_point_via_polygon_discriminator():
-    with pytest.raises(ValidationError):
-        PlaceCreate.model_validate(_wkt_feature("POINT(1 2)"))
+def test_accepts_wkt_point():
+    feature = PlaceCreate.model_validate(_wkt_feature("POINT(1 2)"))
+    assert feature.geometry.type == "Point"
 
 
-def test_rejects_wkt_geometrycollection_via_polygon_discriminator():
-    # Parses fine at the codec, rejected by the Polygon|MultiPolygon discriminator.
+def test_rejects_wkt_geometrycollection_via_supported_discriminator():
+    # Parses fine at the codec, rejected by the supported-geometry discriminator.
     with pytest.raises(ValidationError):
         PlaceCreate.model_validate(_wkt_feature("GEOMETRYCOLLECTION(POINT(1 2))"))
 

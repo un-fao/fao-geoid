@@ -140,20 +140,43 @@ async def test_bulk_invalid_geometry_rejected_batch_continues(client):
 
 
 async def test_bulk_schema_invalid_rejected_batch_continues(client):
-    # A Point fails the polygon-only PlaceCreate schema -> one schema_invalid row,
-    # never a 422 that sinks the whole request.
-    point = {
+    # A LineString fails the supported-geometry PlaceCreate schema -> one
+    # schema_invalid row, never a 422 that sinks the whole request.
+    line = {
         "type": "Feature",
-        "geometry": {"type": "Point", "coordinates": [0, 0]},
+        "geometry": {"type": "LineString", "coordinates": [[0, 0], [1, 1]]},
         "properties": {},
     }
-    resp = await client.post(_BULK, json=_fc(_square(10, 10), point, _square(20, 20)))
+    resp = await client.post(_BULK, json=_fc(_square(10, 10), line, _square(20, 20)))
     assert resp.status_code == 200
     body = resp.json()
     assert body["summary"] == {"received": 3, "accepted": 2, "rejected": 1}
     rejected = body["rejected"][0]
     assert rejected["index"] == 1
     assert rejected["reason"] == "schema_invalid"
+
+
+async def test_bulk_mints_mixed_point_and_polygon(client):
+    # Point, MultiPoint, and Polygon all mint in one batch (all supported types).
+    point = {
+        "type": "Feature",
+        "geometry": {"type": "Point", "coordinates": [40, 40]},
+        "properties": {},
+    }
+    multipoint = {
+        "type": "Feature",
+        "geometry": {"type": "MultiPoint", "coordinates": [[41, 41], [42, 42]]},
+        "properties": {},
+    }
+    resp = await client.post(_BULK, json=_fc(point, multipoint, _square(50, 50)))
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["summary"] == {"received": 3, "accepted": 3, "rejected": 0}
+    types = set()
+    for accepted in body["accepted"]:
+        feat = (await client.get(f"/{accepted['geoid']}")).json()
+        types.add(feat["geometry"]["type"])
+    assert types == {"Point", "MultiPoint", "Polygon"}
 
 
 async def test_bulk_accepts_wkt_string_geometry(client):

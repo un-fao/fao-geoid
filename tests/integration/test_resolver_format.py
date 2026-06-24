@@ -16,6 +16,34 @@ async def _mint(client, feature) -> str:
     return (await client.post("/collections/public/items", json=feature)).json()["geoid"]
 
 
+def _feature(coords, geom_type: str) -> dict:
+    return {
+        "type": "Feature",
+        "geometry": {"type": geom_type, "coordinates": coords},
+        "properties": {},
+    }
+
+
+@pytest.mark.parametrize(
+    ("coords", "geom_type", "wkt_prefix"),
+    [
+        ([0, 0], "Point", "POINT"),
+        ([[0, 0], [5, 5]], "MultiPoint", "MULTIPOINT"),
+        ([[[0, 0], [1, 0], [1, 1], [0, 1], [0, 0]]], "Polygon", "POLYGON"),
+    ],
+)
+async def test_resolver_round_trips_supported_types(client, coords, geom_type, wkt_prefix):
+    # Every supported geometry type resolves in both encodings: GeoJSON type echoed,
+    # WKT body carries the matching prefix.
+    geoid = await _mint(client, _feature(coords, geom_type))
+    geojson = await client.get(f"/{geoid}")
+    assert geojson.status_code == 200
+    assert geojson.json()["geometry"]["type"] == geom_type
+    wkt = await client.get(f"/{geoid}?f=wkt")
+    assert wkt.status_code == 200
+    assert wkt.text.startswith(wkt_prefix)
+
+
 async def test_resolver_default_is_geojson_with_wkt_alternate(client, unit_square_ccw):
     geoid = await _mint(client, unit_square_ccw)
     resp = await client.get(f"/{geoid}")

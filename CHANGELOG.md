@@ -6,6 +6,12 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+- Accept Point and MultiPoint geometries (in addition to Polygon/MultiPolygon);
+  lines and GeometryCollection remain unsupported. Identity reuses the frozen v1
+  recipe at the same 1e-7 tolerance, so a point dedups exactly as a polygon vertex
+  does (409 + incumbent on a match). See ADR-005.
+
 ## [0.2.1] - 2026-06-23
 
 ### Changed

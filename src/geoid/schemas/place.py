@@ -7,13 +7,14 @@ from collections.abc import Iterator
 from typing import Any, Literal
 
 from geojson_pydantic import Feature
-from geojson_pydantic.geometries import MultiPolygon, Polygon
+from geojson_pydantic.geometries import MultiPoint, MultiPolygon, Point, Polygon
 from pydantic import BaseModel, Field, model_validator
 
 from geoid.domain.geometry_format import decode_geometry
 
-# Polygon-first: points/lines are rejected at the schema boundary (422).
-PolygonalGeometry = Polygon | MultiPolygon
+# Accepted geometry types. Lines and GeometryCollection are NOT accepted and are
+# rejected at the schema boundary (422).
+SupportedGeometry = Point | MultiPoint | Polygon | MultiPolygon
 
 _LON_MIN, _LON_MAX = -180.0, 180.0
 _LAT_MIN, _LAT_MAX = -90.0, 90.0
@@ -22,8 +23,9 @@ _LAT_MIN, _LAT_MAX = -90.0, 90.0
 def iter_positions(coordinates: Any) -> Iterator[tuple[float, float]]:
     """Yield every (lon, lat) position in an arbitrarily nested coordinate array.
 
-    Works across Polygon (list[ring]) and MultiPolygon (list[polygon]) nesting;
-    a leaf position is a sequence whose first element is a number.
+    Works across Point ([lon,lat]), MultiPoint, Polygon (list[ring]) and
+    MultiPolygon (list[polygon]) nesting; a leaf position is a sequence whose
+    first element is a number.
     """
     if isinstance(coordinates, (list, tuple)) and coordinates:
         head = coordinates[0]
@@ -34,12 +36,13 @@ def iter_positions(coordinates: Any) -> Iterator[tuple[float, float]]:
             yield from iter_positions(item)
 
 
-class PlaceCreate(Feature[PolygonalGeometry, dict[str, Any] | None]):
+class PlaceCreate(Feature[SupportedGeometry, dict[str, Any] | None]):
     """Incoming GeoJSON Feature for a place.
 
     The optional GeoJSON ``id`` member becomes the place's ``external_id``
-    (collection-scoped unique). Geometry must be a Polygon/MultiPolygon in
-    EPSG:4326, supplied either as a GeoJSON geometry object **or** as a WKT string
+    (collection-scoped unique). Geometry must be a Point/MultiPoint/Polygon/
+    MultiPolygon in EPSG:4326 (lines and GeometryCollection are rejected),
+    supplied either as a GeoJSON geometry object **or** as a WKT string
     (a vendor extension; both single create and per-feature bulk). ``properties`` is
     accepted verbatim into provenance/jsonb; the recognised ``_whisp`` block is
     mirrored as client provenance.
@@ -64,7 +67,13 @@ class PlaceCreate(Feature[PolygonalGeometry, dict[str, Any] | None]):
     def _validate_lonlat_bounds(self) -> PlaceCreate:
         if self.geometry is None:
             raise ValueError("geometry is required")
-        for lon, lat in iter_positions(self.geometry.coordinates):
+        positions = list(iter_positions(self.geometry.coordinates))
+        if not positions:
+            # An empty geometry (e.g. MultiPoint []) passes geojson-pydantic but would
+            # hash to a constant per-type WKB and falsely dedup unrelated rows onto one
+            # geoid. Reject here with a clear message; ck_place_geom_not_empty backstops.
+            raise ValueError("geometry is empty: it carries no coordinates")
+        for lon, lat in positions:
             if not (_LON_MIN <= lon <= _LON_MAX) or not (_LAT_MIN <= lat <= _LAT_MAX):
                 raise ValueError(
                     f"coordinate out of bounds: lon={lon}, lat={lat} "
@@ -128,7 +137,7 @@ class GeometryConflictResponse(BaseModel):
 # a bulk reject reads exactly like the response a single POST would return.
 BulkRejectReason = Literal[
     "schema_invalid",  # failed the PlaceCreate pydantic schema (single-row 422)
-    "invalid_geometry",  # non-polygon / not ST_IsValid / unparseable GeoJSON (422)
+    "invalid_geometry",  # unsupported type (line/GC) / not ST_IsValid / unparseable GeoJSON (422)
     "geometry_conflict",  # identical geometry already registered — 409 + incumbent
     "external_id_conflict",  # duplicate (collection, external_id) — 409
     "geoid_conflict",  # geoid PK collision — 409 (backstop)

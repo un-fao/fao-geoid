@@ -32,9 +32,10 @@ class Place(Base):
     __table_args__ = (
         UniqueConstraint("collection_id", "external_id", name="uq_place_collection_external_id"),
         CheckConstraint(
-            "GeometryType(geom) IN ('POLYGON', 'MULTIPOLYGON')",
-            name="ck_place_geom_is_polygonal",
+            "GeometryType(geom) IN ('POINT', 'MULTIPOINT', 'POLYGON', 'MULTIPOLYGON')",
+            name="ck_place_geom_is_supported",
         ),
+        CheckConstraint("NOT ST_IsEmpty(geom)", name="ck_place_geom_not_empty"),
         CheckConstraint("ST_IsValid(geom)", name="ck_place_geom_is_valid"),
     )
 
