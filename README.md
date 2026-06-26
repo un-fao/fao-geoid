@@ -36,7 +36,7 @@ the content-addressed UUIDv8 geoid), with live widgets and per-section self-test
 browser — definitions & rules, the team's decisions with rationale, the API contract, a fully
 offline interactive playground that simulates mint → dedup → validation, and the release roadmap.
 
-Prose: this file + [`docs/DEFINITIONS.md`](docs/DEFINITIONS.md).
+Prose: this file.
 
 ## The identifier
 

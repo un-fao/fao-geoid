@@ -37,11 +37,14 @@ from geoid.repositories._pg_errors import (
 from geoid.services.exceptions import (
     AnonymousWriteForbiddenError,
     BulkLimitExceededError,
+    CollectionForbiddenError,
     CollectionNotFoundError,
     GeometryConflictError,
     GeometryInvalidError,
+    GrantNotFoundError,
     PlaceNotFoundError,
     RegistryConsistencyError,
+    WriteNotAuthorizedError,
 )
 
 logger = logging.getLogger(__name__)
@@ -78,6 +81,18 @@ def register_exception_handlers(app: FastAPI) -> None:
     @app.exception_handler(AnonymousWriteForbiddenError)
     async def _anon_forbidden(_: Request, exc: AnonymousWriteForbiddenError) -> JSONResponse:
         return _error(status.HTTP_403_FORBIDDEN, str(exc), collection=exc.slug)
+
+    @app.exception_handler(WriteNotAuthorizedError)
+    async def _write_not_authorized(_: Request, exc: WriteNotAuthorizedError) -> JSONResponse:
+        return _error(status.HTTP_403_FORBIDDEN, str(exc), collection=exc.slug)
+
+    @app.exception_handler(CollectionForbiddenError)
+    async def _collection_forbidden(_: Request, exc: CollectionForbiddenError) -> JSONResponse:
+        return _error(status.HTTP_403_FORBIDDEN, str(exc), collection=exc.slug)
+
+    @app.exception_handler(GrantNotFoundError)
+    async def _grant_not_found(_: Request, exc: GrantNotFoundError) -> JSONResponse:
+        return _error(status.HTTP_404_NOT_FOUND, str(exc), collection=exc.slug, email=exc.email)
 
     @app.exception_handler(GeometryConflictError)
     async def _geometry_conflict(_: Request, exc: GeometryConflictError) -> JSONResponse:

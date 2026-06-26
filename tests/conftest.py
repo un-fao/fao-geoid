@@ -36,7 +36,8 @@ if "DOCKER_HOST" not in os.environ:
 os.environ.setdefault("TESTCONTAINERS_RYUK_DISABLED", "true")
 
 _TRUNCATE = (
-    "TRUNCATE place, geoid_registry, change_log, collection, catalog RESTART IDENTITY CASCADE"
+    "TRUNCATE place, geoid_registry, change_log, collection_grant, collection, catalog "
+    "RESTART IDENTITY CASCADE"
 )
 
 
@@ -139,6 +140,89 @@ async def client(db_clean):
 @pytest.fixture
 def admin_headers() -> dict[str, str]:
     return {"Authorization": "Bearer test-admin-token"}
+
+
+# --- OIDC / Keycloak test infra (synthetic RS256 tokens, fake JWKS, no network) -
+
+_OIDC_ISSUER = "https://idp.test/realms/geoid"
+
+
+@pytest.fixture(scope="session")
+def oidc_keypair():
+    """One RSA keypair for the whole OIDC integration run (key-gen is slow)."""
+    from cryptography.hazmat.primitives.asymmetric import rsa
+
+    private_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    return private_key, private_key.public_key()
+
+
+@pytest.fixture
+def make_token(oidc_keypair):
+    """Factory minting a synthetic Keycloak RS256 JWT signed by the in-test key."""
+    import time
+
+    import jwt
+
+    private_key, _ = oidc_keypair
+
+    def _make(
+        *,
+        sub="kc-user",
+        email=None,
+        email_verified=True,
+        roles=(),
+        aud="geoid-be",
+        iss=_OIDC_ISSUER,
+        exp_delta=300,
+    ) -> str:
+        now = int(time.time())
+        claims = {"sub": sub, "iss": iss, "aud": aud, "exp": now + exp_delta, "iat": now}
+        if email is not None:
+            claims["email"] = email
+            claims["email_verified"] = email_verified
+        if roles:
+            claims["resource_access"] = {"geoid-roles": {"roles": list(roles)}}
+        return jwt.encode(claims, private_key, algorithm="RS256")
+
+    return _make
+
+
+@pytest.fixture
+def bearer():
+    """Build an Authorization header from a token string."""
+    return lambda token: {"Authorization": f"Bearer {token}"}
+
+
+@pytest.fixture
+async def oidc_client(db_clean, oidc_keypair):
+    """An httpx client bound to an app with OIDC ENABLED and a fake (no-network) JWKS.
+
+    ``get_settings`` is overridden only for request-time dependency injection (the DB
+    engine keeps using the real testcontainer settings), and ``get_jwks_client`` is
+    overridden with a fake that returns the in-test public key for any token. The
+    static admin token (read from the same env) keeps working — dual auth.
+    """
+    from types import SimpleNamespace
+
+    from httpx import ASGITransport, AsyncClient
+
+    from geoid.config import Settings, get_settings
+    from geoid.deps import get_jwks_client
+    from geoid.main import create_app
+
+    _, public_key = oidc_keypair
+    settings = Settings(
+        _env_file=None, oidc_issuer=_OIDC_ISSUER, oidc_jwks_url="https://idp.test/jwks"
+    )
+    fake_jwks = SimpleNamespace(
+        get_signing_key_from_jwt=lambda _token: SimpleNamespace(key=public_key)
+    )
+    app = create_app()
+    app.dependency_overrides[get_settings] = lambda: settings
+    app.dependency_overrides[get_jwks_client] = lambda: fake_jwks
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://testserver") as http_client:
+        yield http_client
 
 
 # --- Shared geometry fixtures (GeoJSON Features) ----------------------------

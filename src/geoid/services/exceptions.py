@@ -31,6 +31,34 @@ class AnonymousWriteForbiddenError(GeoidServiceError):
         super().__init__(f"anonymous writes are not permitted to collection {slug!r}")
 
 
+class WriteNotAuthorizedError(GeoidServiceError):
+    """Authenticated caller without an editor/owner grant writing to a non-open
+    collection (403). The anonymous case keeps its own
+    :class:`AnonymousWriteForbiddenError` so the 401-vs-403/message split is preserved.
+    """
+
+    def __init__(self, slug: str) -> None:
+        self.slug = slug
+        super().__init__(f"write access to collection {slug!r} requires an editor or owner grant")
+
+
+class CollectionForbiddenError(GeoidServiceError):
+    """Authenticated caller lacks owner/sysadmin rights to manage a collection (403)."""
+
+    def __init__(self, slug: str) -> None:
+        self.slug = slug
+        super().__init__(f"managing collection {slug!r} requires the owner or sysadmin role")
+
+
+class GrantNotFoundError(GeoidServiceError):
+    """DELETE of a grant that does not exist (404)."""
+
+    def __init__(self, slug: str, email: str) -> None:
+        self.slug = slug
+        self.email = email
+        super().__init__(f"no grant for {email!r} on collection {slug!r}")
+
+
 class PlaceNotFoundError(GeoidServiceError):
     def __init__(self, identifier: str) -> None:
         self.identifier = identifier

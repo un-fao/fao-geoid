@@ -13,6 +13,7 @@ them to map SQLSTATE 23505 to the right HTTP status.
 from geoid.models.catalog import Catalog
 from geoid.models.change_log import ChangeLog
 from geoid.models.collection import Collection
+from geoid.models.collection_grant import CollectionGrant
 from geoid.models.geoid_registry import GeoidRegistry
 from geoid.models.place import Place
 from geoid.models.stubs import ApiKey, AuthorityAssertion
@@ -20,6 +21,7 @@ from geoid.models.stubs import ApiKey, AuthorityAssertion
 __all__ = [
     "Catalog",
     "Collection",
+    "CollectionGrant",
     "Place",
     "GeoidRegistry",
     "ChangeLog",
@@ -34,3 +36,8 @@ UQ_PLACE_EXTERNAL_ID = "uq_place_collection_external_id"
 UQ_GEOID_REGISTRY_GEOM_HASH = "uq_geoid_registry_geom_hash"
 PK_GEOID_REGISTRY = "geoid_registry_pkey"
 PK_PLACE = "place_pkey"
+# Per-collection grant constraints (migration 0006; collection_grant is mutable).
+UQ_COLLECTION_GRANT_PRINCIPAL = "uq_collection_grant_principal"
+CK_COLLECTION_GRANT_ROLE = "ck_collection_grant_role"
+CK_COLLECTION_GRANT_PRINCIPAL_TYPE = "ck_collection_grant_principal_type"
+FK_COLLECTION_GRANT_COLLECTION = "fk_collection_grant_collection"

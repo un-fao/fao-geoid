@@ -5,11 +5,11 @@ from __future__ import annotations
 import logging
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI
 from sqlalchemy.exc import InterfaceError, OperationalError
 
 from geoid import __version__
-from geoid.api import health, manage, ogc, places
+from geoid.api import grants, health, manage, ogc, places
 from geoid.api.errors import register_exception_handlers
 from geoid.config import get_settings
 from geoid.db import dispose_engine, get_sessionmaker
@@ -53,8 +53,37 @@ async def lifespan(app: FastAPI):
     await dispose_engine()
 
 
+def _swagger_oauth2(settings):
+    """Optional Swagger Authorization-Code+PKCE config (off by default).
+
+    Returns ``(dependencies, init_oauth)``. When the flag is off (or OIDC is not
+    enabled — the auth/token URLs derive from the issuer), both are empty/None, so
+    ``FastAPI(...)`` sees its defaults and ``/openapi.json`` + ``/docs`` are
+    byte-identical to today. When on, an ``OAuth2AuthorizationCodeBearer`` scheme is
+    declared (``auto_error=False`` → non-blocking, NOT a hard route gate) purely so
+    Swagger renders the PKCE login button; the obtained token rides the same
+    Authorization header ``require_principal`` already reads.
+    """
+    if not (settings.swagger_oauth2_enabled and settings.oidc_enabled):
+        return [], None
+    from fastapi.security import OAuth2AuthorizationCodeBearer
+
+    oauth2_scheme = OAuth2AuthorizationCodeBearer(
+        authorizationUrl=settings.oidc_auth_url or "",
+        tokenUrl=settings.oidc_token_url or "",
+        auto_error=False,
+        scheme_name="KeycloakOAuth2",
+    )
+    init_oauth = {
+        "clientId": settings.swagger_oauth2_client_id,
+        "usePkceWithAuthorizationCodeGrant": True,
+    }
+    return [Depends(oauth2_scheme)], init_oauth
+
+
 def create_app() -> FastAPI:
     settings = get_settings()
+    oauth2_dependencies, swagger_init_oauth = _swagger_oauth2(settings)
     app = FastAPI(
         title="GeoID",
         version=__version__,
@@ -64,13 +93,19 @@ def create_app() -> FastAPI:
         license_info={"name": "Apache-2.0", "url": "https://www.apache.org/licenses/LICENSE-2.0"},
         contact={"name": "FAO GeoID Team"},
         openapi_tags=_TAGS_METADATA,
+        dependencies=oauth2_dependencies or None,
+        swagger_ui_init_oauth=swagger_init_oauth,
     )
     register_exception_handlers(app)
 
-    # Probe surface first, then the read surface (OGC) at the root, the registry,
-    # and management routers. /health is a literal path — no OGC collision.
+    # Probe surface first, then the OGC read surface (hidden from /docs), the
+    # per-collection grant routes, the registry/resolver, and the admin /manage
+    # router. The grants router is mounted BEFORE places so its literal
+    # /collections/... routes are matched ahead of the root /{geoid} catch-all;
+    # /health is a literal path — no OGC collision.
     app.include_router(health.router)
     app.include_router(ogc.router, include_in_schema=False)  # live, but hidden from /docs
+    app.include_router(grants.router)
     app.include_router(places.router)
     app.include_router(manage.router)
 

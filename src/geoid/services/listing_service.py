@@ -4,9 +4,9 @@ from __future__ import annotations
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from geoid.models import Collection
+from geoid.models import Collection, CollectionGrant
 from geoid.repositories import catalog_repo, collection_repo
-from geoid.schemas.collection import CollectionCreate, CollectionOut
+from geoid.schemas.collection import CollectionCreate, CollectionOut, GrantOut
 
 
 def _collection_out(collection: Collection) -> CollectionOut:
@@ -15,6 +15,16 @@ def _collection_out(collection: Collection) -> CollectionOut:
         title=collection.title,
         writable_anon=collection.writable_anon,
         metadata=collection.meta,
+    )
+
+
+def grant_out(grant: CollectionGrant) -> GrantOut:
+    return GrantOut(
+        email=grant.principal_email,
+        role=grant.role,
+        subject=grant.principal_subject,
+        granted_by=grant.granted_by,
+        created_at=grant.created_at,
     )
 
 

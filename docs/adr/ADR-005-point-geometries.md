@@ -1,7 +1,7 @@
 # ADR-005 — Accept Point and MultiPoint geometries
 
 - **Status:** Accepted — 2026-06-24
-- **Extends:** [ADR-004](ADR-004-deterministic-geoid.md) (deterministic geoid; recipe frozen)
+- **Extends:** ADR-004 (deterministic geoid; recipe frozen)
 - **Implemented by:** migration `0005_support_point_geometries`, `schemas/place.SupportedGeometry`,
   `models/place` CHECK constraints, `repositories/place_repo._SUPPORTED_GEOM_TYPES`
 

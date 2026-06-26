@@ -19,6 +19,7 @@ def _isolate_env(monkeypatch):
         "GEOID_BASE_URL",
         "GEOID_OIDC_ISSUER",
         "GEOID_OIDC_JWKS_URL",
+        "GEOID_OIDC_AUDIENCE",
         "GEOID_DEDUP_GRID_DEFAULT",
         "GEOID_ADMIN_TOKEN",
         "GEOID_ENVIRONMENT",
@@ -63,6 +64,41 @@ def test_oidc_enabled_with_issuer_and_jwks():
         oidc_issuer="https://idp.fao.org", oidc_jwks_url="https://idp.fao.org/jwks"
     )
     assert settings.oidc_enabled is True
+
+
+def test_oidc_audience_default_is_geoid_be():
+    # Confirmed from the live realm: our API's audience is geoid-be.
+    assert _settings().oidc_audience == "geoid-be"
+
+
+def test_oidc_role_defaults():
+    s = _settings()
+    assert s.oidc_roles_client == "geoid-roles"
+    assert s.oidc_admin_role == "geoid.sysadmin"
+    assert s.oidc_leeway_seconds == 30
+
+
+def test_setting_audience_alone_does_not_enable_oidc():
+    # Changing the audience default must NOT widen oidc_enabled (issuer+jwks gate it).
+    assert _settings(oidc_audience="geoid-be").oidc_enabled is False
+
+
+def test_oidc_auth_and_token_urls_none_without_issuer():
+    s = _settings()
+    assert s.oidc_auth_url is None
+    assert s.oidc_token_url is None
+
+
+def test_oidc_auth_and_token_urls_derive_from_issuer():
+    s = _settings(oidc_issuer="https://idp.fao.org/realms/geoid/")
+    assert s.oidc_auth_url == "https://idp.fao.org/realms/geoid/protocol/openid-connect/auth"
+    assert s.oidc_token_url == "https://idp.fao.org/realms/geoid/protocol/openid-connect/token"
+
+
+def test_swagger_oauth2_defaults_off():
+    s = _settings()
+    assert s.swagger_oauth2_enabled is False
+    assert s.swagger_oauth2_client_id == "geoid-fe"
 
 
 def test_dedup_grid_default_is_1cm():

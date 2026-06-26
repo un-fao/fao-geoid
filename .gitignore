@@ -98,7 +98,7 @@ AGENT.md
 graphify-out/
 
 # Local-only interactive docs (AI-built HTML walkthroughs). The Markdown docs in
-# docs/ stay tracked — docs/DEFINITIONS.md is the stakeholder-facing spec.
+# docs/ (the ADRs, SCALING.md) stay tracked.
 docs/*.html
 
 local-docs/

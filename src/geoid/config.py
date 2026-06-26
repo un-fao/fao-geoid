@@ -118,11 +118,45 @@ class Settings(DatabaseSettings):
         ),
     )
 
-    # --- Unified auth service seam (expected to be OIDC). Inert until enabled;
-    #     the oidc_* names are kept deliberately to avoid a second rename. ----
-    oidc_issuer: str | None = Field(default=None)
-    oidc_jwks_url: str | None = Field(default=None)
-    oidc_audience: str | None = Field(default=None)
+    # --- OIDC resource-server auth (Keycloak / FAO `<realm>` realm).
+    #     DISABLED by default: oidc_enabled stays gated on issuer + jwks_url, so a
+    #     bare config is static-token-only. Set GEOID_OIDC_ISSUER + GEOID_OIDC_JWKS_URL
+    #     to enable the dual-auth path — the static admin token keeps working
+    #     unchanged (it maps to the global `sysadmin` tier), so there is no flag day. -
+    oidc_issuer: str | None = Field(
+        default=None,
+        description="OIDC issuer (the realm URL); auth/token endpoints derive from it.",
+    )
+    oidc_jwks_url: str | None = Field(
+        default=None,
+        description="JWKS URI; PyJWKClient caches signing keys by kid in-process.",
+    )
+    oidc_audience: str = Field(
+        default="geoid-be",
+        description=(
+            "Required audience: a valid Keycloak token must carry this in `aud` (our "
+            "API's client id, geoid-be). Validated only when OIDC is enabled; setting "
+            "it does NOT by itself enable OIDC."
+        ),
+    )
+    oidc_roles_client: str = Field(
+        default="geoid-roles",
+        description="resource_access client whose `roles` array carries GeoID roles.",
+    )
+    oidc_admin_role: str = Field(
+        default="geoid.sysadmin",
+        description="Role (under oidc_roles_client) granting the global sysadmin tier.",
+    )
+    oidc_leeway_seconds: int = Field(
+        default=30, ge=0, description="Clock-skew leeway (seconds) for exp/nbf validation."
+    )
+
+    # --- Swagger OAuth2 (Authorization Code + PKCE) — OFF by default. The paste-a-
+    #     bearer button is always present (it carries the static token AND a Keycloak
+    #     JWT); this flag only adds the interactive login flow, gated so /openapi.json
+    #     and /docs are byte-identical to today when it is off.
+    swagger_oauth2_enabled: bool = Field(default=False)
+    swagger_oauth2_client_id: str = Field(default="geoid-fe")
 
     @model_validator(mode="after")
     def _normalize_root_path(self) -> Settings:
@@ -155,6 +189,20 @@ class Settings(DatabaseSettings):
     @property
     def oidc_enabled(self) -> bool:
         return bool(self.oidc_issuer and self.oidc_jwks_url)
+
+    @property
+    def oidc_auth_url(self) -> str | None:
+        """Keycloak authorization endpoint derived from the issuer (None if unset)."""
+        if not self.oidc_issuer:
+            return None
+        return f"{self.oidc_issuer.rstrip('/')}/protocol/openid-connect/auth"
+
+    @property
+    def oidc_token_url(self) -> str | None:
+        """Keycloak token endpoint derived from the issuer (None if unset)."""
+        if not self.oidc_issuer:
+            return None
+        return f"{self.oidc_issuer.rstrip('/')}/protocol/openid-connect/token"
 
 
 @lru_cache

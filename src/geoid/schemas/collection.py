@@ -7,7 +7,8 @@ directly in URLs — there is no separate internal UUID in responses.
 
 from __future__ import annotations
 
-from typing import Any
+from datetime import datetime
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -49,3 +50,28 @@ class CollectionOut(BaseModel):
     title: str | None = None
     writable_anon: bool = False
     metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class GrantCreate(BaseModel):
+    """Grant (or re-grant) a per-collection role to a principal by email."""
+
+    email: str = Field(min_length=3, max_length=320, examples=["alice@example.org"])
+    role: Literal["owner", "editor", "viewer"] = Field(examples=["editor"])
+
+    @field_validator("email")
+    @classmethod
+    def _email_shape(cls, email: str) -> str:
+        # Light structural check (grants are keyed by email; the repo normalises).
+        # Not a full RFC 5322 parser — just reject the obviously malformed.
+        stripped = email.strip()
+        if "@" not in stripped or stripped.startswith("@") or stripped.endswith("@"):
+            raise ValueError("email must contain a local part and a domain")
+        return stripped
+
+
+class GrantOut(BaseModel):
+    email: str
+    role: str
+    subject: str | None = None
+    granted_by: str | None = None
+    created_at: datetime

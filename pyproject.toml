@@ -25,6 +25,15 @@ dependencies = [
     "shapely>=2.0",
 ]
 
+[project.optional-dependencies]
+# OIDC resource-server auth (Keycloak / FAO IdP). PyJWT is the smallest battle-tested
+# fit: jwt.decode(algorithms=["RS256"]) rejects none / alg-confusion and validates
+# iss/aud/exp/nbf with leeway, and PyJWKClient gives an in-process JWKS-by-kid cache.
+# Imported lazily inside auth/oidc.py + deps.py so a static-token-only image built
+# WITHOUT this extra still imports cleanly; the deployed FAO image installs it
+# (Dockerfile `uv sync --extra oidc`). The static admin token works with or without it.
+oidc = ["pyjwt[crypto]>=2.10"]
+
 [project.scripts]
 geoid = "geoid.cli:main"
 
@@ -39,6 +48,9 @@ dev = [
     "ruff>=0.15",
     "psycopg[binary]>=3.2",
     "pytest-xdist>=3.8.0",
+    # OIDC auth deps available to the test suite (test_oidc.py mints synthetic RS256
+    # JWTs); production gets the same via the `oidc` extra.
+    "pyjwt[crypto]>=2.10",
 ]
 
 [build-system]

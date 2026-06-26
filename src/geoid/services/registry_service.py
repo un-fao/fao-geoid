@@ -35,11 +35,13 @@ from geoid.schemas.place import (
     PlaceCreate,
     geometry_to_geojson,
 )
+from geoid.services import authz_service
 from geoid.services.exceptions import (
     AnonymousWriteForbiddenError,
     GeometryConflictError,
     GeometryInvalidError,
     RegistryConsistencyError,
+    WriteNotAuthorizedError,
 )
 
 logger = logging.getLogger(__name__)
@@ -49,6 +51,21 @@ logger = logging.getLogger(__name__)
 # by CHECK constraints on the INSERT (SQLSTATE 23514). The supported-type gate +
 # lon/lat bounds + RFC 7946 structure are ALSO enforced earlier by the PlaceCreate
 # pydantic schema (422 before the DB).
+
+
+async def _authorize_write(
+    session: AsyncSession, principal: Principal, collection: Collection
+) -> None:
+    """Gate a write on the per-collection authz ladder (sysadmin > editor/owner >
+    writable_anon). Anonymous denial keeps its own 401-paired error; an authenticated
+    non-grantee facing a non-writable collection gets the 403 write error.
+    """
+    grant = await authz_service.load_caller_grant(session, principal, collection)
+    if authz_service.can_write(principal, collection, grant):
+        return
+    if principal.is_anonymous:
+        raise AnonymousWriteForbiddenError(collection.slug)
+    raise WriteNotAuthorizedError(collection.slug)
 
 
 async def create_place(
@@ -63,12 +80,13 @@ async def create_place(
 
     Raises:
         AnonymousWriteForbiddenError: anon POST to a non-anonymous collection.
+        WriteNotAuthorizedError: authenticated caller without an editor/owner grant
+            POSTing to a non-writable collection.
         GeometryInvalidError: geometry unparseable / invalid (422 with reason).
         GeometryConflictError: identical geometry already registered anywhere in
             the catalog (409 carrying the incumbent geoid).
     """
-    if principal.is_anonymous and not collection.writable_anon:
-        raise AnonymousWriteForbiddenError(collection.slug)
+    await _authorize_write(session, principal, collection)
 
     geojson = geometry_to_geojson(feature)
     external_id = feature.external_id
@@ -146,12 +164,12 @@ async def create_places_bulk(
     with the same reason the single-item endpoint returns.
 
     Raises:
-        AnonymousWriteForbiddenError: anon POST to a non-anonymous collection. Auth
-            depends on principal + collection only (not the features), so it is one
-            fail-fast check up front (403) rather than a per-feature reject.
+        AnonymousWriteForbiddenError / WriteNotAuthorizedError: the caller may not
+            write to this collection. Auth depends on principal + collection only (not
+            the features), so it is one fail-fast check up front (403) rather than a
+            per-feature reject.
     """
-    if principal.is_anonymous and not collection.writable_anon:
-        raise AnonymousWriteForbiddenError(collection.slug)
+    await _authorize_write(session, principal, collection)
 
     accepted: list[BulkAccepted] = []
     rejected: list[BulkRejected] = []

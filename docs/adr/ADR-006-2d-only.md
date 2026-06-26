@@ -1,7 +1,7 @@
 # ADR-006 — Reject 3D (Z) coordinates at the validator: GeoID is 2D-only
 
 - **Status:** Accepted — 2026-06-24
-- **Extends:** [ADR-004](ADR-004-deterministic-geoid.md) (deterministic geoid; recipe frozen),
+- **Extends:** ADR-004 (deterministic geoid; recipe frozen),
   [ADR-005](ADR-005-point-geometries.md) (point/multipoint support)
 - **Implemented by:** `schemas/place._has_z` + the `_validate_lonlat_bounds` 2D-only check
 - **Reverses:** the `WktCodec` docstring's implicit "keep Z, don't fix it" stance (now: the codec keeps
