@@ -25,6 +25,7 @@ from typing import TYPE_CHECKING
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
+from geoid import __version__
 from geoid.config import Settings, get_settings
 
 if TYPE_CHECKING:
@@ -98,7 +99,14 @@ def get_jwks_client() -> PyJWKClient | None:
         return None
     from jwt import PyJWKClient
 
-    return PyJWKClient(settings.oidc_jwks_url, cache_keys=True, lifespan=300)
+    # Cloudflare 403s the default Python-urllib User-Agent on the FAO realm's JWKS
+    # endpoint; any real UA unblocks it (PyJWKClient forwards headers= to urllib).
+    return PyJWKClient(
+        settings.oidc_jwks_url,
+        cache_keys=True,
+        lifespan=300,
+        headers={"User-Agent": f"geoid/{__version__}"},
+    )
 
 
 async def _resolve_oidc(

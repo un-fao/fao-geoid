@@ -165,3 +165,22 @@ def test_empty_claims_never_raise(settings):
     assert p.roles == ()
     assert p.is_admin is False
     assert p.email is None
+
+
+def test_jwks_client_sends_non_urllib_user_agent(monkeypatch):
+    # Cloudflare 403s the default Python-urllib UA on the FAO realm's JWKS endpoint;
+    # the client must construct with a non-urllib User-Agent so the header can't be
+    # silently dropped. No network: PyJWKClient does not fetch at construction.
+    from geoid import config, deps
+
+    oidc_settings = config.Settings(
+        _env_file=None,
+        oidc_issuer="https://idp.test/realms/x",
+        oidc_jwks_url="https://idp.test/jwks",
+    )
+    monkeypatch.setattr(deps, "get_settings", lambda: oidc_settings)
+    deps.get_jwks_client.cache_clear()
+    client = deps.get_jwks_client()
+    deps.get_jwks_client.cache_clear()
+    ua = client.headers.get("User-Agent", "")
+    assert ua and "urllib" not in ua.lower()
