@@ -42,8 +42,7 @@ _WWW_AUTH = {"WWW-Authenticate": _BEARER}
 bearer_scheme = HTTPBearer(
     auto_error=False,
     scheme_name="GeoIDBearer",
-    description="Bearer token: the static admin token (→ sysadmin) OR a Keycloak "
-    "access token (validated when OIDC is enabled).",
+    description="Paste your access token here to authorize your requests.",
 )
 
 

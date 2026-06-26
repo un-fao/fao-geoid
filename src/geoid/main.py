@@ -72,7 +72,11 @@ def _swagger_oauth2(settings):
         authorizationUrl=settings.oidc_auth_url or "",
         tokenUrl=settings.oidc_token_url or "",
         auto_error=False,
-        scheme_name="KeycloakOAuth2",
+        scheme_name="Single Sign-On",
+        description=(
+            "Sign in to authorize your requests. You'll be redirected to sign in, then "
+            "brought back here already authorized — nothing to copy or paste."
+        ),
     )
     init_oauth = {
         "clientId": settings.swagger_oauth2_client_id,

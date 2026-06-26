@@ -192,10 +192,12 @@ jobs:
           # delivers the production realm, so the fragment is empty for production and
           # the env-var string is byte-identical to before. The review issuer + JWKS
           # URL come from the review GitHub Environment's vars (realm <realm>);
-          # audience/roles-client/admin-role use the config.py defaults.
+          # audience/roles-client/admin-role use the config.py defaults. The Swagger
+          # sign-in button is also turned on at review (it renders now; it only
+          # completes once CSI registers the geoid-fe Swagger redirect URI).
           OIDC_ENV=""
           if [ "$TARGET_ENV" = "review" ]; then
-            OIDC_ENV="@GEOID_OIDC_ISSUER=${{ vars.GEOID_OIDC_ISSUER }}@GEOID_OIDC_JWKS_URL=${{ vars.GEOID_OIDC_JWKS_URL }}"
+            OIDC_ENV="@GEOID_OIDC_ISSUER=${{ vars.GEOID_OIDC_ISSUER }}@GEOID_OIDC_JWKS_URL=${{ vars.GEOID_OIDC_JWKS_URL }}@GEOID_SWAGGER_OAUTH2_ENABLED=true"
           fi
           gcloud run deploy "$SERVICE" \
             --image "$IMAGE" \
