@@ -26,3 +26,7 @@ steps:
         docker push "$$CACHE"
 images:
   - ${_IMAGE}
+# A user-managed build service account (deploy.yml passes --service-account) can't write
+# to the default logs bucket, so logging must be explicit or the build is rejected.
+options:
+  logging: CLOUD_LOGGING_ONLY

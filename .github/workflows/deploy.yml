@@ -126,6 +126,7 @@ jobs:
             --config cloudbuild.yaml \
             --substitutions _IMAGE="$IMAGE" \
             --project "$PROJECT" \
+            --service-account "projects/$PROJECT/serviceAccounts/${{ vars.ACTIONS_SERVICE_ACCOUNT }}" \
             --suppress-logs
 
   deploy:
