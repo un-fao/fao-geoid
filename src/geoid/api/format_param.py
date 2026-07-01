@@ -5,7 +5,7 @@ mapping live in exactly one place. Swagger advertises **``format``** (the friend
 name); the OGC ``f`` parameter is also accepted but hidden from the schema
 (``include_in_schema=False``). ``format`` wins over ``f`` when both are given, and
 either query param overrides the ``Accept`` header (``negotiate_format``). An
-unknown value raises 400 — before any I/O, like the offset cap.
+unknown value raises 400 — before any I/O.
 """
 
 from __future__ import annotations

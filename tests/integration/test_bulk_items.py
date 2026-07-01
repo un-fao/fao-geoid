@@ -195,6 +195,55 @@ async def test_bulk_accepts_wkt_string_geometry(client):
     assert (await client.get(f"/{wkt_geoid}")).status_code == 200
 
 
+async def test_bulk_external_id_conflict_mid_batch_recovers(client):
+    # [ext-X, ext-X dup, fresh]: the middle abort rolls back only its SAVEPOINT, so
+    # the batch RECOVERS and the LATER feature still mints — pins abort-then-recover
+    # ordering (the other external_id tests put the failing feature last).
+    resp = await client.post(
+        _BULK,
+        json=_fc(
+            _square(0, 0, external_id="ext-X"),
+            _square(10, 10, external_id="ext-X"),
+            _square(20, 20, external_id="fresh"),
+        ),
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["summary"] == {"received": 3, "accepted": 2, "rejected": 1}
+    rejected = body["rejected"][0]
+    assert rejected["index"] == 1
+    assert rejected["reason"] == "external_id_conflict"
+    assert {a["index"] for a in body["accepted"]} == {0, 2}
+
+
+@pytest.fixture
+async def capped_client(db_clean):
+    """A client whose app sees a tiny bulk cap (3), for exact-boundary tests."""
+    from httpx import ASGITransport, AsyncClient
+
+    from geoid.config import Settings, get_settings
+    from geoid.main import create_app
+
+    app = create_app()
+    app.dependency_overrides[get_settings] = lambda: Settings(_env_file=None, bulk_max_features=3)
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://testserver") as http_client:
+        yield http_client
+
+
+async def test_bulk_exactly_at_cap_succeeds(capped_client):
+    # The cap is inclusive-at, exclusive-over: exactly cap features mint fine.
+    at_cap = await capped_client.post(
+        _BULK, json=_fc(_square(0, 0), _square(5, 5), _square(10, 10))
+    )
+    assert at_cap.status_code == 200
+    assert at_cap.json()["summary"]["accepted"] == 3
+
+    over = await capped_client.post(_BULK, json=_fc(*[_square(i * 2, 20) for i in range(4)]))
+    assert over.status_code == 413
+    assert over.json()["limit"] == 3
+
+
 async def test_bulk_over_limit_returns_413(client):
     # A write bound MUST error, never truncate. The cap is checked before any insert.
     resp = await client.post(_BULK, json=_fc(*[_square(0, 0) for _ in range(1001)]))

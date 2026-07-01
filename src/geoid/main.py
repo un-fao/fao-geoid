@@ -11,7 +11,7 @@ from sqlalchemy.exc import InterfaceError, OperationalError
 from geoid import __version__
 from geoid.api import grants, health, manage, ogc, places
 from geoid.api.errors import register_exception_handlers
-from geoid.config import get_settings
+from geoid.config import Settings, get_settings
 from geoid.db import dispose_engine, get_sessionmaker
 from geoid.services.bootstrap import ensure_public_collection
 
@@ -53,7 +53,7 @@ async def lifespan(app: FastAPI):
     await dispose_engine()
 
 
-def _swagger_oauth2(settings):
+def _swagger_oauth2(settings: Settings) -> tuple[list, dict | None]:
     """Optional Swagger Authorization-Code+PKCE config (off by default).
 
     Returns ``(dependencies, init_oauth)``. When the flag is off (or OIDC is not

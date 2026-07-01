@@ -44,7 +44,6 @@ services:
       GEOID_BASE_URL: http://localhost:8000
       GEOID_ADMIN_TOKEN: change-me-dev-only
       GEOID_INSTANCE_ID: fao-central
-      GEOID_STORAGE_BACKEND: local
     ports:
       - "8000:8000"
     depends_on:

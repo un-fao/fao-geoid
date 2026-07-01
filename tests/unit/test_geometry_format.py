@@ -127,3 +127,9 @@ def test_negotiate_format_precedence(f_param, accept, expected):
 def test_negotiate_format_unknown_f_raises(bad):
     with pytest.raises(ValueError, match="unknown format"):
         negotiate_format(bad, None)
+
+
+def test_negotiate_format_unknown_accept_defaults_to_geojson():
+    # An Accept header naming no supported media type falls back to the default
+    # encoding rather than erroring — only an explicit unknown ?f= is a 400.
+    assert negotiate_format(None, "application/weird") is GeometryFormat.GEOJSON

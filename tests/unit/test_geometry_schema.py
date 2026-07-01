@@ -312,6 +312,20 @@ def test_rejects_3d_wkt_string():
         PlaceCreate.model_validate(_wkt_feature("POINT Z (1 2 5)"))
 
 
+def test_rejects_wkt_measured_point_m():
+    # A measured (M) coordinate must be rejected, not silently dropped: dropping M
+    # would mint POINT(1 2) — the silent-merge ADR-006 forbids. Today shapely
+    # surfaces M as a 3rd ordinate that the 2D-only check trips; this test pins the
+    # REJECTION outcome so a future shapely that *drops* M fails loudly here.
+    with pytest.raises(ValidationError):
+        PlaceCreate.model_validate(_wkt_feature("POINT M (1 2 3)"))
+
+
+def test_rejects_wkt_point_zm():
+    with pytest.raises(ValidationError):
+        PlaceCreate.model_validate(_wkt_feature("POINT ZM (1 2 3 4)"))
+
+
 @pytest.mark.parametrize(
     ("coordinates", "expected"),
     [

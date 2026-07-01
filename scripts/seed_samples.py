@@ -8,6 +8,8 @@ Env:
     GEOID_BASE_URL    default http://localhost:8000
     GEOID_COLLECTION  default public  (anonymous-writable; no token needed)
     GEOID_ADMIN_TOKEN required only when seeding a managed (non-anon) collection
+
+Exit codes: 0 all demos behaved · 1 unreachable or any unexpected response
 """
 
 from __future__ import annotations
@@ -17,6 +19,7 @@ import os
 from pathlib import Path
 
 import httpx
+from _timing import print_timings, record
 
 BASE = os.environ.get("GEOID_BASE_URL", "http://localhost:8000").rstrip("/")
 COLLECTION = os.environ.get("GEOID_COLLECTION", "public")
@@ -29,13 +32,19 @@ def _headers() -> dict[str, str]:
 
 
 def _post(client: httpx.Client, feature: dict) -> httpx.Response:
-    return client.post(f"{BASE}/collections/{COLLECTION}/items", json=feature, headers=_headers())
+    return record(
+        "POST items",
+        client.post(f"{BASE}/collections/{COLLECTION}/items", json=feature, headers=_headers()),
+    )
 
 
 def main() -> int:
+    errors = 0
     with httpx.Client(timeout=30.0) as client:
         try:
-            client.get(f"{BASE}/conformance").raise_for_status()
+            record(
+                "GET /conformance (reachability)", client.get(f"{BASE}/conformance")
+            ).raise_for_status()
         except Exception as exc:
             print(f"✗ cannot reach GeoID at {BASE} ({exc}).")
             print(
@@ -60,6 +69,7 @@ def main() -> int:
                 print(f"  [409] {ext:<22} {'duplicate→existing':<18} geoid={body['geoid']}")
             else:
                 print(f"  [{resp.status_code}] {ext:<22} ERROR {body}")
+                errors += 1
                 continue
             if first_geoid is None:
                 first_geoid = body["geoid"]
@@ -68,7 +78,11 @@ def main() -> int:
         dup = json.loads((SAMPLES / "duplicate_of_GH-COCOA-001.geojson").read_text())
         resp = _post(client, dup)
         body = resp.json()
-        status = "409 Conflict" if resp.status_code == 409 else f"?? {resp.status_code}"
+        if resp.status_code == 409:
+            status = "409 Conflict"
+        else:
+            status = f"?? {resp.status_code}"
+            errors += 1
         print(
             f"  [{status}] insert rejected; incumbent geoid={body.get('geoid')} "
             f"(collection={body.get('collection')})"
@@ -77,18 +91,24 @@ def main() -> int:
         print("\n== Validation demo (self-intersecting bow-tie) ==")
         invalid = json.loads((SAMPLES / "invalid_selfintersecting.geojson").read_text())
         resp = _post(client, invalid)
+        if resp.status_code != 422:
+            errors += 1
         print(f"  [{resp.status_code}] {resp.json().get('reason')}")
 
         if first_geoid:
             # Resolver lives at the app root (BASE already includes any /geoid root_path).
-            props = client.get(f"{BASE}/{first_geoid}").json()["properties"]
+            props = record("GET resolve", client.get(f"{BASE}/{first_geoid}")).json()["properties"]
             print(f"\n== Resolve {first_geoid} ==")
             print(f"  uri:         {props['uri']}")
             print(f"  external_id: {props['external_id']}   commodity: {props.get('commodity')}")
             print(f"  provenance:  {props['_geoid_provenance']['client']}")
 
-        print(f"\n✓ done — explore at {BASE}/docs")
-    return 0
+        print_timings()
+        if errors:
+            print(f"\n✗ done with {errors} unexpected response(s) — see ERROR/?? lines above")
+        else:
+            print(f"\n✓ done — explore at {BASE}/docs")
+    return 1 if errors else 0
 
 
 if __name__ == "__main__":

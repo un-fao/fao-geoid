@@ -30,6 +30,7 @@ from collections.abc import Callable
 from urllib.parse import urlsplit
 
 import httpx
+from _timing import print_timings, record
 
 BASE = os.environ.get("GEOID_BASE_URL", "http://localhost:8000").rstrip("/")
 COLLECTION = os.environ.get("GEOID_COLLECTION", "public")
@@ -49,6 +50,19 @@ SENTINEL_FEATURE = {
 }
 
 
+class CheckFailed(Exception):
+    """A smoke check failed. Raised instead of ``assert`` so the deploy gate
+
+    survives ``python -O`` / ``PYTHONOPTIMIZE`` (which strip asserts into
+    silent success).
+    """
+
+
+def _ensure(condition: bool, message: str) -> None:
+    if not condition:
+        raise CheckFailed(message)
+
+
 def _headers() -> dict[str, str]:
     return {"Authorization": f"Bearer {ADMIN_TOKEN}"} if ADMIN_TOKEN else {}
 
@@ -64,12 +78,13 @@ def _get_json(
     expect_type: str | None = None,
     headers: dict[str, str] | None = None,
 ) -> dict:
-    resp = client.get(f"{BASE}{path}", headers=headers or {})
-    assert resp.status_code == 200, f"GET {path} → {resp.status_code}: {resp.text[:200]}"
+    resp = record(f"GET {path}", client.get(f"{BASE}{path}", headers=headers or {}))
+    _ensure(resp.status_code == 200, f"GET {path} → {resp.status_code}: {resp.text[:200]}")
     if expect_type:
         ctype = resp.headers.get("content-type", "")
-        assert ctype.startswith(expect_type), (
-            f"GET {path} content-type {ctype!r}, expected {expect_type!r}"
+        _ensure(
+            ctype.startswith(expect_type),
+            f"GET {path} content-type {ctype!r}, expected {expect_type!r}",
         )
     return resp.json()
 
@@ -80,18 +95,19 @@ def _get_json(
 def check_landing(client: httpx.Client) -> str:
     body = _get_json(client, "/")
     links = body.get("links") or []
-    assert links, "landing page advertises no links"
+    _ensure(bool(links), "landing page advertises no links")
     expected = _expected_netloc()
     wrong = [link["href"] for link in links if urlsplit(link["href"]).netloc != expected]
-    assert not wrong, (
-        f"links not on {expected!r}: {wrong} — is GEOID_BASE_URL misconfigured on the server?"
+    _ensure(
+        not wrong,
+        f"links not on {expected!r}: {wrong} — is GEOID_BASE_URL misconfigured on the server?",
     )
     return f"{len(links)} links, all on {expected!r}"
 
 
 def check_conformance(client: httpx.Client) -> str:
     classes = _get_json(client, "/conformance").get("conformsTo") or []
-    assert classes, "empty conformsTo"
+    _ensure(bool(classes), "empty conformsTo")
     return f"{len(classes)} conformance classes"
 
 
@@ -101,13 +117,13 @@ def check_collections(client: httpx.Client) -> str:
         c.get("id")
         for c in _get_json(client, "/collections", headers=_headers()).get("collections", [])
     ]
-    assert COLLECTION in ids, f"collection {COLLECTION!r} not in {ids}"
+    _ensure(COLLECTION in ids, f"collection {COLLECTION!r} not in {ids}")
     return f"{len(ids)} collections, {COLLECTION!r} present"
 
 
 def check_collection_desc(client: httpx.Client) -> str:
     body = _get_json(client, f"/collections/{COLLECTION}", headers=_headers())
-    assert body.get("id") == COLLECTION, f"unexpected collection id {body.get('id')!r}"
+    _ensure(body.get("id") == COLLECTION, f"unexpected collection id {body.get('id')!r}")
     return f"id={body['id']!r}"
 
 
@@ -131,8 +147,11 @@ def run_mint_probe(client: httpx.Client) -> list[bool]:
     minted: dict = {}
 
     def probe_mint() -> str:
-        resp = client.post(
-            f"{BASE}/collections/{COLLECTION}/items", json=SENTINEL_FEATURE, headers=_headers()
+        resp = record(
+            "POST items",
+            client.post(
+                f"{BASE}/collections/{COLLECTION}/items", json=SENTINEL_FEATURE, headers=_headers()
+            ),
         )
         if resp.status_code == 409:
             body = resp.json()
@@ -141,11 +160,11 @@ def run_mint_probe(client: httpx.Client) -> list[bool]:
                 # duplicate and hands back the incumbent — continue with it.
                 minted.update(body)
                 return f"[409] duplicate geometry → incumbent geoid={body['geoid']}"
-            raise AssertionError(
+            raise CheckFailed(
                 "409 external_id conflict — the sentinel external_id exists with a "
                 "DIFFERENT geometry; was SENTINEL_FEATURE changed since the first run?"
             )
-        assert resp.status_code == 201, f"{resp.status_code}: {resp.text[:200]}"
+        _ensure(resp.status_code == 201, f"{resp.status_code}: {resp.text[:200]}")
         body = resp.json()
         minted.update(body)
         return f"[201] minted (first run against this catalog), geoid={body['geoid']}"
@@ -155,8 +174,9 @@ def run_mint_probe(client: httpx.Client) -> list[bool]:
         props = _get_json(client, f"/{minted['geoid']}").get("properties") or {}
         uri = props.get("uri")
         uri_netloc = urlsplit(uri or "").netloc
-        assert uri_netloc == _expected_netloc(), (
-            f"uri host {uri_netloc!r} != expected {_expected_netloc()!r} (uri={uri!r})"
+        _ensure(
+            uri_netloc == _expected_netloc(),
+            f"uri host {uri_netloc!r} != expected {_expected_netloc()!r} (uri={uri!r})",
         )
         return f"resolved; uri on {uri_netloc!r}"
 
@@ -170,8 +190,9 @@ def run_mint_probe(client: httpx.Client) -> list[bool]:
             )
             or {}
         )
-        assert props.get("geoid") == minted["geoid"], (
-            f"external-id resolve returned {props.get('geoid')!r}, expected {minted['geoid']!r}"
+        _ensure(
+            props.get("geoid") == minted["geoid"],
+            f"external-id resolve returned {props.get('geoid')!r}, expected {minted['geoid']!r}",
         )
         return f"external_id {SENTINEL_EXTERNAL_ID!r} → same geoid"
 
@@ -191,10 +212,14 @@ def run_mint_probe(client: httpx.Client) -> list[bool]:
 def _run_check(name: str, thunk: Callable[[], str]) -> bool:
     try:
         detail = thunk()
-    except AssertionError as exc:
+    except CheckFailed as exc:
         print(f"✗ {name:<24} {exc}")
         return False
     except httpx.HTTPError as exc:
+        print(f"✗ {name:<24} {type(exc).__name__}: {exc}")
+        return False
+    except ValueError as exc:
+        # A non-JSON body where JSON was expected (JSONDecodeError is a ValueError).
         print(f"✗ {name:<24} {type(exc).__name__}: {exc}")
         return False
     print(f"✓ {name:<24} {detail}")
@@ -214,7 +239,7 @@ def main() -> int:
     print(f"→ GeoID smoke test against {BASE}, collection {COLLECTION!r} ({mode})\n")
     with httpx.Client(timeout=30.0) as client:
         try:
-            client.get(f"{BASE}/conformance")
+            record("GET /conformance (reachability)", client.get(f"{BASE}/conformance"))
         except httpx.HTTPError as exc:
             print(f"✗ cannot reach GeoID at {BASE} ({exc})")
             return 1
@@ -230,6 +255,7 @@ def main() -> int:
 
     passed, total = sum(results), len(results)
     print(f"\n{'✓' if passed == total else '✗'} {passed}/{total} checks passed")
+    print_timings()
     return 0 if passed == total else 1
 
 

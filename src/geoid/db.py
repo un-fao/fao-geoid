@@ -30,8 +30,8 @@ _sessionmaker: async_sessionmaker[AsyncSession] | None = None
 def _build_engine(settings: Settings) -> AsyncEngine:
     # Server-side timeouts cap how long any one statement runs and how long a
     # connection may sit idle inside a transaction — this bounds the blast radius
-    # of a slow client on the public streaming bulk-export endpoint, which holds
-    # a pooled connection (server-side cursor) for the duration of the download.
+    # of a stalled request; the longest-lived transaction today is the synchronous
+    # bulk POST, which holds one pooled connection for its whole batch.
     server_settings: dict[str, str] = {"application_name": f"geoid:{settings.instance_id}"}
     if settings.db_statement_timeout_ms:
         server_settings["statement_timeout"] = str(settings.db_statement_timeout_ms)

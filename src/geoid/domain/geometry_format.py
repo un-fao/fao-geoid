@@ -119,8 +119,8 @@ def negotiate_format(f_param: str | None, accept_header: str | None) -> Geometry
     An explicit ``?f=`` overrides the ``Accept`` header (OGC API – Common §8.7);
     an unknown ``?f=`` value raises ``ValueError`` (the router maps it to 400,
     matching the project's closed-contract handling of bad query params). With no
-    ``f``, a ``text/plain`` substring in ``Accept`` selects WKT (mirrors
-    ``api/bulk._wants_seq``); otherwise GeoJSON, the default encoding.
+    ``f``, a ``text/plain`` substring in ``Accept`` selects WKT; otherwise GeoJSON,
+    the default encoding.
     """
     if f_param is not None:
         try:
