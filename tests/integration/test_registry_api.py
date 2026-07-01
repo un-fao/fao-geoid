@@ -268,6 +268,12 @@ async def test_root_resolver_does_not_shadow_literal_routes(client):
     # /collections is a literal route (now admin-gated) -> 401, NOT the resolver's
     # 422 — proving the literal route still wins over the `/{geoid}` catch-all.
     assert (await client.get("/collections")).status_code == 401
+    # The probe and docs surfaces are literal single segments too — none may fall
+    # through to the resolver (which would answer 422 for a non-UUID segment).
+    assert (await client.get("/health")).status_code == 200
+    assert (await client.get("/docs")).status_code == 200
+    assert (await client.get("/redoc")).status_code == 200
+    assert (await client.get("/openapi.json")).status_code == 200
     # A well-formed but unknown geoid falls through to the resolver -> 404.
     assert (await client.get("/019e0000-0000-7000-8000-000000000000")).status_code == 404
     # A non-UUID single segment can't bind the `uuid.UUID` path param -> 422.

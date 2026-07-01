@@ -17,6 +17,12 @@ ADD validates existing rows: all are real non-empty polygons, so both new CHECKs
 pass. ``ck_place_geom_not_empty`` also retroactively closes the same empty-geometry
 hole for polygons (harmless).
 
+DOWNGRADE IS EFFECTIVELY ONE-WAY once Point/MultiPoint data exists: ``downgrade()``
+re-adds the polygonal-only CHECK, which VALIDATES existing rows and aborts
+(non-destructively) on the first stored point. Accepted: un-accepting stored data
+would be a data-loss decision, not a schema one, so there is deliberately no
+``NOT VALID`` escape hatch here.
+
 Revision ID: 0005_support_point_geometries
 Revises: 0004_deterministic_geoid
 Create Date: 2026-06-24

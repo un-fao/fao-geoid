@@ -92,7 +92,9 @@ def test_check_vectors_strict_pass_advisory_may_drift_on_ci_container(sync_conn)
     assert report.strict_failures == ()
     assert report.passed >= len(_STRICT)
     drifted = {failure.name for failure in report.advisory_failures}
-    assert drifted <= {"cell_straddle_high", "grid9e5_baseline", "grid9e5_jitter"}
+    # The allowed-drift set IS the fixture's advisory set — derived, not hardcoded,
+    # so re-classifying a vector in the corpus automatically updates this gate.
+    assert drifted <= {vector["name"] for vector in _ADVISORY}
 
 
 def test_advisory_drift_is_never_classified_strict(sync_conn):

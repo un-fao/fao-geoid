@@ -41,3 +41,7 @@ UQ_COLLECTION_GRANT_PRINCIPAL = "uq_collection_grant_principal"
 CK_COLLECTION_GRANT_ROLE = "ck_collection_grant_role"
 CK_COLLECTION_GRANT_PRINCIPAL_TYPE = "ck_collection_grant_principal_type"
 FK_COLLECTION_GRANT_COLLECTION = "fk_collection_grant_collection"
+# Hardening CHECK (migration 0007). Surfaces as SQLSTATE 23514; named here for
+# tests/diagnostics. (2D-only needs no CHECK: the place.geom column typmod
+# geometry(Geometry, 4326) already rejects Z/M at the type level.)
+CK_COLLECTION_GRANT_EMAIL_NORMALIZED = "ck_collection_grant_email_normalized"
