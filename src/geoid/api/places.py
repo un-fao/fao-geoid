@@ -95,6 +95,14 @@ async def create_item(
         "Bulk-mint geoids from a GeoJSON FeatureCollection; "
         "processed in-request, returns a per-feature report"
     ),
+    description=(
+        "Partial success at the *report* level, atomic at the *transaction* level: "
+        "the whole batch runs in ONE database transaction, so a request timeout or "
+        "client disconnect before the response discards ALL rows — including the "
+        "ones the report would have listed as accepted. Rows are durable only once "
+        "the 200 report is received. There is no resumability; re-submit the batch "
+        "(already-minted features simply reject as `geometry_conflict`)."
+    ),
 )
 async def create_items_bulk(
     collection_id: str,

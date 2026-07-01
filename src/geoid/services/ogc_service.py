@@ -70,6 +70,10 @@ def landing_page(settings: Settings) -> LandingPage:
                 type=_JSON,
                 title="Conformance classes",
             ),
+            # DELIBERATE: this rel="data" target is admin-gated (a stakeholder rule —
+            # the public must not enumerate collections/items), so an anonymous OGC
+            # client following it hits 401. Advertising the link keeps the landing
+            # page honest about where the data surface lives for authorized callers.
             Link(href=f"{base}/collections", rel="data", type=_JSON, title="Collections"),
             Link(
                 href=f"{base}/docs",

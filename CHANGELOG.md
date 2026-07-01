@@ -6,6 +6,44 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+- **Hybrid authentication** — Keycloak OIDC (RS256 JWT) validated alongside the
+  static admin token, with no flag day: the static token keeps working unchanged.
+  OIDC is enabled at the review deployment; disabled by default elsewhere.
+- **Per-collection RBAC grants** — `owner`/`editor` roles keyed by verified email
+  (`viewer` reserved, not yet enforced), managed via
+  `POST`/`GET`/`DELETE /collections/{id}/grants[/{email}]` (owner or sysadmin).
+- Swagger single-sign-on button (Authorization Code + PKCE), gated behind
+  `GEOID_SWAGGER_OAUTH2_ENABLED` (off by default).
+- Post-deploy golden-vector canary: `dedup_vectors.py --check` runs as a Cloud Run
+  job against the live database after every migration, failing the deploy on
+  identity-recipe drift before the service ships.
+- Last-owner guard: revoking or demoting a collection's only `owner` grant is
+  blocked with 409 (grant another owner first).
+- Database hardening (migration 0007): normalized-grant-email CHECK constraint;
+  identity/dedup SQL functions marked `PARALLEL SAFE` with a pinned `search_path`
+  (bodies unchanged — identity untouched); dead paging index dropped. (2D-only
+  needs no new constraint: the geometry column type already rejects Z/M.)
+
+### Changed
+- A grant whose recorded Keycloak subject differs from the caller's is no longer
+  honored (403 + server-side warning) — email reuse cannot silently inherit access.
+- Unrecognized database integrity errors now answer `500 internal error` (logged
+  loudly server-side) instead of a mislabeled `409`.
+- Bulk ingest documents its atomicity contract: the batch is one transaction — a
+  timeout/disconnect before the response discards all rows, including accepted ones.
+
+### Fixed
+- Non-ASCII bearer tokens now answer 401 instead of crashing with a 500.
+- The dedup 409 now always names the *stored* incumbent geoid (self-correcting
+  against any legacy pre-deterministic row).
+- Database/programming failures during a write are no longer masked as
+  `422 unparseable GeoJSON`; they surface loudly with server-side logging.
+- Application logs (OIDC rejections, JWKS outages, bootstrap) are actually emitted
+  in the deployed image; JWKS infrastructure failures log at ERROR.
+- Concurrent cold-start bootstrap no longer crashes on the public-collection
+  create race.
+
 ## [0.3.0] - 2026-06-24
 
 ### Added

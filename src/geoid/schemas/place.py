@@ -136,20 +136,40 @@ class GeometryConflictResponse(BaseModel):
     Uses the standard error envelope (``code``/``message``) plus the incumbent's
     identifiers. The ``constraint`` field discriminates this conflict from the
     external_id 409.
+
+    The incumbent fields are OPTIONAL in the schema (though always populated
+    today): geometry dedup is global, so a conflict can point at an incumbent in
+    another collection — when private collections land, those fields may be
+    withheld (null) rather than leak a private collection's contents. Declaring
+    them nullable now means that change won't be schema-breaking.
     """
 
     code: int = Field(description="HTTP status code (409).")
     message: str = Field(description="Human-readable conflict description.")
-    geoid: str = Field(description="The INCUMBENT geoid the geometry is already registered under.")
-    uri: str = Field(description="Durable resolver URI of the incumbent geoid.")
-    collection: str = Field(description="Collection slug the incumbent belongs to.")
+    geoid: str | None = Field(
+        default=None,
+        description="The INCUMBENT geoid the geometry is already registered under. "
+        "May be withheld once private collections land.",
+    )
+    uri: str | None = Field(
+        default=None,
+        description="Durable resolver URI of the incumbent geoid. "
+        "May be withheld once private collections land.",
+    )
+    collection: str | None = Field(
+        default=None,
+        description="Collection slug the incumbent belongs to. "
+        "May be withheld once private collections land.",
+    )
     constraint: str = Field(description='Always "uq_geoid_registry_geom_hash" for this conflict.')
 
 
 # --- Bulk write (synchronous multi-geometry POST) ---------------------------
 
-# Per-feature reject discriminator. Maps 1:1 to the single-row write path's 4xx so
-# a bulk reject reads exactly like the response a single POST would return.
+# Per-feature reject discriminator. Maps 1:1 to the single-row write path's status
+# for the same failure: the 4xx classes below read exactly like the response a
+# single POST would return, and internal_error mirrors the single-row 500 (an
+# unrecognised integrity violation answers 500 there, one rejected row here).
 BulkRejectReason = Literal[
     "schema_invalid",  # failed the PlaceCreate pydantic schema (single-row 422)
     "invalid_geometry",  # unsupported type (line/GC) / not ST_IsValid / unparseable GeoJSON (422)
