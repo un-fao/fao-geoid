@@ -53,7 +53,11 @@ class CollectionOut(BaseModel):
 
 
 class GrantCreate(BaseModel):
-    """Grant (or re-grant) a per-collection role to a principal by email."""
+    """Grant (or re-grant) a per-collection role to a principal by email.
+
+    ``viewer`` is reserved, not yet enforced: it is accepted and stored (forward
+    compatibility with the private-collections phase) but grants no access today.
+    """
 
     email: str = Field(min_length=3, max_length=320, examples=["alice@example.org"])
     role: Literal["owner", "editor", "viewer"] = Field(examples=["editor"])

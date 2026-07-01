@@ -50,6 +50,22 @@ class CollectionForbiddenError(GeoidServiceError):
         super().__init__(f"managing collection {slug!r} requires the owner or sysadmin role")
 
 
+class LastOwnerGuardError(GeoidServiceError):
+    """Revoking/demoting the LAST owner grant of a collection is blocked (409).
+
+    Applies to everyone, sysadmin included — a sysadmin wanting the owner gone
+    grants another owner first. Keeps the invariant one rule with no bypass tier.
+    """
+
+    def __init__(self, slug: str, email: str) -> None:
+        self.slug = slug
+        self.email = email
+        super().__init__(
+            f"{email!r} is the last owner of collection {slug!r}; "
+            "grant another owner before revoking or demoting this one"
+        )
+
+
 class GrantNotFoundError(GeoidServiceError):
     """DELETE of a grant that does not exist (404)."""
 

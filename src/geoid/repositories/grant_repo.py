@@ -11,11 +11,12 @@ from __future__ import annotations
 
 import uuid
 
-from sqlalchemy import delete, select, update
+from sqlalchemy import delete, func, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from geoid.domain.identifiers import uuid7
+from geoid.domain.roles import Role
 from geoid.models import CollectionGrant
 
 _USER = "user"
@@ -81,6 +82,19 @@ async def upsert_grant(
         await backfill_subject(session, collection_id, norm, subject)
         grant = await get_grant(session, collection_id, norm)
     return grant  # type: ignore[return-value]
+
+
+async def count_owners(session: AsyncSession, collection_id: uuid.UUID) -> int:
+    """How many owner grants a collection has (the last-owner guard's input)."""
+    stmt = (
+        select(func.count())
+        .select_from(CollectionGrant)
+        .where(
+            CollectionGrant.collection_id == collection_id,
+            CollectionGrant.role == Role.OWNER.value,
+        )
+    )
+    return (await session.execute(stmt)).scalar_one()
 
 
 async def delete_grant(session: AsyncSession, collection_id: uuid.UUID, email: str) -> bool:

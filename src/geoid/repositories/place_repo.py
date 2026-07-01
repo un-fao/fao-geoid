@@ -114,7 +114,12 @@ async def insert_place(
     Race safety: the geoid is derived in the SAME statement as the arbiter
     (``i.geoid`` from the ``ids`` leg), so a concurrent loser ALWAYS gets the real
     incumbent geoid with no cross-statement visibility gap — never a geoid-less
-    response. Only the incumbent's collection slug can be missing, in the narrow
+    response. The final SELECT prefers the STORED registry geoid
+    (``COALESCE(r.geoid, i.geoid)``): identical to ``i.geoid`` on the winner path
+    (the LEFT JOIN can't see the arbiter's own insert, so ``r`` is NULL) and on
+    every post-0004 loser, but self-correcting against a legacy/drifted row whose
+    stored geoid predates deterministic derivation — the 409 must name a geoid
+    that actually resolves. Only the incumbent's collection slug can be missing, in the narrow
     concurrent pre-commit window where the in-statement ``LEFT JOIN`` ran before the
     winner committed; ``_resolve_incumbent_slug`` re-snapshots under READ COMMITTED
     with a bounded retry to recover it. If it still never appears (genuine recipe
@@ -158,7 +163,7 @@ async def insert_place(
             RETURNING id
         )
         SELECT
-            i.geoid AS geoid,
+            COALESCE(r.geoid, i.geoid) AS geoid,
             EXISTS (SELECT 1 FROM ins) AS created,
             c.slug AS incumbent_slug
         FROM ids i

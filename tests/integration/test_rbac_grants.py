@@ -128,3 +128,159 @@ async def test_subject_backfilled_on_first_authorized_write(
     after = await oidc_client.get("/collections/bf/grants", headers=ADMIN)
     dave_after = next(g for g in after.json() if g["email"] == "dave@x.org")
     assert dave_after["subject"] == "kc-dave"
+
+
+# --- H6: the unverified-email guard is load-bearing ---------------------------
+
+
+async def test_unverified_email_grant_is_not_honored(
+    oidc_client, make_token, bearer, unit_square_ccw
+):
+    # The only defense against registering a grantee's email unverified in Keycloak
+    # and inheriting the grant: email_verified=False must yield NO grant → 403.
+    await _create(oidc_client, "uv")
+    await _grant(oidc_client, "uv", "ed@x.org", "editor")
+    unverified = bearer(make_token(sub="kc-ed", email="ed@x.org", email_verified=False))
+    resp = await oidc_client.post("/collections/uv/items", headers=unverified, json=unit_square_ccw)
+    assert resp.status_code == 403
+
+
+async def test_token_without_email_claim_gets_no_grant(
+    oidc_client, make_token, bearer, unit_square_ccw
+):
+    await _create(oidc_client, "noemail")
+    await _grant(oidc_client, "noemail", "ed@x.org", "editor")
+    no_email = bearer(make_token(sub="kc-ed"))  # no email/email_verified claims at all
+    resp = await oidc_client.post(
+        "/collections/noemail/items", headers=no_email, json=unit_square_ccw
+    )
+    assert resp.status_code == 403
+
+
+# --- H7: cross-collection grant isolation --------------------------------------
+
+
+async def test_grant_on_one_collection_confers_nothing_on_another(
+    oidc_client, make_token, bearer, unit_square_ccw, other_square
+):
+    # If get_grant ever dropped its collection_id predicate, an owner anywhere could
+    # write/manage everywhere — this pins the isolation with a real cross-collection probe.
+    await _create(oidc_client, "col-a")
+    await _create(oidc_client, "col-b")
+    await _grant(oidc_client, "col-a", "owner-a@x.org", "owner")
+    owner_a = bearer(make_token(sub="kc-oa", email="owner-a@x.org"))
+
+    # Sanity: the credential is live on its own collection.
+    ok = await oidc_client.post("/collections/col-a/items", headers=owner_a, json=unit_square_ccw)
+    assert ok.status_code == 201
+    # Writing into B → 403.
+    assert (
+        await oidc_client.post("/collections/col-b/items", headers=owner_a, json=other_square)
+    ).status_code == 403
+    # Managing B's grants → 403 (list and create).
+    assert (await oidc_client.get("/collections/col-b/grants", headers=owner_a)).status_code == 403
+    assert (
+        await oidc_client.post(
+            "/collections/col-b/grants",
+            headers=owner_a,
+            json={"email": "x@x.org", "role": "editor"},
+        )
+    ).status_code == 403
+
+
+# --- M1: a recorded-sub mismatch denies the grant ------------------------------
+
+
+async def test_sub_mismatch_denies_the_grant(
+    oidc_client, make_token, bearer, unit_square_ccw, other_square
+):
+    await _create(oidc_client, "subm")
+    await _grant(oidc_client, "subm", "eve@x.org", "editor")
+    original = bearer(make_token(sub="kc-original", email="eve@x.org"))
+    # First authorized write backfills principal_subject = kc-original.
+    assert (
+        await oidc_client.post("/collections/subm/items", headers=original, json=unit_square_ccw)
+    ).status_code == 201
+    # Same (reused) email under a DIFFERENT Keycloak identity → grant not honored.
+    imposter = bearer(make_token(sub="kc-imposter", email="eve@x.org"))
+    assert (
+        await oidc_client.post("/collections/subm/items", headers=imposter, json=other_square)
+    ).status_code == 403
+    # The recorded identity keeps working.
+    assert (
+        await oidc_client.post("/collections/subm/items", headers=original, json=other_square)
+    ).status_code == 201
+
+
+# --- M2: last-owner guard -------------------------------------------------------
+
+
+async def test_cannot_revoke_the_last_owner(oidc_client):
+    await _create(oidc_client, "lo")
+    await _grant(oidc_client, "lo", "solo@x.org", "owner")
+    # Even the sysadmin has no bypass: grant another owner first.
+    resp = await oidc_client.delete("/collections/lo/grants/solo@x.org", headers=ADMIN)
+    assert resp.status_code == 409
+    # With a second owner in place the revoke goes through.
+    await _grant(oidc_client, "lo", "second@x.org", "owner")
+    assert (
+        await oidc_client.delete("/collections/lo/grants/solo@x.org", headers=ADMIN)
+    ).status_code == 204
+
+
+async def test_cannot_demote_the_last_owner_via_upsert(oidc_client):
+    await _create(oidc_client, "lo2")
+    await _grant(oidc_client, "lo2", "solo@x.org", "owner")
+    demote = await oidc_client.post(
+        "/collections/lo2/grants", headers=ADMIN, json={"email": "solo@x.org", "role": "editor"}
+    )
+    assert demote.status_code == 409
+    # Re-granting owner (no demotion) is fine.
+    assert (
+        await oidc_client.post(
+            "/collections/lo2/grants", headers=ADMIN, json={"email": "solo@x.org", "role": "owner"}
+        )
+    ).status_code == 201
+    # A second owner unlocks the demotion.
+    await _grant(oidc_client, "lo2", "second@x.org", "owner")
+    assert (
+        await oidc_client.post(
+            "/collections/lo2/grants", headers=ADMIN, json={"email": "solo@x.org", "role": "editor"}
+        )
+    ).status_code == 201
+
+
+# --- L8: anonymous on grants routes → 401 (matching require_admin's split) ------
+
+
+async def test_anonymous_grant_routes_are_401(oidc_client):
+    await _create(oidc_client, "anon401")
+    assert (await oidc_client.get("/collections/anon401/grants")).status_code == 401
+    assert (
+        await oidc_client.post(
+            "/collections/anon401/grants", json={"email": "a@x.org", "role": "editor"}
+        )
+    ).status_code == 401
+    assert (await oidc_client.delete("/collections/anon401/grants/a@x.org")).status_code == 401
+
+
+# --- M16(b): the bulk route honors the same grant ladder ------------------------
+
+
+async def test_bulk_editor_jwt_accepted_viewer_jwt_403(
+    oidc_client, make_token, bearer, unit_square_ccw, other_square
+):
+    await _create(oidc_client, "bulkg")
+    await _grant(oidc_client, "bulkg", "ed@x.org", "editor")
+    await _grant(oidc_client, "bulkg", "vw@x.org", "viewer")
+    fc = {"type": "FeatureCollection", "features": [unit_square_ccw, other_square]}
+
+    editor = bearer(make_token(sub="kc-e", email="ed@x.org"))
+    ok = await oidc_client.post("/collections/bulkg/items/bulk", headers=editor, json=fc)
+    assert ok.status_code == 200
+    assert ok.json()["summary"]["accepted"] == 2
+
+    viewer = bearer(make_token(sub="kc-v", email="vw@x.org"))
+    assert (
+        await oidc_client.post("/collections/bulkg/items/bulk", headers=viewer, json=fc)
+    ).status_code == 403

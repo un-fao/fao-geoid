@@ -135,6 +135,18 @@ def test_real_admin_token_in_production_is_allowed():
 
 
 @pytest.mark.parametrize("environment", ["review", "production"])
+@pytest.mark.parametrize("token", ["", "   "])
+def test_empty_or_whitespace_admin_token_outside_development_is_rejected(environment, token):
+    # A mis-mounted secret (empty value) must fail boot, exactly like the dev default.
+    with pytest.raises(ValidationError):
+        _settings(environment=environment, admin_token=token)
+
+
+def test_empty_admin_token_in_development_is_allowed():
+    assert _settings(admin_token="").admin_token == ""
+
+
+@pytest.mark.parametrize("environment", ["review", "production"])
 def test_database_settings_needs_no_admin_token_outside_development(monkeypatch, environment):
     # The regression pin: the migrate job constructs DatabaseSettings with no
     # admin token mounted; that must never trip the dev-token guard.

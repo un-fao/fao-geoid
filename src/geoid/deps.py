@@ -55,6 +55,10 @@ class Principal:
     admin and anonymous principals leave them at their defaults). They are appended
     after the original three fields so ``admin()``/``anonymous()`` and every existing
     call site stay valid.
+
+    ``roles`` is audit/logging-only — every authorization decision branches on the
+    precomputed ``is_admin`` (and the per-collection grant ladder), never on this
+    tuple. Do not treat it as a security control.
     """
 
     subject: str | None
@@ -73,7 +77,7 @@ class Principal:
 
     @classmethod
     def admin(cls) -> Principal:
-        return cls(subject="admin", is_admin=True, roles=("superadmin",))
+        return cls(subject="admin", is_admin=True, roles=("sysadmin",))
 
 
 def _invalid_token() -> HTTPException:
@@ -127,11 +131,19 @@ async def _resolve_oidc(
     if jwks_client is None:
         # oidc_enabled but no client (misconfiguration) — treat as an invalid token,
         # never a 500: an unauthenticated caller must not learn about server state.
+        # But the operator must: this branch 401s EVERY login until fixed.
+        logger.error("OIDC is enabled but no JWKS client is configured; all OIDC logins 401")
         raise _invalid_token()
     try:
         claims = await anyio.to_thread.run_sync(decode_and_validate, token, settings, jwks_client)
+    except jwt.PyJWKClientError as exc:
+        # JWKS infrastructure failure (IdP down, Cloudflare block, bad URL) — a full
+        # IdP outage must be distinguishable from one user's bad token. str(exc) is
+        # server infra detail (URL/error), never the token, so it is safe to log.
+        logger.error("OIDC JWKS failure: %s", exc)
+        raise _invalid_token() from exc
     except jwt.PyJWTError as exc:
-        logger.info("OIDC token rejected: %s", type(exc).__name__)
+        logger.warning("OIDC token rejected: %s", type(exc).__name__)
         raise _invalid_token() from exc
     return principal_from_claims(claims, settings)
 
@@ -157,7 +169,10 @@ async def require_principal(
             headers=_WWW_AUTH,
         )
     # Constant-time comparison so a wrong token can't be recovered via timing.
-    if hmac.compare_digest(creds.credentials, settings.admin_token):
+    # Compared as bytes: compare_digest raises TypeError on non-ASCII *str* input,
+    # and Starlette decodes headers as latin-1, so a stray "Bearer café" must 401,
+    # never 500 (an unauthenticated-input crash would break the anti-oracle 401).
+    if hmac.compare_digest(creds.credentials.encode(), settings.admin_token.encode()):
         return Principal.admin()
     if settings.oidc_enabled:
         return await _resolve_oidc(creds.credentials, settings, jwks_client)

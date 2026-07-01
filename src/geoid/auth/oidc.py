@@ -37,9 +37,22 @@ def principal_from_claims(claims: dict[str, Any], settings: Settings) -> Princip
     subject = claims.get("sub")
     email = claims.get("email")
     email_verified = bool(claims.get("email_verified", False))
-    resource_access = claims.get("resource_access") or {}
-    client_block = resource_access.get(settings.oidc_roles_client) or {}
-    roles = tuple(client_block.get("roles") or ())
+    # isinstance-guarded so a realm-misconfigured claim shape (resource_access as a
+    # list/string, roles as a bare string) degrades to no-roles instead of raising —
+    # a validly-signed token must never 500 the auth path. A bare-string roles value
+    # is deliberately NOT iterated (tuple("x") would explode into characters).
+    resource_access = claims.get("resource_access")
+    client_block = (
+        resource_access.get(settings.oidc_roles_client)
+        if isinstance(resource_access, dict)
+        else None
+    )
+    raw_roles = client_block.get("roles") if isinstance(client_block, dict) else None
+    roles = (
+        tuple(r for r in raw_roles if isinstance(r, str))
+        if isinstance(raw_roles, (list, tuple))
+        else ()
+    )
     return Principal(
         subject=subject,
         is_admin=settings.oidc_admin_role in roles,

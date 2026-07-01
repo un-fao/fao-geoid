@@ -168,12 +168,20 @@ class Settings(DatabaseSettings):
     @model_validator(mode="after")
     def _forbid_dev_token_in_prod(self) -> Settings:
         # Fail fast so a missing secret mount can't leave the dev token live in prod.
-        if self.environment != "development" and self.admin_token == _DEV_ADMIN_TOKEN:
-            raise ValueError(
-                f"GEOID_ADMIN_TOKEN is the insecure default in {self.environment!r}; "
-                "set a real GEOID_ADMIN_TOKEN (the dev default is only allowed when "
-                "GEOID_ENVIRONMENT=development)."
-            )
+        if self.environment != "development":
+            if self.admin_token == _DEV_ADMIN_TOKEN:
+                raise ValueError(
+                    f"GEOID_ADMIN_TOKEN is the insecure default in {self.environment!r}; "
+                    "set a real GEOID_ADMIN_TOKEN (the dev default is only allowed when "
+                    "GEOID_ENVIRONMENT=development)."
+                )
+            if not self.admin_token.strip():
+                # An empty/whitespace token would make HTTPBearer-less requests and the
+                # static compare behave surprisingly; a mis-mounted secret must not boot.
+                raise ValueError(
+                    f"GEOID_ADMIN_TOKEN is empty/whitespace in {self.environment!r}; "
+                    "set a real GEOID_ADMIN_TOKEN."
+                )
         return self
 
     @property

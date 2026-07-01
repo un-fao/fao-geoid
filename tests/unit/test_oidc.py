@@ -120,6 +120,43 @@ def test_leeway_tolerates_small_clock_skew(_keypair, settings):
     assert claims["sub"] == "user-123"
 
 
+def test_leeway_rejects_just_past_the_boundary(_keypair, settings):
+    # exp 35s in the past is beyond the 30s leeway -> rejected (pins the boundary).
+    private_key, public_key = _keypair
+    token = _encode(private_key, _claims(exp=int(time.time()) - 35))
+    with pytest.raises(jwt.ExpiredSignatureError):
+        decode_and_validate(token, settings, _fake_jwks(public_key))
+
+
+def test_nbf_in_future_beyond_leeway_is_rejected(_keypair, settings):
+    private_key, public_key = _keypair
+    token = _encode(private_key, _claims(nbf=int(time.time()) + 300))
+    with pytest.raises(jwt.ImmatureSignatureError):
+        decode_and_validate(token, settings, _fake_jwks(public_key))
+
+
+def test_alg_none_forgery_is_rejected(_keypair, settings):
+    # An unsigned alg=none token must be refused: RS256 is pinned.
+    _, public_key = _keypair
+    token = jwt.encode(_claims(), None, algorithm="none")
+    with pytest.raises(jwt.PyJWTError):
+        decode_and_validate(token, settings, _fake_jwks(public_key))
+
+
+def test_unknown_kid_jwks_error_propagates_as_pyjwterror(_keypair, settings):
+    # A kid the JWKS can't resolve surfaces as PyJWKClientError — a PyJWTError
+    # subclass, so the auth seam's except-clauses map it to the same 401.
+    private_key, _ = _keypair
+    token = _encode(private_key, _claims())
+
+    def _raise(_token):
+        raise jwt.PyJWKClientError('Unable to find a signing key that matches: "unknown-kid"')
+
+    with pytest.raises(jwt.PyJWKClientError):
+        decode_and_validate(token, settings, SimpleNamespace(get_signing_key_from_jwt=_raise))
+    assert issubclass(jwt.PyJWKClientError, jwt.PyJWTError)
+
+
 # --- principal_from_claims (pure projection) ---------------------------------
 
 
@@ -165,6 +202,33 @@ def test_empty_claims_never_raise(settings):
     assert p.roles == ()
     assert p.is_admin is False
     assert p.email is None
+
+
+@pytest.mark.parametrize(
+    "resource_access",
+    [
+        [],  # list instead of dict
+        "geoid.sysadmin",  # bare string
+        42,  # number
+        {"geoid-roles": {"roles": "geoid.sysadmin"}},  # roles as a bare string
+        {"geoid-roles": ["roles"]},  # client block as a list
+    ],
+    ids=["list", "string", "number", "string-roles", "list-client-block"],
+)
+def test_malformed_resource_access_shapes_never_raise(settings, resource_access):
+    # A validly-signed token with a realm-misconfigured claim shape must degrade to
+    # no-roles/non-admin, never raise (a 500 from the auth path). In particular a
+    # bare-string roles value must NOT be iterated character-by-character.
+    p = principal_from_claims(_claims(resource_access=resource_access), settings)
+    assert p.roles == ()
+    assert p.is_admin is False
+
+
+def test_non_string_role_entries_are_filtered(settings):
+    claims = _claims(resource_access={"geoid-roles": {"roles": ["geoid.sysadmin", 42, None]}})
+    p = principal_from_claims(claims, settings)
+    assert p.roles == ("geoid.sysadmin",)
+    assert p.is_admin is True
 
 
 def test_jwks_client_sends_non_urllib_user_agent(monkeypatch):
