@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import uuid
+
 import pytest
 from sqlalchemy import text
-from sqlalchemy.exc import DBAPIError
+from sqlalchemy.exc import DBAPIError, IntegrityError
 
 pytestmark = pytest.mark.integration
 
@@ -153,3 +155,62 @@ async def test_bulk_registry_consistency_drift_returns_structured_500(
     resp = await client.post("/collections/public/items/bulk", json=fc)
     assert resp.status_code == 500
     assert resp.json()["message"] == "internal registry inconsistency"
+
+
+# --- H4: the dedup 409 names the STORED incumbent geoid, not a re-derived one ---
+
+
+async def test_dedup_409_carries_the_stored_registry_geoid_for_legacy_rows(
+    client, session, unit_square_ccw
+):
+    minted = (await client.post("/collections/public/items", json=unit_square_ccw)).json()["geoid"]
+    # Simulate a legacy (pre-0004, random-UUIDv7) registry row: rewrite the stored
+    # geoid, bypassing the append-only trigger (superuser test role only).
+    legacy = str(uuid.uuid4())
+    await session.execute(text("SET session_replication_role = replica"))
+    await session.execute(
+        text("UPDATE geoid_registry SET geoid = :legacy, place_id = :legacy WHERE geoid = :minted"),
+        {"legacy": legacy, "minted": minted},
+    )
+    await session.execute(text("SET session_replication_role = origin"))
+    await session.commit()
+
+    # The duplicate 409 must report what is actually STORED (COALESCE(r.geoid, ...)),
+    # never a freshly re-derived geoid that resolves nowhere.
+    dup = await client.post("/collections/public/items", json=unit_square_ccw)
+    assert dup.status_code == 409
+    assert dup.json()["geoid"] == legacy
+
+
+# --- M9: an unrecognised IntegrityError is an honest 500, not a mislabelled 409 ---
+
+
+async def test_unrecognised_integrity_error_returns_500(client, monkeypatch, unit_square_ccw):
+    from geoid.repositories import place_repo
+
+    class _FakeDriverError(Exception):
+        sqlstate = "23502"  # NOT NULL violation — a server bug, not a client conflict
+        constraint_name = None
+
+    async def _raise(*args, **kwargs):
+        raise IntegrityError("INSERT ...", {}, _FakeDriverError("boom"))
+
+    monkeypatch.setattr(place_repo, "insert_place", _raise)
+
+    resp = await client.post("/collections/public/items", json=unit_square_ccw)
+    assert resp.status_code == 500
+    assert resp.json() == {"code": 500, "message": "internal error"}
+
+
+# --- H2: the DBAPIError→422 mapping is pinned to the real parse SQLSTATEs -------
+
+
+async def test_st_geomfromgeojson_parse_failures_raise_a_mapped_sqlstate(session):
+    # Empirical pin for GEOJSON_PARSE_SQLSTATES: malformed GeoJSON *text* reaching
+    # ST_GeomFromGeoJSON must raise one of the mapped states — if a PostGIS upgrade
+    # moves it, this fails and the mapping (not the 500 path) needs the update.
+    from geoid.repositories._pg_errors import GEOJSON_PARSE_SQLSTATES, sqlstate_of
+
+    with pytest.raises(DBAPIError) as exc_info:
+        await session.execute(text("SELECT ST_GeomFromGeoJSON('{\"type\":')"))
+    assert sqlstate_of(exc_info.value) in GEOJSON_PARSE_SQLSTATES

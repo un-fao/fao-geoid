@@ -25,7 +25,12 @@ from geoid.models import (
     Collection,
 )
 from geoid.repositories import place_repo
-from geoid.repositories._pg_errors import SQLSTATE_CHECK_VIOLATION, pg_fields, sqlstate_of
+from geoid.repositories._pg_errors import (
+    GEOJSON_PARSE_SQLSTATES,
+    SQLSTATE_CHECK_VIOLATION,
+    pg_fields,
+    sqlstate_of,
+)
 from geoid.schemas.place import (
     BulkAccepted,
     BulkRejected,
@@ -51,6 +56,23 @@ logger = logging.getLogger(__name__)
 # by CHECK constraints on the INSERT (SQLSTATE 23514). The supported-type gate +
 # lon/lat bounds + RFC 7946 structure are ALSO enforced earlier by the PlaceCreate
 # pydantic schema (422 before the DB).
+
+
+def _build_write_inputs(
+    feature: PlaceCreate, principal: Principal, settings: Settings
+) -> tuple[str, str | None, dict[str, Any]]:
+    """The ``(geojson, external_id, provenance)`` triple both write paths stage.
+
+    One helper so the single and bulk paths can never drift on what they hash or
+    record — the same reason both funnel into ``place_repo.insert_place``.
+    """
+    provenance = build_provenance(
+        created_by=principal.subject,
+        originating_instance=settings.instance_id,
+        client=extract_client(feature.properties),
+        extra={"submitted_properties": feature.properties or {}},
+    )
+    return geometry_to_geojson(feature), feature.external_id, provenance
 
 
 async def _authorize_write(
@@ -88,15 +110,7 @@ async def create_place(
     """
     await _authorize_write(session, principal, collection)
 
-    geojson = geometry_to_geojson(feature)
-    external_id = feature.external_id
-    client = extract_client(feature.properties)
-    provenance = build_provenance(
-        created_by=principal.subject,
-        originating_instance=settings.instance_id,
-        client=client,
-        extra={"submitted_properties": feature.properties or {}},
-    )
+    geojson, external_id, provenance = _build_write_inputs(feature, principal, settings)
 
     # Happy path is one INSERT round-trip: the DB CHECK constraints reject invalid
     # geometry (23514) and we recover ST_IsValidReason for the 422 ONLY on that
@@ -120,7 +134,12 @@ async def create_place(
     except (OperationalError, InterfaceError):
         raise  # genuine infra failure — never mask as a 422
     except DBAPIError as exc:
+        if sqlstate_of(exc) not in GEOJSON_PARSE_SQLSTATES:
+            # Programming/schema drift (e.g. a missing SQL function, 42883) is NOT
+            # the client's geometry — re-raise for a loud 500, never a silent 422.
+            raise
         # Malformed GeoJSON makes ST_GeomFromGeoJSON raise and aborts the tx.
+        logger.warning("geometry rejected: ST_GeomFromGeoJSON parse failure", exc_info=exc)
         await session.rollback()
         raise GeometryInvalidError("unparseable GeoJSON geometry") from exc
 
@@ -222,15 +241,7 @@ async def _mint_one(
     SAVEPOINT back on exception leaves the OUTER transaction healthy for the next
     feature, while a full rollback would discard every already-accepted row.
     """
-    geojson = geometry_to_geojson(feature)
-    external_id = feature.external_id
-    client = extract_client(feature.properties)
-    provenance = build_provenance(
-        created_by=principal.subject,
-        originating_instance=settings.instance_id,
-        client=client,
-        extra={"submitted_properties": feature.properties or {}},
-    )
+    geojson, external_id, provenance = _build_write_inputs(feature, principal, settings)
     try:
         async with session.begin_nested():
             result = await place_repo.insert_place(
@@ -247,8 +258,15 @@ async def _mint_one(
         return await _classify_integrity(session, index, external_id, geojson, exc)
     except (OperationalError, InterfaceError):
         raise  # genuine infra failure — never mask as a rejected row
-    except DBAPIError:
+    except DBAPIError as exc:
+        if sqlstate_of(exc) not in GEOJSON_PARSE_SQLSTATES:
+            # Programming/schema drift — abort the batch loudly; a mislabelled
+            # per-feature invalid_geometry would hide a server-side outage.
+            raise
         # Malformed GeoJSON makes ST_GeomFromGeoJSON raise and aborts the statement.
+        logger.warning(
+            "bulk feature %d rejected: ST_GeomFromGeoJSON parse failure", index, exc_info=exc
+        )
         return BulkRejected(
             index=index,
             reason="invalid_geometry",
@@ -311,16 +329,19 @@ async def _classify_integrity(
         return BulkRejected(
             index=index, reason="invalid_geometry", detail=reason, external_id=external_id
         )
-    # Unrecognised integrity constraint — should not happen. Log it and surface an
-    # honest internal_error (not a mislabelled invalid_geometry); the batch survives
-    # as one rejected row rather than aborting.
+    # Unrecognised integrity constraint — should not happen. Log it (with the stack
+    # and Postgres DETAIL) and surface an honest internal_error (not a mislabelled
+    # invalid_geometry); the batch survives as one rejected row rather than aborting.
     logger.error(
-        "unclassified integrity violation: constraint=%r sqlstate=%r", constraint, sqlstate
+        "unclassified integrity violation: constraint=%r sqlstate=%r",
+        constraint,
+        sqlstate,
+        exc_info=exc,
     )
     return BulkRejected(
         index=index,
         reason="internal_error",
-        detail=f"integrity constraint violation ({constraint or sqlstate})",
+        detail=f"integrity constraint violation ({constraint or sqlstate or 'unknown'})",
         external_id=external_id,
     )
 

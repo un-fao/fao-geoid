@@ -14,6 +14,14 @@ from sqlalchemy.exc import DBAPIError, IntegrityError
 SQLSTATE_CHECK_VIOLATION = "23514"  # invalid / unsupported-type / empty geometry (DB CHECK)
 SQLSTATE_RESTRICT_VIOLATION = "23001"  # raised by the immutability trigger
 
+# ST_GeomFromGeoJSON parse failures for malformed GeoJSON text: PostGIS lwgeom
+# errors surface as XX000 (internal_error), bad parameters as 22023
+# (invalid_parameter_value). The write path maps ONLY these DBAPIError states to
+# the client-facing 422/invalid_geometry; any other sqlstate (e.g. 42883, a
+# missing SQL function — the June-15 outage signature) is a server-side failure
+# and must stay loud, never be mislabelled as the client's geometry.
+GEOJSON_PARSE_SQLSTATES = frozenset({"XX000", "22023"})
+
 
 def sqlstate_of(exc: DBAPIError) -> str | None:
     """The SQLSTATE on a SQLAlchemy asyncpg error (``exc.orig.sqlstate``)."""

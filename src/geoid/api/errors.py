@@ -42,6 +42,7 @@ from geoid.services.exceptions import (
     GeometryConflictError,
     GeometryInvalidError,
     GrantNotFoundError,
+    LastOwnerGuardError,
     PlaceNotFoundError,
     RegistryConsistencyError,
     WriteNotAuthorizedError,
@@ -94,6 +95,10 @@ def register_exception_handlers(app: FastAPI) -> None:
     async def _grant_not_found(_: Request, exc: GrantNotFoundError) -> JSONResponse:
         return _error(status.HTTP_404_NOT_FOUND, str(exc), collection=exc.slug, email=exc.email)
 
+    @app.exception_handler(LastOwnerGuardError)
+    async def _last_owner_guard(_: Request, exc: LastOwnerGuardError) -> JSONResponse:
+        return _error(status.HTTP_409_CONFLICT, str(exc), collection=exc.slug, email=exc.email)
+
     @app.exception_handler(GeometryConflictError)
     async def _geometry_conflict(_: Request, exc: GeometryConflictError) -> JSONResponse:
         # The ruling: the insert fails AND the body names the existing geoid.
@@ -145,7 +150,12 @@ def register_exception_handlers(app: FastAPI) -> None:
         if constraint == UQ_GEOID_REGISTRY_GEOM_HASH:
             # Backstop only: the service normally raises GeometryConflictError
             # (whose body carries the incumbent geoid — there is no session
-            # here to look it up). Surfacing this branch is unexpected.
+            # here to look it up). Surfacing this branch is unexpected, so log it.
+            logger.error(
+                "geom_hash 409 served from the IntegrityError backstop "
+                "(no incumbent geoid in the body)",
+                exc_info=exc,
+            )
             return _error(
                 status.HTTP_409_CONFLICT,
                 "identical geometry already exists in the catalog",
@@ -162,9 +172,14 @@ def register_exception_handlers(app: FastAPI) -> None:
                 status.HTTP_409_CONFLICT,
                 "place is immutable; corrections mint a new geoid via predecessor_id",
             )
-        return _error(
-            status.HTTP_409_CONFLICT,
-            "integrity constraint violation",
-            constraint=constraint,
-            sqlstate=sqlstate,
+        # Unrecognised integrity failure — a NOT NULL violation (23502) is a server
+        # bug, and pg_fields degrading to (None, None) on a driver change lands here
+        # too. Presenting either as the client's 409 conflict would mislabel it:
+        # log loud (stack + Postgres DETAIL) and answer an honest 500.
+        logger.error(
+            "unclassified integrity violation: constraint=%r sqlstate=%r",
+            constraint,
+            sqlstate,
+            exc_info=exc,
         )
+        return _error(status.HTTP_500_INTERNAL_SERVER_ERROR, "internal error")

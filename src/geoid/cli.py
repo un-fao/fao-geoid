@@ -32,6 +32,15 @@ def _alembic_ini() -> str:
 def run_web() -> None:
     import uvicorn
 
+    # uvicorn's log_level configures only the uvicorn.* loggers; geoid.* records
+    # propagate to a handler-less root where only WARNING+ leaks out via
+    # logging.lastResort. Configure the root here so app INFO (OIDC rejections,
+    # bootstrap) is actually emitted in the deployed image.
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+    )
+
     port = int(os.environ.get("PORT", "8000"))
     host = os.environ.get("HOST", "0.0.0.0")
     # WEB_CONCURRENCY>1 spawns multiple worker processes (one event loop each);
