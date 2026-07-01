@@ -186,6 +186,32 @@ jobs:
             --project "$PROJECT" \
             --wait
 
+      # Golden-vector identity canary: recompute the pinned dedup/identity digests
+      # against the LIVE database engine (Cloud SQL). Post-0004 the recipe is
+      # identity-load-bearing, and Google can bump GEOS in a maintenance window that
+      # CI structurally cannot see (CI runs GEOS 3.9.0, prod 3.11.4) — strict drift
+      # (exit 3) fails the deploy HERE, before the service ships. The script falls
+      # back to GEOID_DATABASE_URL (asyncpg scheme normalized) when --dsn is absent.
+      - name: Golden-vector identity canary (Cloud Run Job)
+        run: |
+          gcloud run jobs deploy "${SERVICE}-vectors-check" \
+            --image "$IMAGE" \
+            --region "$REGION" \
+            --project "$PROJECT" \
+            --service-account "$RUN_SERVICE_ACCOUNT" \
+            --set-cloudsql-instances "$CLOUD_SQL_INSTANCE" \
+            --network "${{ vars.VPC_NETWORK }}" \
+            --subnet "${{ vars.VPC_SUBNET }}" \
+            --vpc-egress private-ranges-only \
+            --set-secrets GEOID_DATABASE_URL=geoid-database-url:latest \
+            --command python \
+            --args "scripts/dedup_vectors.py,--check" \
+            --max-retries 0
+          gcloud run jobs execute "${SERVICE}-vectors-check" \
+            --region "$REGION" \
+            --project "$PROJECT" \
+            --wait
+
       - name: Deploy service (Cloud Run)
         run: |
           # OIDC dual-auth is enabled at REVIEW only (the static admin token is
@@ -210,7 +236,7 @@ jobs:
             --subnet "${{ vars.VPC_SUBNET }}" \
             --vpc-egress private-ranges-only \
             --set-secrets GEOID_DATABASE_URL=geoid-database-url:latest,GEOID_ADMIN_TOKEN=geoid-admin-token:latest \
-            --set-env-vars "^@^GEOID_ENVIRONMENT=$TARGET_ENV@GEOID_BASE_URL=${{ vars.GEOID_BASE_URL }}@GEOID_ROOT_PATH=${{ vars.GEOID_ROOT_PATH }}@GEOID_INSTANCE_ID=${{ vars.GEOID_INSTANCE_ID }}@GEOID_PUBLIC_COLLECTION=${{ vars.GEOID_PUBLIC_COLLECTION }}@GEOID_BULK_MAX_FEATURES=2500${OIDC_ENV}" \
+            --set-env-vars "^@^GEOID_ENVIRONMENT=$TARGET_ENV@GEOID_BASE_URL=${{ vars.GEOID_BASE_URL }}@GEOID_ROOT_PATH=${{ vars.GEOID_ROOT_PATH }}@GEOID_INSTANCE_ID=${{ vars.GEOID_INSTANCE_ID }}@GEOID_PUBLIC_COLLECTION=${{ vars.GEOID_PUBLIC_COLLECTION }}@GEOID_BULK_MAX_FEATURES=2500@GEOID_DB_POOL_SIZE=5@GEOID_DB_MAX_OVERFLOW=15${OIDC_ENV}" \
             --port 8000 \
             --allow-unauthenticated \
             --execution-environment gen2 \
@@ -218,7 +244,13 @@ jobs:
             --max-instances 4 \
             --memory 1Gi \
             --timeout 600 \
+            --concurrency 16 \
             --cpu-boost
+          # Connection/memory budget (kept coherent on purpose): pool 5 + overflow 15
+          # = 20 conns/instance x 4 max instances = 80, leaving headroom under a small
+          # Cloud SQL tier's ~100 max_connections for the migrate/canary jobs and ops.
+          # --concurrency 16 bounds how many (up to 2500-feature) bulk bodies one
+          # 1 GiB instance parses at once — the Cloud Run default of 80 was an OOM risk.
 
       - name: Install uv (for the smoke script)
         uses: astral-sh/setup-uv@v8.2.0

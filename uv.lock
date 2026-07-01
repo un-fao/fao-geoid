@@ -522,6 +522,9 @@ dependencies = [
 oidc = [
     { name = "pyjwt", extra = ["crypto"] },
 ]
+ops = [
+    { name = "psycopg", extra = ["binary"] },
+]
 
 [package.dev-dependencies]
 dev = [
@@ -544,6 +547,7 @@ requires-dist = [
     { name = "fastapi", specifier = ">=0.115,<1.0" },
     { name = "geoalchemy2", specifier = ">=0.16" },
     { name = "geojson-pydantic", specifier = ">=2.1,<2.2" },
+    { name = "psycopg", extras = ["binary"], marker = "extra == 'ops'", specifier = ">=3.2" },
     { name = "pydantic", specifier = ">=2.9" },
     { name = "pydantic-settings", specifier = ">=2.6" },
     { name = "pyjwt", extras = ["crypto"], marker = "extra == 'oidc'", specifier = ">=2.10" },
@@ -551,7 +555,7 @@ requires-dist = [
     { name = "sqlalchemy", extras = ["asyncio"], specifier = ">=2.0.36" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.32" },
 ]
-provides-extras = ["oidc"]
+provides-extras = ["oidc", "ops"]
 
 [package.metadata.requires-dev]
 dev = [

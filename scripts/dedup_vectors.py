@@ -38,6 +38,8 @@ from __future__ import annotations
 import argparse
 import contextlib
 import json
+import os
+import re
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -357,7 +359,13 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
         action="store_true",
         help="compute fresh digests and write the fixture (recipe-version event)",
     )
-    parser.add_argument("--dsn", required=True, help="libpq DSN/URL of the database to use")
+    parser.add_argument(
+        "--dsn",
+        default=None,
+        help="libpq DSN/URL of the database (default: GEOID_DATABASE_URL with any "
+        "SQLAlchemy '+driver' suffix stripped — lets the Cloud Run canary job reuse "
+        "the mounted asyncpg secret)",
+    )
     parser.add_argument(
         "--fixture",
         type=Path,
@@ -375,7 +383,21 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     args = parser.parse_args(argv)
     if args.check == args.generate:
         raise ConfigError("pass exactly one of --check / --generate")
+    if not args.dsn:
+        args.dsn = _normalize_dsn(os.environ.get("GEOID_DATABASE_URL", ""))
+        if not args.dsn:
+            raise ConfigError("pass --dsn or set GEOID_DATABASE_URL")
     return args
+
+
+def _normalize_dsn(dsn: str) -> str:
+    """Strip a SQLAlchemy driver suffix so psycopg/libpq accepts the URL.
+
+    The deployed ``GEOID_DATABASE_URL`` is ``postgresql+asyncpg://…?host=/cloudsql/…``;
+    psycopg wants plain ``postgresql://`` (the unix-socket ``?host=`` query form
+    passes through to libpq untouched).
+    """
+    return re.sub(r"^postgresql\+\w+://", "postgresql://", dsn)
 
 
 def _psycopg_run_sql(conn) -> RunSQL:

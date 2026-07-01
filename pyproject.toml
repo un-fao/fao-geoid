@@ -33,6 +33,11 @@ dependencies = [
 # WITHOUT this extra still imports cleanly; the deployed FAO image installs it
 # (Dockerfile `uv sync --extra oidc`). The static admin token works with or without it.
 oidc = ["pyjwt[crypto]>=2.10"]
+# Operational tooling baked into the deployed image: scripts/dedup_vectors.py runs
+# as a post-deploy Cloud Run job (the golden-vector identity canary) and needs the
+# sync psycopg driver, which is otherwise dev-only. Installed via the Dockerfile's
+# `uv sync --extra ops`.
+ops = ["psycopg[binary]>=3.2"]
 
 [project.scripts]
 geoid = "geoid.cli:main"
