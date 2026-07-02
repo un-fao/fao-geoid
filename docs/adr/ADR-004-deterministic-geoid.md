@@ -64,7 +64,7 @@ UUIDv5 (name-based, SHA-1) is the more universally recognized "deterministic UUI
   and `dedup_recipe_stamp` now guard identity, not just dedup correctness.
 - **(−) Lost PK k-sortability:** deterministic ids distribute randomly in the primary-key b-tree (more
   page splits / insert I/O). Negligible at the ~40k-polygon Release-1 scale; matters on the billion-row
-  `SCALING.md` ladder. Read paging is unaffected (it orders by `place(collection_id, created_at, id)`).
+  `local-scripts/docs/SCALING.md` ladder. Read paging is unaffected (it orders by `place(collection_id, created_at, id)`).
 - **(=) Collision space:** 122-bit payload (16-byte truncation of SHA-256) → birthday ~2⁶¹; negligible.
 
 ## Rollout precondition

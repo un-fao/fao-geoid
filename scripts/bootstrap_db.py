@@ -563,7 +563,7 @@ def verify(cfg: BootstrapConfig) -> list[str]:
             recipe_version == "v2",
             f"latest dedup_recipe_stamp.recipe_version is {recipe_version!r}, expected 'v2' "
             "— migrate to 0008 (the identity-recipe-v2 migration; it refuses a non-empty "
-            "registry — see the re-mint runbook, local-docs/DEPLOYMENT.md §15)",
+            "registry — see the re-mint runbook, local-scripts/docs/DEPLOYMENT.md §15)",
         ),
         (
             "catalogs / collections",

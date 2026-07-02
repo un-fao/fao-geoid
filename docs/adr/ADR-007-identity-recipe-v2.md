@@ -142,7 +142,7 @@ GEOS/PostGIS calls remain in the identity bytes — only coordinate *accessors* 
   June-15 0004-backfill trap), `place.id` IS the PK/geoid with `predecessor_id` FKs,
   rewriting `change_log.geoid` falsifies the audit feed, and v1-distinct geometries can collide
   under v2 (an undecided collision policy). Migration 0008 instead **refuses to run on a non-empty
-  registry** (both directions); the re-mint is operational (DEPLOYMENT.md §15).
+  registry** (both directions); the re-mint is operational (local-scripts/docs/DEPLOYMENT.md §15).
 - **Silently dropping degenerate geometries or repairing them** — the v1 behavior this ADR
   classifies as a bug (silent identity merge/vanish); see ADR-006's identical reasoning on Z.
 - **Tolerance/similarity matching** (GERS-style IoU) — a separate overlap-matching layer if FAO
@@ -152,7 +152,7 @@ GEOS/PostGIS calls remain in the identity bytes — only coordinate *accessors* 
 
 - **Every geoid re-mints.** Sanctioned and executed while the review DB is empty post-reset and
   prod is small. Old v1 geoids/permalinks are void; the re-mint runbook (export → reset →
-  migrate → re-seed → **reconcile rejects**) is local-docs/DEPLOYMENT.md §15. A v1-valid geometry
+  migrate → re-seed → **reconcile rejects**) is local-scripts/docs/DEPLOYMENT.md §15. A v1-valid geometry
   can be lattice-degenerate under v2 (422 at re-seed) — the runbook must reconcile those rows
   explicitly, never silently drop them.
 - **Identity is engine-independent.** The strict/advisory golden-vector split disappears: CI, the

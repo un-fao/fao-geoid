@@ -97,11 +97,8 @@ CLAUDE.md
 AGENT.md
 graphify-out/
 
-# Local-only interactive docs (AI-built HTML walkthroughs). The Markdown docs in
-# docs/ (the ADRs, SCALING.md) stay tracked.
-docs/*.html
-
-local-docs/
+# Local-only docs (HTML walkthroughs, deployment/runbook notes). docs/ stays
+# tracked for ADRs only; local-scripts/docs/ is the one gitignored docs home.
 local-scripts/
 
 # Local data

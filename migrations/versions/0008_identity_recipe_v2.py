@@ -39,7 +39,7 @@ hash stays callable on an identity database.
 THIS IS A SANCTIONED IDENTITY-VERSION EVENT: the same geometry mints a DIFFERENT
 geoid under v2 than under v1, so this migration REFUSES to run on a non-empty
 registry. Executed while the review DB is empty post-reset and prod is small —
-the re-mint runbook is local-docs/DEPLOYMENT.md §15 (export → reset → migrate →
+the re-mint runbook is local-scripts/docs/DEPLOYMENT.md §15 (export → reset → migrate →
 re-seed → reconcile rejects). ``geoid_from_geom_hash`` / ``geoid_id_default``
 (the UUIDv8 stamping, 0004) are UNCHANGED — only the hash under them changes.
 
@@ -71,7 +71,7 @@ BEGIN
     IF EXISTS (SELECT 1 FROM place) OR EXISTS (SELECT 1 FROM geoid_registry) THEN
         RAISE EXCEPTION 'identity recipe migration refuses to run: place/geoid_registry are not empty. '
             'Changing the recipe re-mints EVERY geoid — follow the re-mint runbook '
-            '(local-docs/DEPLOYMENT.md, section 15): export -> reset the DB -> migrate -> '
+            '(local-scripts/docs/DEPLOYMENT.md, section 15): export -> reset the DB -> migrate -> '
             're-seed -> reconcile rejects.';
     END IF;
 END

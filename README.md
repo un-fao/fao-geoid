@@ -23,16 +23,16 @@ QGIS / ogr / Whisp / Ground ──►  GeoID FastAPI (one image)
 
 ## Documentation
 
-📖 **Full interactive technical walkthrough:** open [`docs/architecture.html`](docs/architecture.html)
+📖 **Full interactive technical walkthrough:** open [`local-scripts/docs/architecture.html`](local-scripts/docs/architecture.html)
 in a browser — system architecture, ER + sequence + dedup diagrams, the write/read paths, and a
 per-module reference for all 47 modules.
 
-🎓 **Geospatial concepts & standards tutorial:** open [`docs/tutorial.html`](docs/tutorial.html)
+🎓 **Geospatial concepts & standards tutorial:** open [`local-scripts/docs/tutorial.html`](local-scripts/docs/tutorial.html)
 in a browser — an interactive primer on every geospatial idea GeoID relies on (CRS & axis order,
 GeoJSON↔WKB, polygon validity, the dedup hash, spatial indexing, OGC API Features,
 the content-addressed UUIDv8 geoid), with live widgets and per-section self-tests grounded in the real code.
 
-📋 **Stakeholder contract (shareable):** open [`docs/contract.html`](docs/contract.html) in a
+📋 **Stakeholder contract (shareable):** open [`local-scripts/docs/contract.html`](local-scripts/docs/contract.html) in a
 browser — definitions & rules, the team's decisions with rationale, the API contract, a fully
 offline interactive playground that simulates mint → dedup → validation, and the release roadmap.
 
@@ -139,7 +139,7 @@ via `docker compose`.
 
 These are **not shipped as runnable scripts** — they permanently alter the append-only registry and
 must only be run by a DB admin (`cloudsqlsuperuser`) over the Cloud SQL Auth Proxy. The tooling lives
-in `local-scripts/` (git-ignored, not in the image); the full runbook is `local-docs/DEPLOYMENT.md §14`.
+in `local-scripts/` (git-ignored, not in the image); the full runbook is `local-scripts/docs/DEPLOYMENT.md §14`.
 
 **1. geom_hash rehash / drift-recovery — HISTORICAL (v1-era).** Under recipe v1 the hash was
 GEOS-bound, and `local-scripts/rehash_geom_hashes.py` existed to recompute stored hashes after an
@@ -149,7 +149,7 @@ engine-drift rehashing has no trigger anymore — and the script's own guard fai
 golden-vector check now means the deployed SQL diverged from the Python reference (a code bug or an
 unapplied migration), never an engine artifact — do not load data on a failing check. A deliberate
 recipe change is an **identity-version event** with its own migration and the re-mint runbook
-(`local-docs/DEPLOYMENT.md §15`), never a rehash.
+(`local-scripts/docs/DEPLOYMENT.md §15`), never a rehash.
 
 **2. DB teardown wipe** (reset data while keeping schema + the seeded `public` collection). The
 `place`/`geoid_registry`/`change_log` triggers block ordinary `DELETE`/`TRUNCATE`. On managed

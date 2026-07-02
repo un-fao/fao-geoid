@@ -31,7 +31,7 @@ Reading the table: the LATEST row is the stack the current ``geoid_registry.geom
 values are valid under. If the live ``postgis_geos_version()`` series differs from
 it, run the golden-vector check (``scripts/dedup_vectors.py --check``) and, on
 drift, the audited re-hash procedure (``local-scripts/rehash_geom_hashes.py``,
-runbook: local-docs/DEPLOYMENT.md §14).
+runbook: local-scripts/docs/DEPLOYMENT.md §14).
 
 Design note (D1): this table is ops bookkeeping, not a data-integrity hinge — it
 deliberately gets NO triggers (the global user-trigger inventory stays at 7, as
