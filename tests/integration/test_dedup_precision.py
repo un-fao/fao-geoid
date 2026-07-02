@@ -1,9 +1,9 @@
-"""Coordinate-precision behaviour: ONE global dedup grid (~1cm,
-1e-7 deg/vertex — exact-match semantics), pinned in the
-BEFORE-INSERT trigger by migration 0001. Geometry uniqueness is catalog-wide,
-and an identical submission fails with a 409 carrying the incumbent geoid.
+"""Coordinate-precision behaviour: ONE global identity lattice (~1cm, 1e-7
+deg/vertex — exact-match semantics), a frozen recipe constant (migration 0008's
+``geoid_quantize_v2`` SCALE). Geometry uniqueness is catalog-wide, and an
+identical submission fails with a 409 carrying the incumbent geoid.
 
-These tests demonstrate the grid in action via the live write path: sub-cell
+These tests demonstrate the lattice in action via the live write path: sub-cell
 float jitter collapses onto the incumbent (409), a shift of several cells is a
 different place (201, distinct geoid).
 """

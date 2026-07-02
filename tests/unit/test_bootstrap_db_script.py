@@ -96,11 +96,3 @@ def test_derive_app_url_rejects_garbage():
 def test_psycopg_dsn_strips_the_async_driver_and_keeps_credentials():
     dsn = bootstrap_db._psycopg_dsn("postgresql+asyncpg://geoid:pw@host:5432/geoid")
     assert dsn == "postgresql://geoid:pw@host:5432/geoid"
-
-
-# --- _series ------------------------------------------------------------------
-
-
-def test_series_truncates_to_major_minor():
-    assert bootstrap_db._series("3.6.0") == "3.6"
-    assert bootstrap_db._series("3.11.4") == "3.11"

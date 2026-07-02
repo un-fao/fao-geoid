@@ -14,6 +14,16 @@ from sqlalchemy.exc import DBAPIError, IntegrityError
 SQLSTATE_CHECK_VIOLATION = "23514"  # invalid / unsupported-type / empty geometry (DB CHECK)
 SQLSTATE_RESTRICT_VIOLATION = "23001"  # raised by the immutability trigger
 
+# Custom SQLSTATE raised by the v2 identity recipe (migration 0008) when a VALID
+# geometry degenerates on the 1e-7 lattice (ring < 3 distinct vertices, or exact-
+# zero integer shoelace). Deliberately NOT 23514: that path recovers the reason
+# via ST_IsValidReason, which answers "Valid Geometry" for a lattice-degenerate
+# sliver. Class GD is outside SQLSTATE class 23, so SQLAlchemy wraps it as a
+# generic DBAPIError (not IntegrityError) — handled in registry_service's
+# DBAPIError branches. The schema layer pre-rejects these with a clean 422; this
+# is the DB backstop for writes that bypass the schema.
+SQLSTATE_DEGENERATE_GEOMETRY = "GD001"
+
 # ST_GeomFromGeoJSON parse failures for malformed GeoJSON text: PostGIS lwgeom
 # errors surface as XX000 (internal_error), bad parameters as 22023
 # (invalid_parameter_value). The write path maps ONLY these DBAPIError states to

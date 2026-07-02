@@ -16,6 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from geoid.config import Settings
 from geoid.deps import Principal
+from geoid.domain.geometry_identity import DEGENERATE_MESSAGE
 from geoid.domain.identifiers import derive_identifiers
 from geoid.domain.provenance import build_provenance, extract_client
 from geoid.models import (
@@ -28,6 +29,7 @@ from geoid.repositories import place_repo
 from geoid.repositories._pg_errors import (
     GEOJSON_PARSE_SQLSTATES,
     SQLSTATE_CHECK_VIOLATION,
+    SQLSTATE_DEGENERATE_GEOMETRY,
     pg_fields,
     sqlstate_of,
 )
@@ -134,6 +136,11 @@ async def create_place(
     except (OperationalError, InterfaceError):
         raise  # genuine infra failure — never mask as a 422
     except DBAPIError as exc:
+        if sqlstate_of(exc) == SQLSTATE_DEGENERATE_GEOMETRY:
+            # DB backstop (the schema pre-check rejects these first): a valid
+            # geometry that degenerates on the identity lattice (GD001, recipe v2).
+            await session.rollback()
+            raise GeometryInvalidError(DEGENERATE_MESSAGE) from exc
         if sqlstate_of(exc) not in GEOJSON_PARSE_SQLSTATES:
             # Programming/schema drift (e.g. a missing SQL function, 42883) is NOT
             # the client's geometry — re-raise for a loud 500, never a silent 422.
@@ -259,6 +266,15 @@ async def _mint_one(
     except (OperationalError, InterfaceError):
         raise  # genuine infra failure — never mask as a rejected row
     except DBAPIError as exc:
+        if sqlstate_of(exc) == SQLSTATE_DEGENERATE_GEOMETRY:
+            # DB backstop, bulk twin: the SAVEPOINT already rolled back, so this
+            # is one rejected row, mirroring the single-row 422.
+            return BulkRejected(
+                index=index,
+                reason="invalid_geometry",
+                detail=DEGENERATE_MESSAGE,
+                external_id=external_id,
+            )
         if sqlstate_of(exc) not in GEOJSON_PARSE_SQLSTATES:
             # Programming/schema drift — abort the batch loudly; a mislabelled
             # per-feature invalid_geometry would hide a server-side outage.

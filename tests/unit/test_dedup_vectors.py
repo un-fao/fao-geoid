@@ -1,9 +1,9 @@
-"""Unit tests for scripts/dedup_vectors.py — committed-fixture well-formedness
-and the check/generate logic with a fake run_sql (no DB)."""
+"""Unit tests for scripts/dedup_vectors.py (recipe v2) — committed-fixture
+well-formedness, fixture ≡ pure-Python-reference recomputation (the corpus is now
+verifiable WITHOUT Docker), and the check/generate logic with a fake run_sql."""
 
 from __future__ import annotations
 
-import hashlib
 import importlib.util
 import json
 import re
@@ -11,6 +11,8 @@ import sys
 from pathlib import Path
 
 import pytest
+
+from geoid.domain.geometry_identity import DegenerateGeometryError, geom_hash_v2
 
 pytestmark = pytest.mark.unit
 
@@ -33,6 +35,8 @@ dedup_vectors = _load_script_module()
 FIXTURE = dedup_vectors.load_fixture()
 VECTORS = FIXTURE["vectors"]
 BY_NAME = {vector["name"]: vector for vector in VECTORS}
+HASH_VECTORS = [vector for vector in VECTORS if vector["expect"] == "hash"]
+ERROR_VECTORS = [vector for vector in VECTORS if vector["expect"] == "error"]
 
 _HEX64 = re.compile(r"^[0-9a-f]{64}$")
 
@@ -40,10 +44,9 @@ _HEX64 = re.compile(r"^[0-9a-f]{64}$")
 # --- committed fixture well-formedness -----------------------------------------
 
 
-def test_fixture_is_recipe_v1_with_provenance():
-    assert FIXTURE["recipe_version"] == "v1"
-    assert "POSTGIS=" in FIXTURE["generated_on"]["postgis_full_version"]
-    assert FIXTURE["generated_on"]["generated_at"]
+def test_fixture_is_recipe_v2_with_provenance():
+    assert FIXTURE["recipe_version"] == "v2"
+    assert "pure-Python reference" in FIXTURE["generated_by"]
 
 
 def test_vector_names_are_unique():
@@ -51,9 +54,11 @@ def test_vector_names_are_unique():
     assert len(names) == len(set(names))
 
 
-def test_digests_are_64_char_lowercase_hex():
-    for vector in VECTORS:
+def test_hash_vectors_carry_hex_digests_and_error_vectors_none():
+    for vector in HASH_VECTORS:
         assert _HEX64.match(vector["sha256"]), vector["name"]
+    for vector in ERROR_VECTORS:
+        assert vector["sha256"] is None, vector["name"]
 
 
 def test_same_as_references_resolve():
@@ -64,11 +69,11 @@ def test_same_as_references_resolve():
 
 
 def test_corpus_coverage():
-    strict = [vector for vector in VECTORS if vector["strict"]]
-    advisory = [vector for vector in VECTORS if not vector["strict"]]
-    assert len(strict) >= 13  # 13 GEOS-stable; cell_straddle_high + grid9e5_* are advisory
-    assert len(advisory) >= 1
-    assert {vector["grid"] for vector in VECTORS} >= {1e-7, 9e-5}
+    # The v1 strict/advisory split is gone (v2 is engine-independent, everything
+    # is strict); coverage floor: a healthy hash corpus + the degeneracy rejects.
+    assert len(HASH_VECTORS) >= 20
+    assert len(ERROR_VECTORS) >= 3
+    assert any(vector.get("wkt") for vector in VECTORS)  # WKT convergence pins
 
 
 def test_same_as_pairs_have_equal_pinned_digests():
@@ -78,12 +83,42 @@ def test_same_as_pairs_have_equal_pinned_digests():
 
 
 def test_cell_straddle_pair_pins_distinct_digests():
-    # The known caveat: an absolute grid, not a radius — 2e-8 apart, different hash.
+    # The known caveat: an absolute lattice, not a radius — 2e-8 apart, different
+    # hash. Both strict under v2 (the rounding is ours, no GEOS involved).
     assert BY_NAME["cell_straddle_low"]["sha256"] != BY_NAME["cell_straddle_high"]["sha256"]
 
 
 def test_collinear_extra_vertex_has_its_own_digest():
     assert BY_NAME["collinear_extra_vertex"]["sha256"] != BY_NAME["baseline_unit_square"]["sha256"]
+
+
+def test_multipoint_duplicate_members_are_not_merged():
+    assert (
+        BY_NAME["multipoint_duplicate_members"]["sha256"] != BY_NAME["multipoint_single"]["sha256"]
+    )
+
+
+# --- fixture ≡ reference recomputation (no Docker needed) -----------------------
+
+
+@pytest.mark.parametrize("vector", HASH_VECTORS, ids=lambda vector: vector["name"])
+def test_fixture_digest_matches_reference_recomputation(vector):
+    assert geom_hash_v2(vector["geojson"]).hex() == vector["sha256"], (
+        f"{vector['name']!r}: the committed corpus no longer matches the Python "
+        "reference — recipe code changed (a recipe-version event, never a casual fix)"
+    )
+
+
+@pytest.mark.parametrize("vector", ERROR_VECTORS, ids=lambda vector: vector["name"])
+def test_error_vectors_are_rejected_by_the_reference(vector):
+    with pytest.raises(DegenerateGeometryError):
+        geom_hash_v2(vector["geojson"])
+
+
+def test_generate_reproduces_the_committed_fixture_exactly():
+    # The fixture is deterministic (no timestamps): regenerating on an unchanged
+    # recipe must reproduce the committed file verbatim.
+    assert dedup_vectors.generate_fixture() == FIXTURE
 
 
 # --- load_fixture ----------------------------------------------------------------
@@ -95,32 +130,34 @@ def test_load_fixture_missing_file_raises_step_error(tmp_path):
 
 
 def test_load_fixture_wrong_recipe_version_raises_step_error(tmp_path):
-    path = tmp_path / "v2.json"
-    path.write_text(json.dumps({"recipe_version": "v2", "vectors": []}))
+    path = tmp_path / "v1.json"
+    path.write_text(json.dumps({"recipe_version": "v1", "vectors": []}))
     with pytest.raises(dedup_vectors.StepError, match="recipe_version"):
         dedup_vectors.load_fixture(path)
 
 
 # --- check_vectors ---------------------------------------------------------------
 
+_POINT = {"type": "Point", "coordinates": [0, 0]}
+
 _FAKE_FIXTURE = {
-    "recipe_version": "v1",
+    "recipe_version": "v2",
     "vectors": [
         {
-            "name": "pinned_strict",
-            "wkt": "POLYGON EMPTY",
-            "grid": 1e-7,
+            "name": "pinned_hash",
+            "geojson": _POINT,
+            "wkt": None,
+            "expect": "hash",
             "sha256": "aa" * 32,
-            "strict": True,
             "same_as": None,
             "note": None,
         },
         {
-            "name": "pinned_advisory",
-            "wkt": "POLYGON EMPTY",
-            "grid": 1e-7,
-            "sha256": "bb" * 32,
-            "strict": False,
+            "name": "pinned_error",
+            "geojson": _POINT,
+            "wkt": None,
+            "expect": "error",
+            "sha256": None,
             "same_as": None,
             "note": None,
         },
@@ -128,85 +165,103 @@ _FAKE_FIXTURE = {
 }
 
 
-def test_check_vectors_all_pass():
-    digests = iter(["aa" * 32, "bb" * 32])
-
-    report = dedup_vectors.check_vectors(lambda query, params=None: next(digests), _FAKE_FIXTURE)
-    assert report.passed == 2
-    assert report.strict_failures == ()
-    assert report.advisory_failures == ()
+class _FakePgError(Exception):
+    def __init__(self, sqlstate):
+        super().__init__(f"fake pg error ({sqlstate})")
+        self.sqlstate = sqlstate
 
 
-def test_check_vectors_never_crosses_strict_and_advisory():
-    report = dedup_vectors.check_vectors(lambda query, params=None: "ff" * 32, _FAKE_FIXTURE)
-    assert report.passed == 0
-    assert [failure.name for failure in report.strict_failures] == ["pinned_strict"]
-    assert [failure.name for failure in report.advisory_failures] == ["pinned_advisory"]
-    assert report.strict_failures[0].expected == "aa" * 32
-    assert report.strict_failures[0].actual == "ff" * 32
+def _fake_run_sql(*, digest="aa" * 32, error_sqlstate="GD001"):
+    """Hash vectors answer ``digest`` on both the v2 function and the wrapper;
+    the error vector raises with ``error_sqlstate`` (None = returns a digest)."""
+    calls = {"n": 0}
 
-
-# --- generate_fixture -------------------------------------------------------------
-
-
-def _fake_run_sql(lib: str, geos: str):
-    """Version queries → the given stack; recipe queries → a digest derived from
-    the vector's canonical group, so same_as pairs collapse and others differ."""
-    groups = {
-        (case.wkt, case.grid): case.same_as or case.name for case in dedup_vectors.VECTOR_CASES
-    }
-
-    def run_sql(query: str, params: dict | None = None) -> str:
-        if "postgis_lib_version" in query:
-            return lib
-        if "postgis_geos_version" in query:
-            return geos
-        if "postgis_full_version" in query:
-            return f'POSTGIS="{lib}" GEOS="{geos}"'
-        root = groups[(params["wkt"], params["grid"])]
-        return hashlib.sha256(f"{root}|{params['grid']}".encode()).hexdigest()
+    def run_sql(query, params=None):
+        calls["n"] += 1
+        if calls["n"] > 2 and error_sqlstate is not None:
+            raise _FakePgError(error_sqlstate)
+        return digest
 
     return run_sql
 
 
-def test_generate_refuses_wrong_postgis_series():
-    with pytest.raises(dedup_vectors.StepError, match="refusing"):
-        dedup_vectors.generate_fixture(_fake_run_sql("3.4.0", "3.11.4-CAPI-1.17.4"))
+def test_check_vectors_all_pass():
+    report = dedup_vectors.check_vectors(_fake_run_sql(), _FAKE_FIXTURE)
+    assert report.passed == 2
+    assert report.failures == ()
 
 
-def test_generate_refuses_wrong_geos_series():
-    with pytest.raises(dedup_vectors.StepError, match="refusing"):
-        dedup_vectors.generate_fixture(_fake_run_sql("3.6.0", "3.13.0-CAPI-1.19.0"))
+def test_check_vectors_flags_digest_drift_per_function():
+    report = dedup_vectors.check_vectors(_fake_run_sql(digest="ff" * 32), _FAKE_FIXTURE)
+    assert report.passed == 1  # the error vector still raises GD001
+    assert [failure.name for failure in report.failures] == [
+        "pinned_hash [geoid_geom_hash_v2]",
+        "pinned_hash [wrapper]",
+    ]
+    assert report.failures[0].expected == "aa" * 32
+    assert report.failures[0].actual == "ff" * 32
 
 
-def test_generate_force_overrides_series_refusal():
-    fixture = dedup_vectors.generate_fixture(_fake_run_sql("3.4.0", "3.13.0"), force=True)
-    assert fixture["recipe_version"] == "v1"
-    assert len(fixture["vectors"]) == len(dedup_vectors.VECTOR_CASES)
+def test_check_vectors_flags_error_vector_with_wrong_sqlstate():
+    report = dedup_vectors.check_vectors(_fake_run_sql(error_sqlstate="XX000"), _FAKE_FIXTURE)
+    assert report.passed == 1
+    assert [failure.name for failure in report.failures] == ["pinned_error"]
+    assert "GD001" in report.failures[0].expected
 
 
-def test_generate_on_validated_series_cross_checks_same_as():
-    fixture = dedup_vectors.generate_fixture(_fake_run_sql("3.6.0", "3.11.4-CAPI-1.17.4"))
-    by_name = {vector["name"]: vector for vector in fixture["vectors"]}
-    for vector in fixture["vectors"]:
-        if vector["same_as"] is not None:
-            assert vector["sha256"] == by_name[vector["same_as"]]["sha256"]
+def test_check_vectors_flags_error_vector_that_hashes():
+    report = dedup_vectors.check_vectors(_fake_run_sql(error_sqlstate=None), _FAKE_FIXTURE)
+    assert report.passed == 1
+    assert [failure.name for failure in report.failures] == ["pinned_error"]
+    assert report.failures[0].actual.startswith("digest ")
 
 
-def test_generate_self_check_rejects_inconsistent_engine():
-    # An engine where same_as pairs do NOT collapse must be refused.
-    def run_sql(query: str, params: dict | None = None) -> str:
-        if "version" in query:
-            return "3.6.0" if "lib" in query else "3.11.4"
-        return hashlib.sha256(params["wkt"].encode()).hexdigest()
+def test_ensure_v2_deployed_hints_at_migrate():
+    with pytest.raises(dedup_vectors.StepError, match="geoid migrate"):
+        dedup_vectors.ensure_v2_deployed(lambda query, params=None: 0)
+    dedup_vectors.ensure_v2_deployed(lambda query, params=None: 1)  # deployed: no raise
 
-    with pytest.raises(dedup_vectors.StepError, match="self-check"):
-        dedup_vectors.generate_fixture(run_sql)
+
+# --- refuse_silent_regeneration ----------------------------------------------------
+
+
+def test_regeneration_onto_drifted_fixture_is_refused(tmp_path):
+    out = tmp_path / "fixture.json"
+    drifted = {
+        "recipe_version": "v2",
+        "vectors": [
+            {**vector, "sha256": "0" * 64 if vector["sha256"] else None} for vector in VECTORS
+        ],
+    }
+    out.write_text(json.dumps(drifted))
+    fresh = dedup_vectors.generate_fixture()
+    with pytest.raises(dedup_vectors.StepError, match="RECIPE-VERSION EVENT"):
+        dedup_vectors.refuse_silent_regeneration(fresh, out, force=False)
+    dedup_vectors.refuse_silent_regeneration(fresh, out, force=True)  # explicit opt-in
+
+
+def test_regeneration_over_identical_or_missing_fixture_is_allowed(tmp_path):
+    fresh = dedup_vectors.generate_fixture()
+    dedup_vectors.refuse_silent_regeneration(fresh, tmp_path / "absent.json", force=False)
+    same = tmp_path / "same.json"
+    same.write_text(json.dumps(fresh))
+    dedup_vectors.refuse_silent_regeneration(fresh, same, force=False)
 
 
 # --- CLI argument validation -------------------------------------------------------
 
 
 def test_cli_requires_exactly_one_mode():
-    assert dedup_vectors.main(["--dsn", "postgresql://x/y"]) == 2
-    assert dedup_vectors.main(["--check", "--generate", "--dsn", "postgresql://x/y"]) == 2
+    assert dedup_vectors.main([]) == 2
+    assert dedup_vectors.main(["--check", "--generate"]) == 2
+
+
+def test_cli_check_requires_a_dsn(monkeypatch):
+    monkeypatch.delenv("GEOID_DATABASE_URL", raising=False)
+    assert dedup_vectors.main(["--check"]) == 2
+
+
+def test_cli_generate_needs_no_database(tmp_path):
+    out = tmp_path / "generated.json"
+    assert dedup_vectors.main(["--generate", "--out", str(out)]) == 0
+    assert json.loads(out.read_text()) == FIXTURE

@@ -103,7 +103,7 @@ def _snapshot(pg, role: str, db: str, password: str = APP_PASSWORD) -> dict:
             WHERE NOT t.tgisinternal AND n.nspname = 'public'
         """).fetchone()[0]
         hash_fn = conn.execute(
-            "SELECT count(*) FROM pg_proc WHERE proname = 'geoid_geom_hash'"
+            "SELECT count(*) FROM pg_proc WHERE proname = 'geoid_geom_hash_v2'"
         ).fetchone()[0]
         recipe_stamp = conn.execute(
             "SELECT recipe_version FROM dedup_recipe_stamp ORDER BY id DESC LIMIT 1"
@@ -139,7 +139,7 @@ def test_fresh_bootstrap_then_idempotent_rerun(_postgis):
     assert state["extensions"] == ["pgcrypto", "postgis"]
     assert state["triggers"] >= 7
     assert state["hash_fn"] == 1
-    assert state["recipe_stamp"] == "v1"
+    assert state["recipe_stamp"] == "v2"
     assert state["catalogs"] >= 1 and state["collections"] >= 1
 
     rerun = _run_bootstrap(_postgis, role, db)

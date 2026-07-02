@@ -22,19 +22,19 @@ Steps (each idempotent):
     5. extensions    CREATE EXTENSION postgis, pgcrypto as the admin — on Cloud SQL
                      only `cloudsqlsuperuser` members may CREATE EXTENSION, so
                      migration 0001's IF NOT EXISTS then no-ops under the app role
-    6. parity        PostGIS 3.6.x / GEOS 3.11.x heads-up vs the Cloud SQL stack
-                     (informational only — step 7's digest check is the gate)
-    7. golden vectors  recompute the pinned dedup-hash corpus
-                     (scripts/data/dedup_golden_vectors_v1.json) with an inline
-                     copy of the recipe — works pre-migrate; strict digest drift
-                     joins the exit-3 path, advisory (ST_MakeValid-leg) only warns
-    8. privileges    assert the owner has CONNECT + public-schema CREATE (PG15+
+    6. privileges    assert the owner has CONNECT + public-schema CREATE (PG15+
                      grants these via pg_database_owner when ownership is right)
-    9. migrate       `geoid migrate` subprocess AS THE APP ROLE, so every table,
+    7. migrate       `geoid migrate` subprocess AS THE APP ROLE, so every table,
                      function and trigger is owned by it (--skip-migrate to skip)
-   10. seed          default catalog + reserved public collection (--skip-seed)
-   11. verify        connect as the app role (doubles as a credential check):
-                     alembic head, extensions, triggers, dedup function, recipe
+    8. golden vectors  recompute the pinned identity corpus
+                     (scripts/data/dedup_golden_vectors_v2.json) against the
+                     DEPLOYED geoid_geom_hash_v2 + wrapper — recipe v2 is
+                     engine-independent, so the check means "deployed function ≡
+                     Python reference"; any drift joins the exit-3 path. Runs
+                     AFTER migrate (the function must exist).
+    9. seed          default catalog + reserved public collection (--skip-seed)
+   10. verify        connect as the app role (doubles as a credential check):
+                     alembic head, extensions, triggers, identity function, recipe
                      stamp (migration 0003's dedup_recipe_stamp), seed rows
 
 Env:
@@ -68,10 +68,6 @@ from sqlalchemy.engine.url import make_url
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
 REQUIRED_EXTENSIONS = ("postgis", "pgcrypto")
-# The dedup hash (geoid_geom_hash → ST_Normalize) is validated against this stack;
-# a different GEOS series can canonicalize geometries differently → hash drift.
-EXPECTED_POSTGIS_SERIES = "3.6"
-EXPECTED_GEOS_SERIES = "3.11"
 # Migration 0001's user-trigger inventory: 3 on place (after_insert,
 # block_mutation, block_truncate) + 2×2 append-only guards on geoid_registry and
 # change_log. (No BEFORE INSERT hash trigger: the dedup geom_hash lives on
@@ -375,49 +371,6 @@ def ensure_extensions(conn: psycopg.Connection, cfg: BootstrapConfig) -> None:
         raise StepError(f"extensions failed to install: {sorted(missing)}")
 
 
-def _has_extension(conn: psycopg.Connection, name: str) -> bool:
-    return (
-        conn.execute("SELECT 1 FROM pg_extension WHERE extname = %s", (name,)).fetchone()
-        is not None
-    )
-
-
-def _series(version: str) -> str:
-    return ".".join(version.split(".")[:2])
-
-
-def check_postgis_parity(conn: psycopg.Connection) -> list[str]:
-    """Print an informational heads-up when the PostGIS/GEOS series differs from
-    the Cloud SQL production stack. NOT a gate — the golden-vector digest check
-    (check_hash_vectors) is authoritative. Returns the problems for callers that
-    want them, but main() no longer routes these to the exit-3 path (a version
-    string differs harmlessly when the STABLE hashes still match, e.g. GEOS 3.9.0)."""
-    print("→ PostGIS parity")
-    lib = conn.execute("SELECT postgis_lib_version()").fetchone()[0]
-    geos = conn.execute("SELECT postgis_geos_version()").fetchone()[0]
-    full = conn.execute("SELECT postgis_full_version()").fetchone()[0]
-    print(f"  {full}")
-    problems = []
-    if _series(lib) != EXPECTED_POSTGIS_SERIES:
-        problems.append(
-            f"PostGIS {lib} is not {EXPECTED_POSTGIS_SERIES}.x — the dedup hash is "
-            "validated on the Cloud SQL stack 3.6.0; confirm hash parity before loading any data"
-        )
-    if _series(geos.split("-")[0]) != EXPECTED_GEOS_SERIES:
-        problems.append(
-            f"GEOS {geos} is not {EXPECTED_GEOS_SERIES}.x — ST_Normalize (the dedup "
-            "canonicalizer) is GEOS-bound; confirm hash parity before loading any data"
-        )
-    for problem in problems:
-        print(f"  ⚠ {problem}")
-    if not problems:
-        print(
-            f"  ✓ PostGIS {lib} / GEOS {geos.split('-')[0]} "
-            f"(expected {EXPECTED_POSTGIS_SERIES}.x / {EXPECTED_GEOS_SERIES}.x)"
-        )
-    return problems
-
-
 def _load_dedup_vectors():
     """Load scripts/dedup_vectors.py as a module (scripts/ is not a package)."""
     import importlib.util
@@ -433,30 +386,25 @@ def _load_dedup_vectors():
 
 
 def check_hash_vectors(conn: psycopg.Connection) -> list[str]:
-    """Recompute the pinned golden-vector corpus with an inline copy of the dedup
-    recipe (it must work pre-migrate, when geoid_geom_hash() may not exist yet).
-    Strict drift joins the exit-3 path; advisory (ST_MakeValid-leg) drift only
-    warns — stored rows are always valid, so it can never change a stored hash."""
-    print("→ dedup golden vectors")
+    """Recompute the pinned golden-vector corpus against the DEPLOYED identity
+    recipe (``geoid_geom_hash_v2`` + the ``geoid_geom_hash_default`` wrapper).
+    Recipe v2 is engine-independent, so any drift means the deployed SQL does not
+    match the Python reference — never an engine-version artifact. Runs AFTER
+    migrate (the function must exist)."""
+    print("→ identity golden vectors (deployed function ≡ Python reference)")
     vectors = _load_dedup_vectors()
     run_sql = vectors._psycopg_run_sql(conn)
     try:
+        vectors.ensure_v2_deployed(run_sql)
         fixture = vectors.load_fixture()
         report = vectors.check_vectors(run_sql, fixture)
     except vectors.StepError as exc:
         raise StepError(str(exc)) from exc
-    for failure in report.advisory_failures:
-        print(
-            f"  ⚠ advisory vector {failure.name!r} drifted "
-            f"(expected {failure.expected}, got {failure.actual}) — "
-            "ST_MakeValid leg only; stored hashes are unaffected"
-        )
     problems = [
         f"golden vector {failure.name!r} drifted — expected {failure.expected}, got "
-        f"{failure.actual}; stored hashes are stale on this stack: freeze writes and run the "
-        "operator-only geom_hash rehash (README › Destructive operations; runbook: "
-        "local-docs/DEPLOYMENT.md §14)"
-        for failure in report.strict_failures
+        f"{failure.actual}; the deployed SQL recipe does not match the Python reference "
+        "(migration 0008 vs domain/geometry_identity drift) — do NOT load data"
+        for failure in report.failures
     ]
     for problem in problems:
         print(f"  ⚠ {problem}")
@@ -570,7 +518,7 @@ def verify(cfg: BootstrapConfig) -> list[str]:
             WHERE NOT t.tgisinternal AND n.nspname = 'public'
         """,
         )
-        hash_fn = _scalar(conn, "SELECT count(*) FROM pg_proc WHERE proname = 'geoid_geom_hash'")
+        hash_fn = _scalar(conn, "SELECT count(*) FROM pg_proc WHERE proname = 'geoid_geom_hash_v2'")
         recipe_version = _scalar(
             conn, "SELECT recipe_version FROM dedup_recipe_stamp ORDER BY id DESC LIMIT 1"
         )
@@ -604,18 +552,18 @@ def verify(cfg: BootstrapConfig) -> list[str]:
             f"only {triggers} user triggers — migration 0001 creates {EXPECTED_USER_TRIGGERS}",
         ),
         (
-            "geoid_geom_hash()",
+            "geoid_geom_hash_v2()",
             "present" if hash_fn else "missing",
             bool(hash_fn),
-            "dedup function geoid_geom_hash is missing",
+            "identity function geoid_geom_hash_v2 is missing — migrate to 0008+",
         ),
         (
             "recipe stamp",
             recipe_version or "<absent>",
-            recipe_version == "v1",
-            f"latest dedup_recipe_stamp.recipe_version is {recipe_version!r}, expected 'v1' "
-            "— migrate to 0003+ (and re-stamp via the operator-only rehash procedure, "
-            "README › Destructive operations, if the recipe ever changed)",
+            recipe_version == "v2",
+            f"latest dedup_recipe_stamp.recipe_version is {recipe_version!r}, expected 'v2' "
+            "— migrate to 0008 (the identity-recipe-v2 migration; it refuses a non-empty "
+            "registry — see the re-mint runbook, local-docs/DEPLOYMENT.md §15)",
         ),
         (
             "catalogs / collections",
@@ -682,25 +630,15 @@ def main(argv: list[str] | None = None) -> int:
         drift: list[str] = []
         with _connect(cfg, dbname=cfg.app_db) as conn:
             ensure_extensions(conn, cfg)
-            if _has_extension(conn, "postgis"):
-                # Informational only: a version-string mismatch is a coarse proxy.
-                # The golden-vector digest check below is the authoritative gate
-                # (strict drift → exit 3), so a non-production engine whose STABLE
-                # hashes still match (e.g. the local GEOS-3.9.0 stack) is not flagged.
-                check_postgis_parity(conn)
-                if _has_extension(conn, "pgcrypto"):
-                    drift += check_hash_vectors(conn)
             if role_existed or not cfg.dry_run:
                 check_owner_privileges(conn, cfg)
 
         if cfg.dry_run:
             print(
                 f"\n[dry-run] would then run `geoid migrate` (as {cfg.app_role!r}), "
+                "check the identity golden vectors against the deployed recipe, "
                 "seed the public collection, and verify"
             )
-            if drift:
-                print("⚠ dry-run found drift (see above)")
-                return 3
             print("✓ dry-run complete (nothing mutated)")
             return 0
 
@@ -708,6 +646,13 @@ def main(argv: list[str] | None = None) -> int:
             print("→ migrations skipped (--skip-migrate)")
         else:
             run_migrations(cfg)
+        # The vectors check validates the DEPLOYED geoid_geom_hash_v2 (recipe v2 is
+        # engine-independent), so it can only run once migrate has created it.
+        if cfg.skip_migrate:
+            print("→ identity golden vectors skipped (--skip-migrate: function not deployed)")
+        else:
+            with _connect(cfg, dbname=cfg.app_db) as conn:
+                drift += check_hash_vectors(conn)
         if cfg.skip_seed:
             print("→ seed skipped (--skip-seed)")
         else:

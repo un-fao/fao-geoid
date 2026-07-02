@@ -22,6 +22,8 @@ EXPECTED_USER_TRIGGERS = 7
 
 
 async def test_initial_stamp_row_exists_with_v1(session):
+    # The stamp table is append-only history: the v1 rows survive the recipe-v2
+    # migration untouched.
     row = (
         await session.execute(
             text(
@@ -34,6 +36,22 @@ async def test_initial_stamp_row_exists_with_v1(session):
     assert row.stamped_by == "migration:0003"
     assert "initial stamp" in row.note
     assert row.stamped_at is not None
+
+
+async def test_latest_stamp_row_is_recipe_v2(session):
+    # Migration 0008 (identity recipe v2) appends the current-recipe row: the
+    # LATEST row answers "which recipe are the stored hashes valid under?".
+    row = (
+        await session.execute(
+            text(
+                "SELECT recipe_version, stamped_by, note "
+                "FROM dedup_recipe_stamp ORDER BY id DESC LIMIT 1"
+            )
+        )
+    ).one()
+    assert row.recipe_version == "v2"
+    assert row.stamped_by == "migration:0008"
+    assert "engine-independent" in row.note
 
 
 async def test_stamp_versions_match_live_stack(session):

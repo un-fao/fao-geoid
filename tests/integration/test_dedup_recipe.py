@@ -1,11 +1,11 @@
 """The dedup-recipe permutation suite — the one place dedup can silently fail.
 
-Tests the authoritative ``geoid_geom_hash`` SQL function directly (the same
-function the arbiter insert and the incumbent-lookup use, via the
-``geoid_geom_hash_default`` wrapper), across the
-canonicalization permutations: ring-start rotation,
-winding direction, hole order, part order, and sub-grid float jitter must all
-collapse to the SAME hash; genuinely different geometry must NOT.
+Tests the authoritative ``geoid_geom_hash_default`` SQL wrapper directly (the
+one entry point the arbiter insert and the incumbent-lookup use; since migration
+0008 it is the v2 integer-lattice recipe), across the canonicalization
+permutations: ring-start rotation, winding direction, hole order, part order,
+and sub-grid float jitter must all collapse to the SAME hash; genuinely
+different geometry must NOT.
 """
 
 from __future__ import annotations
@@ -15,12 +15,12 @@ from sqlalchemy import text
 
 pytestmark = pytest.mark.integration
 
-_DEFAULT_GRID = 1e-7  # default: ~1cm/vertex (exact-match semantics)
 
-
-async def _hash(session, wkt: str, grid: float = _DEFAULT_GRID) -> str:
-    stmt = text("SELECT encode(geoid_geom_hash(ST_GeomFromText(:wkt, 4326), :grid), 'hex')")
-    return (await session.execute(stmt, {"wkt": wkt, "grid": grid})).scalar_one()
+async def _hash(session, wkt: str) -> str:
+    # The v1 geoid_geom_hash(g, grid) is dropped (0008): the lattice scale is a
+    # frozen recipe constant, not a parameter — the wrapper IS the recipe.
+    stmt = text("SELECT encode(geoid_geom_hash_default(ST_GeomFromText(:wkt, 4326)), 'hex')")
+    return (await session.execute(stmt, {"wkt": wkt})).scalar_one()
 
 
 async def test_ring_start_rotation_yields_same_hash(session):

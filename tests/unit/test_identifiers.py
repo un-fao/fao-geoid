@@ -150,8 +150,9 @@ def test_explicit_ts_ms_bypasses_monotonic_state(monkeypatch):
 # geoid_from_geom_hash MUST stay byte-identical to the SQL function of the same name
 # (migration 0004) — the Python and DB derivations are the same identity.
 
-# SHA-256 of the canonical baseline_unit_square at grid 1e-7 (golden-vector corpus).
-_BASELINE_UNIT_SQUARE_SHA256 = "c624e28423aaac2485c0cda6e2ecab95fba795d9b3ff32ffce582ec9868a24c4"
+# SHA-256 of the canonical baseline_unit_square under recipe v2 (the golden-vector
+# corpus, scripts/data/dedup_golden_vectors_v2.json).
+_BASELINE_UNIT_SQUARE_SHA256 = "169dc6c3af8c30d4a0b3436d1bbbde865626ff1d7e48195b14fcf563dc4663c1"
 
 
 def test_geoid_from_geom_hash_is_version_8_and_rfc4122_variant():
@@ -169,7 +170,7 @@ def test_geoid_from_geom_hash_known_answer():
     # Pins the exact byte layout (first 16 bytes of the SHA-256, version=8 + variant
     # stamped) so any change to the stamping surfaces as identity drift.
     geoid = identifiers.geoid_from_geom_hash(bytes.fromhex(_BASELINE_UNIT_SQUARE_SHA256))
-    assert str(geoid) == "c624e284-23aa-8c24-85c0-cda6e2ecab95"
+    assert str(geoid) == "169dc6c3-af8c-80d4-a0b3-436d1bbbde86"
 
 
 def test_geoid_from_geom_hash_distinct_digests_give_distinct_geoids():

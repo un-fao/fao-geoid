@@ -5,9 +5,10 @@
   pins the schema-level rejection empirically (ADR-006).
 - ``ck_collection_grant_email_normalized``: a write bypassing ``grant_repo._norm``
   cannot create case/whitespace-duplicate grants (M4).
-- The four identity/dedup functions are PARALLEL SAFE with a pinned search_path;
-  their BODIES are unchanged — the golden-vector + deterministic-geoid suites prove
-  the output bytes are untouched (M6/L13).
+- EVERY geoid_* SQL function (the 0007 four, minus the v1 hash 0008 dropped, plus
+  the five v2 recipe functions) is PARALLEL SAFE with a pinned search_path — the
+  set is asserted explicitly so a new function can't ship without the attributes;
+  the golden-vector + deterministic-geoid suites pin the output bytes (M6/L13).
 - The dead 0002 paging index is gone (M17).
 - The engine runs READ COMMITTED — the stated dependency of
   ``place_repo._resolve_incumbent_slug``'s bounded retry (L13).
@@ -24,12 +25,19 @@ from geoid.repositories._pg_errors import pg_fields
 
 pytestmark = pytest.mark.integration
 
-_IDENTITY_FUNCTIONS = (
-    "geoid_geom_hash",
+# The complete expected inventory of identity/dedup SQL functions after 0008:
+# the 0004/0007 stamping pair + the flipped wrapper + the five v2 recipe
+# functions. The v1 geoid_geom_hash(geometry, float8) is dropped by 0008.
+_IDENTITY_FUNCTIONS = {
     "geoid_geom_hash_default",
     "geoid_from_geom_hash",
     "geoid_id_default",
-)
+    "geoid_quantize_v2",
+    "geoid_canon_ring_v2",
+    "geoid_canon_polygon_body_v2",
+    "geoid_canonical_bytes_v2",
+    "geoid_geom_hash_v2",
+}
 
 
 async def _public_collection_id(session):
@@ -74,16 +82,20 @@ async def test_denormalized_grant_email_violates_the_check(session):
 
 
 async def test_identity_functions_are_parallel_safe_with_pinned_search_path(session):
+    # Enumerate every geoid_* non-trigger function actually deployed (robust to
+    # recipe-set changes) and assert it is exactly the expected inventory, all
+    # PARALLEL SAFE with a pinned search_path.
     rows = (
         await session.execute(
             text(
-                "SELECT proname, proparallel::text, proconfig FROM pg_proc "
-                "WHERE proname = ANY(:names)"
-            ),
-            {"names": list(_IDENTITY_FUNCTIONS)},
+                "SELECT p.proname, p.proparallel::text, p.proconfig "
+                "FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace "
+                "WHERE n.nspname = 'public' AND p.proname LIKE 'geoid%' "
+                "AND p.prorettype <> 'trigger'::regtype"
+            )
         )
     ).all()
-    assert {row[0] for row in rows} == set(_IDENTITY_FUNCTIONS)
+    assert {row[0] for row in rows} == _IDENTITY_FUNCTIONS
     for name, parallel, config in rows:
         assert parallel == "s", f"{name} is not PARALLEL SAFE"
         assert config and any("search_path=" in entry for entry in config), (
