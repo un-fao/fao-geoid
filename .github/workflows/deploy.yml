@@ -186,12 +186,13 @@ jobs:
             --project "$PROJECT" \
             --wait
 
-      # Golden-vector identity canary: recompute the pinned dedup/identity digests
-      # against the LIVE database engine (Cloud SQL). Post-0004 the recipe is
-      # identity-load-bearing, and Google can bump GEOS in a maintenance window that
-      # CI structurally cannot see (CI runs GEOS 3.9.0, prod 3.11.4) — strict drift
-      # (exit 3) fails the deploy HERE, before the service ships. The script falls
-      # back to GEOID_DATABASE_URL (asyncpg scheme normalized) when --dsn is absent.
+      # Golden-vector identity canary: recipe v2 (migration 0008, ADR-007) is
+      # engine-independent, so this asserts the DEPLOYED geoid_geom_hash_v2 (and the
+      # geoid_geom_hash_default wrapper the arbiter uses) is byte-identical to the
+      # pure-Python reference that generated the corpus — any drift (exit 3) fails
+      # the deploy HERE, before the service ships. Runs after migrate (the function
+      # must exist). The script falls back to GEOID_DATABASE_URL (asyncpg scheme
+      # normalized) when --dsn is absent.
       - name: Golden-vector identity canary (Cloud Run Job)
         run: |
           gcloud run jobs deploy "${SERVICE}-vectors-check" \

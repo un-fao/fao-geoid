@@ -55,30 +55,39 @@ geometry yields the same geoid on every deployment. One geometry → one geoid a
 POSTing an identical geometry fails with **409** and the body carries the **incumbent geoid** (plus its
 uri and collection).
 
-## The dedup recipe (load-bearing correctness)
+## The identity recipe (load-bearing correctness)
 
 Computed inside the single arbiter-CTE insert (`place_repo.insert_place`) that both the single and bulk
-write paths share, via the one grid-pinned `geoid_geom_hash_default` SQL function, so the hash can never
-drift between paths (and, post-migration 0004, the geoid itself is derived from it):
+write paths share, via the one `geoid_geom_hash_default` SQL wrapper, so the hash can never drift
+between paths (and, post-migration 0004, the geoid itself is derived from it). Since migration 0008
+(**recipe v2**, [ADR-007](docs/adr/ADR-007-identity-recipe-v2.md)) the recipe is an integer-lattice
+canonicalization GeoID fully owns — **engine-independent**, zero GEOS/PostGIS calls in the identity
+bytes:
 
 ```
-geom_hash = sha256( ST_AsBinary(
-              ST_Normalize( ST_ReducePrecision( ST_MakeValid(geom), grid ) ),
-              'NDR' ) )
+q            = round_half_even(coord × 10⁷)         one IEEE-754 multiply → int64 lattice index
+canonical    = 0x02 ‖ type_tag ‖ counts + int64 pairs (big-endian), with rings CCW,
+               min-vertex-rotated, coincident runs collapsed, holes/parts byte-sorted
+geom_hash    = sha256(canonical)                     hash int64 indices, never floats
 ```
 
 - **SHA-256** — a collision would assign the wrong geoid to a *different* place.
-- **`ST_ReducePrecision(grid)`** — coordinates that round to the same `grid` cell collapse to one hash
-  (`grid` is `1e-7` ≈ 1 cm — ONE global value, pinned as the trigger literal in the schema migration;
-  `GEOID_DEDUP_GRID_DEFAULT` mirrors it for the conflict lookup, and retunes are migration events).
-  Note: this snaps to a fixed grid, so two points a hair apart but straddling a cell boundary can still
-  round to *different* cells — it neutralizes float jitter, not all sub-cm differences.
-- **`ST_Normalize`** — canonical ring / part / hole order.
-- **`'NDR'` endianness pinned** — so a country instance's hash matches central at federation sync.
+- **The 1e-7° lattice (~1 cm/vertex)** — coordinates that quantize to the same cell collapse to one
+  hash (`GEOID_DEDUP_GRID_DEFAULT` documents the cell size; the SCALE literal is pinned in migration
+  0008 and mirrored by `domain/geometry_identity.py`; retunes are identity-version migration events).
+  Note: this snaps to a fixed lattice, so two points a hair apart but straddling a cell boundary can
+  still land in *different* cells — it neutralizes float jitter, not all sub-cm differences.
+- **Structure canonicalized by frozen spec constants** (not GEOS): ring rotation/winding, hole and
+  multipart order, multipoint order — the same geometry serialized any way yields one hash.
+- **Degeneracy is rejected, never merged**: a valid geometry that collapses on the lattice (a sliver
+  thinner than a cell, a zero-area bowtie) answers **422** — an identity service must not silently
+  merge or vanish distinct submissions.
+- **Big-endian, collation-free serialization** — a country instance's hash matches central at
+  federation sync, on any engine build.
 
-A single SQL function `geoid_geom_hash(geom, grid)` — pinned to the global grid by the
-`geoid_geom_hash_default(geom)` wrapper — is the *one* definition, used by both the arbiter-CTE insert
-and the incumbent-lookup query.
+The SQL functions (migration 0008) and the pure-Python reference (`geoid.domain.geometry_identity`)
+are pinned byte-identical by the golden-vector corpus (`scripts/data/dedup_golden_vectors_v2.json`) on
+every CI run and by the post-deploy canary (`scripts/dedup_vectors.py --check`).
 
 ## Quickstart (uv)
 
@@ -132,17 +141,15 @@ These are **not shipped as runnable scripts** — they permanently alter the app
 must only be run by a DB admin (`cloudsqlsuperuser`) over the Cloud SQL Auth Proxy. The tooling lives
 in `local-scripts/` (git-ignored, not in the image); the full runbook is `local-docs/DEPLOYMENT.md §14`.
 
-**1. geom_hash rehash / drift-recovery.** If `bootstrap_db.py`'s golden-vector parity gate (or
-`scripts/dedup_vectors.py --check`) reports drift, the stored `geoid_registry.geom_hash` values were
-computed on a PostGIS/GEOS stack that no longer matches. Recovery = `local-scripts/rehash_geom_hashes.py`,
-which recomputes them from `place.geom` in one audited transaction.
-
-> ⚠️ **Guard:** since migration `0004` the geoid is *derived from* `geom_hash`, so the recipe is
-> **identity-load-bearing and frozen**. Recomputing `geom_hash` on a DB that already holds real geoids
-> would **re-mint every identity**. The script refuses on a deterministic-geoid DB unless forced; the
-> only safe time to run it is to repair drift detected **before any data is loaded** on a new stack.
-> A genuine recipe/GEOS change is an *identity-version event*, not a rehash — do not load data on a
-> failing parity gate.
+**1. geom_hash rehash / drift-recovery — HISTORICAL (v1-era).** Under recipe v1 the hash was
+GEOS-bound, and `local-scripts/rehash_geom_hashes.py` existed to recompute stored hashes after an
+engine upgrade. Under recipe v2 (migration 0008, ADR-007) the hash is **engine-independent**, so
+engine-drift rehashing has no trigger anymore — and the script's own guard fails fast post-0004/0008
+(the geoid is *derived from* `geom_hash`; recomputing would re-mint every identity). A failing
+golden-vector check now means the deployed SQL diverged from the Python reference (a code bug or an
+unapplied migration), never an engine artifact — do not load data on a failing check. A deliberate
+recipe change is an **identity-version event** with its own migration and the re-mint runbook
+(`local-docs/DEPLOYMENT.md §15`), never a rehash.
 
 **2. DB teardown wipe** (reset data while keeping schema + the seeded `public` collection). The
 `place`/`geoid_registry`/`change_log` triggers block ordinary `DELETE`/`TRUNCATE`. On managed

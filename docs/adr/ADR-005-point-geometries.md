@@ -1,6 +1,9 @@
 # ADR-005 — Accept Point and MultiPoint geometries
 
-- **Status:** Accepted — 2026-06-24
+- **Status:** Accepted — 2026-06-24. Superseded in part by
+  [ADR-007](ADR-007-identity-recipe-v2.md) (recipe v2, 2026-07-02): the hash under the geoid is now
+  the engine-independent integer-lattice recipe, not the frozen v1 SQL cited below — the
+  point/multipoint *support* decision stands unchanged.
 - **Extends:** ADR-004 (deterministic geoid; recipe frozen)
 - **Implemented by:** migration `0005_support_point_geometries`, `schemas/place.SupportedGeometry`,
   `models/place` CHECK constraints, `repositories/place_repo._SUPPORTED_GEOM_TYPES`

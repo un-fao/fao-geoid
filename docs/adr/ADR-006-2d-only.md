@@ -1,6 +1,9 @@
 # ADR-006 — Reject 3D (Z) coordinates at the validator: GeoID is 2D-only
 
-- **Status:** Accepted — 2026-06-24
+- **Status:** Accepted — 2026-06-24. Superseded in part by
+  [ADR-007](ADR-007-identity-recipe-v2.md) (recipe v2, 2026-07-02): the GEOS-bound recipe described
+  in the Context below is replaced by the engine-independent integer-lattice recipe — the 2D-only
+  rule itself stands unchanged (and ADR-007's degeneracy rejection reuses its rationale).
 - **Extends:** ADR-004 (deterministic geoid; recipe frozen),
   [ADR-005](ADR-005-point-geometries.md) (point/multipoint support)
 - **Implemented by:** `schemas/place._has_z` + the `_validate_lonlat_bounds` 2D-only check

@@ -6,6 +6,24 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed — BREAKING
+- **Identity recipe v2 (migration 0008, ADR-007): every geoid re-mints.** The
+  geometry fingerprint the geoid is derived from is no longer computed by the
+  database's GEOS library (whose builds provably disagree with each other); it is
+  an engine-independent integer-lattice canonicalization owned by GeoID — the
+  same geometry now yields the same geoid on *any* engine, build, or deployment.
+  Geoids minted under the previous recipe are void (the registries were reset per
+  the re-mint runbook). Dedup semantics are unchanged (same ~1cm exact-match
+  precision, same 409-with-incumbent contract).
+- **New:** a geometry that *degenerates at the identity precision* — e.g. a
+  polygon sliver thinner than ~1cm, or a zero-area bowtie — is now rejected with
+  `422 "geometry degenerates at the identity precision (1e-7°)"` (one
+  `schema_invalid` reject on the bulk route) instead of being silently merged or
+  dropped by the old repair step.
+- The golden-vector corpus is regenerated as v2 and is now verifiable without a
+  database; the post-deploy canary asserts the deployed SQL recipe is
+  byte-identical to the pure-Python reference.
+
 ### Added
 - **Hybrid authentication** — Keycloak OIDC (RS256 JWT) validated alongside the
   static admin token, with no flag day: the static token keeps working unchanged.
