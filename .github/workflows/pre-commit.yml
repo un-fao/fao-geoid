@@ -2,7 +2,7 @@ name: pre-commit
 on:
   pull_request:
   push:
-    branches: [main]
+    branches: [main, review]
 
 # Cancel a superseded lint run when rapid pushes stack up (mirrors ci.yml).
 concurrency:

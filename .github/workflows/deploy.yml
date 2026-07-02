@@ -10,6 +10,7 @@ on:
     paths:
       - "src/**"
       - "migrations/**"
+      - "scripts/**"   # baked into the image; the canary + smoke jobs run from it
       - "Dockerfile"
       - "cloudbuild.yaml"
       - "pyproject.toml"

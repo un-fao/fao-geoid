@@ -1,8 +1,10 @@
 name: CI
 
+# review is included so test-/scripts-only pushes (outside deploy.yml's path
+# filter, which embeds its own lint+test) still get a CI run.
 on:
   push:
-    branches: [main]
+    branches: [main, review]
   pull_request:
 
 # Lint/format is owned by pre-commit.yml; this workflow is the test + migration gate.
