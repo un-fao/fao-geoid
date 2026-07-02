@@ -11,6 +11,7 @@ from geojson_pydantic.geometries import MultiPoint, MultiPolygon, Point, Polygon
 from pydantic import BaseModel, Field, model_validator
 
 from geoid.domain.geometry_format import decode_geometry
+from geoid.domain.geometry_identity import DegenerateGeometryError, canonical_bytes
 
 # Accepted geometry types. Lines and GeometryCollection are NOT accepted and are
 # rejected at the schema boundary (422).
@@ -95,6 +96,20 @@ class PlaceCreate(Feature[SupportedGeometry, dict[str, Any] | None]):
                     f"(expected lon∈[{_LON_MIN},{_LON_MAX}], lat∈[{_LAT_MIN},{_LAT_MAX}]); "
                     "GeoJSON is lon,lat — check for a swapped pair"
                 )
+        # Identity-lattice degeneracy (recipe v2, ADR-007): a geometry whose ring
+        # collapses below 3 distinct 1e-7-lattice vertices (or to zero lattice
+        # area) has no v2 identity — reject with a clear 422 here (uniform for
+        # GeoJSON + WKT, single + bulk) rather than let the DB backstop (GD001)
+        # answer. Same rationale as the Z rejection above (ADR-006): an identity
+        # service must not silently merge or vanish distinct submissions.
+        try:
+            canonical_bytes({"type": self.geometry.type, "coordinates": self.geometry.coordinates})
+        except DegenerateGeometryError as exc:
+            raise ValueError(str(exc)) from exc
+        except ValueError:
+            # Non-degeneracy complaints (unsupported type, structure) are already
+            # owned by the discriminator/earlier checks — never duplicate them here.
+            pass
         return self
 
     @property

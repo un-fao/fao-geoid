@@ -121,15 +121,17 @@ async def test_bulk_external_id_conflict_against_existing(client):
 
 
 async def test_bulk_invalid_geometry_rejected_batch_continues(client):
-    # A self-intersecting "bowtie" passes the PlaceCreate schema (valid RFC 7946
-    # structure) but fails the ST_IsValid DB CHECK -> invalid_geometry, and the
-    # surrounding valid features still mint.
-    bowtie = {
+    # A self-intersecting polygon with NONZERO lattice area passes the PlaceCreate
+    # schema (valid RFC 7946 structure; not lattice-degenerate, so the v2 pre-check
+    # lets it through) but fails the ST_IsValid DB CHECK -> invalid_geometry, and
+    # the surrounding valid features still mint. (A zero-area bowtie now rejects
+    # earlier at the schema as identity-degenerate — test_identity_v2_degeneracy.)
+    crossed = {
         "type": "Feature",
-        "geometry": {"type": "Polygon", "coordinates": [[[0, 0], [2, 2], [2, 0], [0, 2], [0, 0]]]},
+        "geometry": {"type": "Polygon", "coordinates": [[[0, 0], [4, 0], [0, 3], [3, 3], [0, 0]]]},
         "properties": {},
     }
-    resp = await client.post(_BULK, json=_fc(_square(10, 10), bowtie, _square(20, 20)))
+    resp = await client.post(_BULK, json=_fc(_square(10, 10), crossed, _square(20, 20)))
     assert resp.status_code == 200
     body = resp.json()
     assert body["summary"] == {"received": 3, "accepted": 2, "rejected": 1}

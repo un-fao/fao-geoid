@@ -108,12 +108,15 @@ async def test_external_id_conflict_returns_409_with_constraint(
 
 
 async def test_invalid_self_intersecting_polygon_returns_422_with_reason(client):
-    bowtie = {
+    # Nonzero lattice area, so the v2 degeneracy pre-check passes it and the DB
+    # ST_IsValid CHECK answers (zero-area bowties reject earlier at the schema —
+    # test_identity_v2_degeneracy pins that path).
+    crossed = {
         "type": "Feature",
-        "geometry": {"type": "Polygon", "coordinates": [[[0, 0], [2, 2], [2, 0], [0, 2], [0, 0]]]},
+        "geometry": {"type": "Polygon", "coordinates": [[[0, 0], [4, 0], [0, 3], [3, 3], [0, 0]]]},
         "properties": {},
     }
-    resp = await client.post("/collections/public/items", json=bowtie)
+    resp = await client.post("/collections/public/items", json=crossed)
     assert resp.status_code == 422
     assert "reason" in resp.json()
 

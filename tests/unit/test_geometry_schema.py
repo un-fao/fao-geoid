@@ -340,3 +340,41 @@ def test_rejects_wkt_point_zm():
 )
 def test_has_z_detects_any_3d_leaf(coordinates, expected):
     assert _has_z(coordinates) is expected
+
+
+# --- Identity-lattice degeneracy: rejected at the schema boundary (ADR-007) ---
+
+
+def _polygon_feature(coords) -> dict:
+    return {
+        "type": "Feature",
+        "geometry": {"type": "Polygon", "coordinates": coords},
+        "properties": {},
+    }
+
+
+def test_rejects_geojson_polygon_that_degenerates_on_the_lattice():
+    # A valid sub-cell sliver collapses below 3 distinct 1e-7-lattice vertices:
+    # it has no v2 identity, so the schema rejects it with a clear 422 message.
+    with pytest.raises(ValidationError, match="identity precision"):
+        PlaceCreate.model_validate(
+            _polygon_feature([[[0, 0], [1, 0], [1, 1e-8], [0, 1e-8], [0, 0]]])
+        )
+
+
+def test_rejects_geojson_polygon_with_zero_lattice_area():
+    with pytest.raises(ValidationError, match="identity precision"):
+        PlaceCreate.model_validate(_polygon_feature([[[0, 0], [1, 0], [2, 1e-8], [0, 0]]]))
+
+
+def test_rejects_wkt_polygon_that_degenerates_on_the_lattice():
+    # Uniform for the WKT vendor extension: the same sliver as WKT text.
+    with pytest.raises(ValidationError, match="identity precision"):
+        PlaceCreate.model_validate(_wkt_feature("POLYGON((0 0,1 0,1 0.00000001,0 0.00000001,0 0))"))
+
+
+def test_accepts_geometry_comfortably_above_the_lattice():
+    # The pre-check must not reject ordinary geometry (the whole valid corpus
+    # is separately pinned by the golden vectors).
+    feature = PlaceCreate.model_validate(_VALID_POLYGON)
+    assert feature.geometry.type == "Polygon"
