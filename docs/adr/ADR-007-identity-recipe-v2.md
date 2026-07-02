@@ -1,9 +1,9 @@
 # ADR-007 — Identity recipe v2: engine-independent integer-lattice canonicalization
 
 - **Status:** Accepted — 2026-07-02 (senior-review finding H5; sanctioned identity-version event)
-- **Supersedes:** ADR-004 (deterministic geoid; *recipe frozen for all time*) **in part** — the
-  UUIDv8 derivation and the freeze *discipline* stand; the frozen v1 *recipe body* is replaced,
-  executed as the identity-version event ADR-004 itself defined
+- **Supersedes:** [ADR-004](ADR-004-deterministic-geoid.md) (deterministic geoid; *recipe frozen
+  for all time*) **in part** — the UUIDv8 derivation and the freeze *discipline* stand; the frozen
+  v1 *recipe body* is replaced, executed as the identity-version event ADR-004 itself defined
 - **Extends:** [ADR-005](ADR-005-point-geometries.md) (point/multipoint),
   [ADR-006](ADR-006-2d-only.md) (2D-only; the degeneracy REJECT below reuses its rationale)
 - **Implemented by:** migration `0008_identity_recipe_v2` (SQL) + `domain/geometry_identity.py`
