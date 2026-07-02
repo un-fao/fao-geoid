@@ -174,8 +174,7 @@ ALTER TABLE change_log     ENABLE TRIGGER USER;  -- keeps catalog/collection see
 
 ## Status
 
-Phase 1 / Release 1. **Authenticated access is live** (1.2, done): hybrid Keycloak
-OIDC + a static admin token, with per-collection owner/editor/viewer grants — see
-[`local-scripts/docs/auth.html`](local-scripts/docs/auth.html). **Synchronous bulk write is live**
-(1.3, done): `POST /collections/{id}/items/bulk`. Remaining roadmap: 2 open-source release, 3
-standalone country instances + federation.
+**Authenticated access is live**: hybrid Keycloak OIDC + a static admin token, with per-collection
+owner/editor/viewer grants — see [`local-scripts/docs/auth.html`](local-scripts/docs/auth.html).
+**Synchronous bulk write is live**: `POST /collections/{id}/items/bulk`. Planned next: an
+open-source release, and standalone country instances with federation.
