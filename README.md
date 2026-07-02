@@ -174,7 +174,8 @@ ALTER TABLE change_log     ENABLE TRIGGER USER;  -- keeps catalog/collection see
 
 ## Status
 
-Phase 1 / Release 1. Authenticated RBAC is a Release-1 **stretch goal**, gated on
-FAO's unified authentication service — until then a temporary static admin token gates
-the management surface. See the implementation plan for the full roadmap (1.2 authenticated RBAC, 1.3
-bulk, 2 open-source release, 3 standalone country instances + federation).
+Phase 1 / Release 1. **Authenticated access is live** (1.2, done): hybrid Keycloak
+OIDC + a static admin token, with per-collection owner/editor/viewer grants — see
+[`local-scripts/docs/auth.html`](local-scripts/docs/auth.html). **Synchronous bulk write is live**
+(1.3, done): `POST /collections/{id}/items/bulk`. Remaining roadmap: 2 open-source release, 3
+standalone country instances + federation.
