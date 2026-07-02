@@ -48,9 +48,7 @@ def _constructed_sliver() -> PlaceCreate:
     """A degenerate feature built WITHOUT validation (model_construct), so it
     reaches the DB and exercises the GD001 backstop the schema normally hides."""
     geometry = Polygon.model_construct(type="Polygon", coordinates=_SLIVER_COORDS)
-    return PlaceCreate.model_construct(
-        type="Feature", geometry=geometry, properties={}, id=None
-    )
+    return PlaceCreate.model_construct(type="Feature", geometry=geometry, properties={}, id=None)
 
 
 async def _public_collection(session) -> Collection:

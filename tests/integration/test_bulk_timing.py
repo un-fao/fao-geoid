@@ -34,9 +34,7 @@ def _distinct_square(i: int) -> dict:
         "type": "Feature",
         "geometry": {
             "type": "Polygon",
-            "coordinates": [
-                [[x, y], [x + side, y], [x + side, y + side], [x, y + side], [x, y]]
-            ],
+            "coordinates": [[[x, y], [x + side, y], [x + side, y + side], [x, y + side], [x, y]]],
         },
         "properties": {},
     }
@@ -69,7 +67,11 @@ async def test_max_size_bulk_request_fits_the_request_window(deployed_scale_clie
 
     assert resp.status_code == 200
     summary = resp.json()["summary"]
-    assert summary == {"received": _DEPLOYED_BULK_MAX, "accepted": _DEPLOYED_BULK_MAX, "rejected": 0}
+    assert summary == {
+        "received": _DEPLOYED_BULK_MAX,
+        "accepted": _DEPLOYED_BULK_MAX,
+        "rejected": 0,
+    }
     print(f"\nbulk timing gate: {_DEPLOYED_BULK_MAX} features in {elapsed:.1f}s")
     assert elapsed < _CEILING_SECONDS, (
         f"max-size bulk took {elapsed:.1f}s (> {_CEILING_SECONDS}s gate) — the v2 "
