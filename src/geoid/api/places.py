@@ -190,27 +190,14 @@ async def list_my_geoids(
 async def resolve_geoid(
     geoid: uuid.UUID,
     fmt: GeometryFormat = Depends(output_format),
-    principal: Principal = Depends(require_principal),
     session: AsyncSession = Depends(get_session),
     settings: Settings = Depends(get_settings),
 ) -> FeatureModel | WKTResponse:
+    # Deliberately ungated (2026-07-03): the geoid is the capability —
+    # public_read hides discovery (external-id lookup, dedup-409 incumbent),
+    # never exact-geoid resolution.
     row = await place_repo.get_by_geoid(session, geoid)
     if row is None:
-        raise PlaceNotFoundError(str(geoid))
-    # Grant-gated read (viewer+), existence-masked: the 404 is identical to an
-    # unknown geoid's. Public rows pay zero extra queries; private rows pay only
-    # the grant lookup — the row already carries the collection facts.
-    if (
-        not row["collection_public_read"]
-        and not principal.is_admin
-        and not await _can_read_collection(
-            session,
-            principal,
-            collection_id=row["collection_id"],
-            collection_slug=row["collection_slug"],
-            public_read=row["collection_public_read"],
-        )
-    ):
         raise PlaceNotFoundError(str(geoid))
     feature = ogc_service.build_feature(settings, row)
     return feature_response(feature, fmt)

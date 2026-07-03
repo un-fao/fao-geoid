@@ -1,13 +1,13 @@
 """Integration: non-public collections (``public_read=false``) end to end.
 
-Covers the four 2026-07-03 surfaces: resolver 404-masking (existence-masked, the
-body identical to an unknown id's), caller-aware dedup-409 disclosure (single +
-bulk), ``GET /me/geoids``, and the sysadmin ``/manage`` item inventory.
+Covers the four 2026-07-03 surfaces: 404-masking on the external-id resolver
+only (existence-masked, the body identical to an unknown id's — ``GET /{geoid}``
+is deliberately ungated: the geoid is the capability), caller-aware dedup-409
+disclosure (single + bulk), ``GET /me/geoids``, and the sysadmin ``/manage``
+item inventory.
 """
 
 from __future__ import annotations
-
-import uuid as uuid_module
 
 import pytest
 
@@ -62,27 +62,24 @@ async def test_public_read_defaults_true(client, admin_headers):
     assert by_id["public"]["public_read"] is True
 
 
-# --- resolver 404-masking ---------------------------------------------------------
+# --- resolver gating: /{geoid} open, external-id masked ---------------------------
 
 
-async def test_resolver_masks_private_collection(oidc_client, make_token, bearer):
+async def test_resolver_serves_private_collection_to_any_geoid_holder(
+    oidc_client, make_token, bearer
+):
+    # The geoid is the capability: exact-geoid resolution ignores public_read.
     await _create(oidc_client, "priv", public_read=False)
-    await _grant(oidc_client, "priv", "viewer@x.org", "viewer")
     minted = await _mint(oidc_client, "priv", _square(10, 10))
     geoid = minted["geoid"]
 
-    assert (await oidc_client.get(f"/{geoid}")).status_code == 404
     stranger = bearer(make_token(sub="kc-st", email="stranger@x.org"))
-    masked = await oidc_client.get(f"/{geoid}", headers=stranger)
-    assert masked.status_code == 404
-    # Existence-masked: byte-identical body to a genuinely unknown geoid's 404.
-    unknown = await oidc_client.get(f"/{uuid_module.uuid4()}", headers=stranger)
-    assert masked.json()["message"] == f"place not found: {geoid}"
-    assert set(masked.json()) == set(unknown.json())
-
-    viewer = bearer(make_token(sub="kc-vw", email="viewer@x.org"))
-    assert (await oidc_client.get(f"/{geoid}", headers=viewer)).status_code == 200
-    assert (await oidc_client.get(f"/{geoid}", headers=ADMIN)).status_code == 200
+    for headers in (None, stranger, ADMIN):
+        resp = await oidc_client.get(f"/{geoid}", headers=headers)
+        assert resp.status_code == 200, resp.text
+        feature = resp.json()
+        assert feature["type"] == "Feature"
+        assert feature["id"] == geoid
 
 
 async def test_external_id_resolver_masks_private_collection(oidc_client, make_token, bearer):
@@ -110,11 +107,20 @@ async def test_public_collection_still_resolves_anonymously(client, unit_square_
     assert (await client.get(f"/{minted['geoid']}")).status_code == 200
 
 
-async def test_resolver_rejects_malformed_bearer(client, unit_square_ccw):
-    # New with authenticated reads: a PRESENT-but-invalid credential is 401, never
-    # silently anonymous. No header at all stays anonymous (see the tests above).
+async def test_geoid_resolver_ignores_malformed_bearer(client, unit_square_ccw):
+    # No principal on this route: a garbage credential is ignored, not 401'd.
     minted = await _mint(client, "public", unit_square_ccw)
     resp = await client.get(f"/{minted['geoid']}", headers={"Authorization": "Bearer nope"})
+    assert resp.status_code == 200
+
+
+async def test_external_id_resolver_rejects_malformed_bearer(client):
+    # The external-id resolver keeps require_principal: a PRESENT-but-invalid
+    # credential is 401, never silently anonymous.
+    await _mint(client, "public", _square(15, 15, external_id="mb-1"))
+    resp = await client.get(
+        "/collections/public/external/mb-1", headers={"Authorization": "Bearer nope"}
+    )
     assert resp.status_code == 401
 
 
