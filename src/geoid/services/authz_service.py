@@ -3,7 +3,7 @@
 Precedence (highest first): **sysadmin** (static admin token OR Keycloak
 ``geoid.sysadmin``) bypasses every per-collection check; then the grant ladder
 **owner > editor > viewer**; then the data-layer fallback (``writable_anon`` for
-writes) for callers with no grant.
+writes, ``public_read`` for reads) for callers with no grant.
 
 :func:`load_caller_grant` is the single grant lookup — it returns ``None`` (no
 query needed) for sysadmin / anonymous / unverified-email callers, who never carry
@@ -71,6 +71,20 @@ def can_write(principal: Principal, collection: Collection, grant: CollectionGra
         principal.is_admin
         or (grant is not None and role_at_least(grant.role, Role.EDITOR))
         or collection.writable_anon
+    )
+
+
+def can_read(principal: Principal, collection: Collection, grant: CollectionGrant | None) -> bool:
+    """sysadmin OR a public_read collection OR any grant (viewer+) → may read.
+
+    Mirrors :func:`can_write` one rung lower on the ladder: reads only need
+    ``viewer``. A public collection stays readable by everyone (anonymous
+    included); a non-public one is 404-masked for callers this returns False for.
+    """
+    return (
+        principal.is_admin
+        or collection.public_read
+        or (grant is not None and role_at_least(grant.role, Role.VIEWER))
     )
 
 

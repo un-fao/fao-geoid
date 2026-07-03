@@ -198,7 +198,9 @@ async def insert_place(
 
 _READ_COLUMNS = """
     p.id AS geoid,
+    p.collection_id,
     c.slug AS collection_slug,
+    c.public_read AS collection_public_read,
     ST_AsGeoJSON(p.geom) AS geometry,
     p.external_id,
     p.provenance,

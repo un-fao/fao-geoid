@@ -1,10 +1,9 @@
 """Integration: per-collection grant ladder (viewer < editor < owner) on the
 write + manage paths, plus Keycloak-``sub`` backfill on first authorized access.
 
-Read enforcement for private collections is a deferred phase, so these pin the two
-load-bearing Core surfaces: who may WRITE to a collection and who may MANAGE its
-grants. ``GET /collections`` stays admin-gated (unchanged), so reads are not asserted
-here.
+These pin who may WRITE to a collection and who may MANAGE its grants. Read
+enforcement (``public_read``/viewer) is pinned in ``test_private_collections.py``;
+``GET /collections`` stays admin-gated (unchanged).
 """
 
 from __future__ import annotations

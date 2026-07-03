@@ -62,9 +62,9 @@ async def _require_manageable(
     status_code=status.HTTP_201_CREATED,
     summary="Grant or update a per-collection role by email (owner or sysadmin)",
     description=(
-        "Roles: `owner` (manage grants + write), `editor` (write). `viewer` is "
-        "**reserved** — grantable for forward compatibility but not yet enforced "
-        "anywhere (read enforcement arrives with the private-collections phase). "
+        "Roles: `owner` (manage grants + write + read), `editor` (write + read), "
+        "`viewer` (read: resolves features in a non-public collection and unlocks "
+        "dedup-409 incumbent disclosure). "
         "Demoting the last owner is blocked (409); grant another owner first."
     ),
 )

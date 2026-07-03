@@ -63,8 +63,9 @@ class CollectionOut(BaseModel):
 class GrantCreate(BaseModel):
     """Grant (or re-grant) a per-collection role to a principal by email.
 
-    ``viewer`` is reserved, not yet enforced: it is accepted and stored (forward
-    compatibility with the private-collections phase) but grants no access today.
+    ``viewer`` is the read tier: on a non-public collection it unlocks the
+    resolvers (no more 404 mask) and the dedup-409 incumbent disclosure; it does
+    NOT authorize writes (``editor``+) or grant management (``owner``).
     """
 
     email: str = Field(min_length=3, max_length=320, examples=["alice@example.org"])

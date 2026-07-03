@@ -18,6 +18,7 @@ from geoid.config import Settings, get_settings
 from geoid.db import get_session
 from geoid.deps import Principal, require_principal
 from geoid.domain.geometry_format import GeometryFormat
+from geoid.models import Collection
 from geoid.repositories import collection_repo, place_repo
 from geoid.schemas.ogc import FeatureModel
 from geoid.schemas.place import (
@@ -27,7 +28,7 @@ from geoid.schemas.place import (
     MintResponse,
     PlaceCreate,
 )
-from geoid.services import ogc_service, registry_service
+from geoid.services import authz_service, ogc_service, registry_service
 from geoid.services.exceptions import (
     BulkLimitExceededError,
     CollectionNotFoundError,
@@ -128,6 +129,18 @@ async def create_items_bulk(
     )
 
 
+async def _can_read_collection(
+    session: AsyncSession, principal: Principal, collection: Collection
+) -> bool:
+    """Grant lookup + the pure ``can_read`` predicate.
+
+    NOTE: ``load_caller_grant`` backfills the Keycloak ``sub`` on first authorized
+    access, so this read path can issue one idempotent UPDATE.
+    """
+    grant = await authz_service.load_caller_grant(session, principal, collection)
+    return authz_service.can_read(principal, collection, grant)
+
+
 @router.get(
     "/{geoid}",
     response_model=FeatureModel,
@@ -138,12 +151,19 @@ async def create_items_bulk(
 async def resolve_geoid(
     geoid: uuid.UUID,
     fmt: GeometryFormat = Depends(output_format),
+    principal: Principal = Depends(require_principal),
     session: AsyncSession = Depends(get_session),
     settings: Settings = Depends(get_settings),
 ) -> FeatureModel | WKTResponse:
     row = await place_repo.get_by_geoid(session, geoid)
     if row is None:
         raise PlaceNotFoundError(str(geoid))
+    if not row["collection_public_read"] and not principal.is_admin:
+        # Grant-gated read (viewer+), existence-masked: the 404 is identical to an
+        # unknown geoid's. Public rows pay zero extra queries.
+        collection = await collection_repo.get_by_id(session, row["collection_id"])
+        if collection is None or not await _can_read_collection(session, principal, collection):
+            raise PlaceNotFoundError(str(geoid))
     feature = ogc_service.build_feature(settings, row)
     return feature_response(feature, fmt)
 
@@ -159,12 +179,21 @@ async def resolve_by_external_id(
     collection_id: str,
     external_id: str,
     fmt: GeometryFormat = Depends(output_format),
+    principal: Principal = Depends(require_principal),
     session: AsyncSession = Depends(get_session),
     settings: Settings = Depends(get_settings),
 ) -> FeatureModel | WKTResponse:
     collection = await collection_repo.get_by_slug(session, collection_id)
     if collection is None:
         raise CollectionNotFoundError(collection_id)
+    # Feature-level mask (same 404 as an unknown external_id), checked before the
+    # place fetch. Public collections skip the grant lookup entirely.
+    if (
+        not collection.public_read
+        and not principal.is_admin
+        and not await _can_read_collection(session, principal, collection)
+    ):
+        raise PlaceNotFoundError(f"{collection_id}/{external_id}")
     row = await place_repo.get_by_external_id(session, collection.id, external_id)
     if row is None:
         raise PlaceNotFoundError(f"{collection_id}/{external_id}")
