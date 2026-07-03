@@ -1,7 +1,8 @@
 """Unit truth-table for the pure authz predicates (can_write / can_read / can_manage).
 
 ``load_caller_grant`` touches the DB and is exercised in the integration suite; here
-the predicates are pure functions over (principal, collection-view, grant).
+the predicates are pure functions over (principal, collection-view / public_read
+flag, grant).
 """
 
 from __future__ import annotations
@@ -16,8 +17,8 @@ from geoid.services import authz_service
 pytestmark = pytest.mark.unit
 
 
-def _collection(*, writable_anon: bool, public_read: bool = True):
-    return SimpleNamespace(writable_anon=writable_anon, public_read=public_read, slug="c")
+def _collection(*, writable_anon: bool):
+    return SimpleNamespace(writable_anon=writable_anon)
 
 
 def _grant(role: str):
@@ -30,7 +31,10 @@ USER = Principal(subject="kc-1", email="u@x.org", email_verified=True)
 
 CLOSED = _collection(writable_anon=False)
 OPEN = _collection(writable_anon=True)
-PRIVATE = _collection(writable_anon=False, public_read=False)
+
+# can_read takes the public_read flag as a scalar (read paths hold it on the row).
+PUBLIC_READ = True
+PRIVATE_READ = False
 
 
 # --- can_write ----------------------------------------------------------------
@@ -69,28 +73,28 @@ def test_authenticated_non_grantee_can_write_open_collection():
 
 
 def test_sysadmin_reads_anything():
-    assert authz_service.can_read(ADMIN, PRIVATE, None) is True
+    assert authz_service.can_read(ADMIN, PRIVATE_READ, None) is True
 
 
 def test_public_read_allows_anonymous_read():
-    assert authz_service.can_read(ANON, CLOSED, None) is True
+    assert authz_service.can_read(ANON, PUBLIC_READ, None) is True
 
 
 def test_private_collection_blocks_anonymous_read():
-    assert authz_service.can_read(ANON, PRIVATE, None) is False
+    assert authz_service.can_read(ANON, PRIVATE_READ, None) is False
 
 
 def test_any_grant_reads_private_collection():
     for role in ("viewer", "editor", "owner"):
-        assert authz_service.can_read(USER, PRIVATE, _grant(role)) is True
+        assert authz_service.can_read(USER, PRIVATE_READ, _grant(role)) is True
 
 
 def test_authenticated_non_grantee_cannot_read_private_collection():
-    assert authz_service.can_read(USER, PRIVATE, None) is False
+    assert authz_service.can_read(USER, PRIVATE_READ, None) is False
 
 
 def test_authenticated_non_grantee_reads_public_collection():
-    assert authz_service.can_read(USER, CLOSED, None) is True
+    assert authz_service.can_read(USER, PUBLIC_READ, None) is True
 
 
 # --- can_manage ---------------------------------------------------------------

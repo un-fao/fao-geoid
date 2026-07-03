@@ -14,6 +14,7 @@ a per-collection grant, and otherwise the caller's grant (backfilling the Keyclo
 from __future__ import annotations
 
 import logging
+import uuid
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -26,9 +27,16 @@ logger = logging.getLogger(__name__)
 
 
 async def load_caller_grant(
-    session: AsyncSession, principal: Principal, collection: Collection
+    session: AsyncSession,
+    principal: Principal,
+    collection_id: uuid.UUID,
+    collection_slug: str,
 ) -> CollectionGrant | None:
     """The ONE per-collection grant DB touch.
+
+    Takes the collection facts as scalars (``collection_slug`` is log-only) so
+    callers holding a read-path row or an ``InsertResult`` never refetch the
+    Collection just to look up a grant.
 
     Returns ``None`` without querying for the sysadmin tier, anonymous callers, and
     callers whose email is absent or unverified (grants are keyed by verified email).
@@ -42,7 +50,7 @@ async def load_caller_grant(
         return None
     if not principal.email_verified or not principal.email:
         return None
-    grant = await grant_repo.get_grant(session, collection.id, principal.email)
+    grant = await grant_repo.get_grant(session, collection_id, principal.email)
     if grant is None:
         return None
     if grant.principal_subject is not None and grant.principal_subject != principal.subject:
@@ -50,12 +58,12 @@ async def load_caller_grant(
             "grant subject mismatch for %s on collection %s: stored sub differs from "
             "caller sub — grant not honored (email reuse or IdP identity change?)",
             principal.email,
-            collection.slug,
+            collection_slug,
         )
         return None
     if grant.principal_subject is None and principal.subject:
         await grant_repo.backfill_subject(
-            session, collection.id, principal.email, principal.subject
+            session, collection_id, principal.email, principal.subject
         )
     return grant
 
@@ -74,16 +82,17 @@ def can_write(principal: Principal, collection: Collection, grant: CollectionGra
     )
 
 
-def can_read(principal: Principal, collection: Collection, grant: CollectionGrant | None) -> bool:
+def can_read(principal: Principal, public_read: bool, grant: CollectionGrant | None) -> bool:
     """sysadmin OR a public_read collection OR any grant (viewer+) → may read.
 
     Mirrors :func:`can_write` one rung lower on the ladder: reads only need
-    ``viewer``. A public collection stays readable by everyone (anonymous
+    ``viewer``. Takes the ``public_read`` flag as a scalar — read paths hold it on
+    the row already. A public collection stays readable by everyone (anonymous
     included); a non-public one is 404-masked for callers this returns False for.
     """
     return (
         principal.is_admin
-        or collection.public_read
+        or public_read
         or (grant is not None and role_at_least(grant.role, Role.VIEWER))
     )
 

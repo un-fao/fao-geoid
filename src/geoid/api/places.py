@@ -18,7 +18,6 @@ from geoid.config import Settings, get_settings
 from geoid.db import get_session
 from geoid.deps import Principal, require_principal
 from geoid.domain.geometry_format import GeometryFormat
-from geoid.models import Collection
 from geoid.repositories import collection_repo, place_repo
 from geoid.schemas.ogc import FeatureModel
 from geoid.schemas.place import (
@@ -133,15 +132,24 @@ async def create_items_bulk(
 
 
 async def _can_read_collection(
-    session: AsyncSession, principal: Principal, collection: Collection
+    session: AsyncSession,
+    principal: Principal,
+    *,
+    collection_id: uuid.UUID,
+    collection_slug: str,
+    public_read: bool,
 ) -> bool:
     """Grant lookup + the pure ``can_read`` predicate.
 
-    NOTE: ``load_caller_grant`` backfills the Keycloak ``sub`` on first authorized
-    access, so this read path can issue one idempotent UPDATE.
+    Takes the collection facts as scalars — both resolvers already hold them (on
+    the read row / the Collection), so no refetch. NOTE: ``load_caller_grant``
+    backfills the Keycloak ``sub`` on first authorized access, so this read path
+    can issue one idempotent UPDATE.
     """
-    grant = await authz_service.load_caller_grant(session, principal, collection)
-    return authz_service.can_read(principal, collection, grant)
+    grant = await authz_service.load_caller_grant(
+        session, principal, collection_id, collection_slug
+    )
+    return authz_service.can_read(principal, public_read, grant)
 
 
 @router.get(
@@ -189,12 +197,21 @@ async def resolve_geoid(
     row = await place_repo.get_by_geoid(session, geoid)
     if row is None:
         raise PlaceNotFoundError(str(geoid))
-    if not row["collection_public_read"] and not principal.is_admin:
-        # Grant-gated read (viewer+), existence-masked: the 404 is identical to an
-        # unknown geoid's. Public rows pay zero extra queries.
-        collection = await collection_repo.get_by_id(session, row["collection_id"])
-        if collection is None or not await _can_read_collection(session, principal, collection):
-            raise PlaceNotFoundError(str(geoid))
+    # Grant-gated read (viewer+), existence-masked: the 404 is identical to an
+    # unknown geoid's. Public rows pay zero extra queries; private rows pay only
+    # the grant lookup — the row already carries the collection facts.
+    if (
+        not row["collection_public_read"]
+        and not principal.is_admin
+        and not await _can_read_collection(
+            session,
+            principal,
+            collection_id=row["collection_id"],
+            collection_slug=row["collection_slug"],
+            public_read=row["collection_public_read"],
+        )
+    ):
+        raise PlaceNotFoundError(str(geoid))
     feature = ogc_service.build_feature(settings, row)
     return feature_response(feature, fmt)
 
@@ -222,7 +239,13 @@ async def resolve_by_external_id(
     if (
         not collection.public_read
         and not principal.is_admin
-        and not await _can_read_collection(session, principal, collection)
+        and not await _can_read_collection(
+            session,
+            principal,
+            collection_id=collection.id,
+            collection_slug=collection.slug,
+            public_read=collection.public_read,
+        )
     ):
         raise PlaceNotFoundError(f"{collection_id}/{external_id}")
     row = await place_repo.get_by_external_id(session, collection.id, external_id)

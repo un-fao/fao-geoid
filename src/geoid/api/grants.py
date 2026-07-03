@@ -50,7 +50,9 @@ async def _require_manageable(
     collection = await collection_repo.get_by_slug(session, collection_id)
     if collection is None:
         raise CollectionNotFoundError(collection_id)
-    grant = await authz_service.load_caller_grant(session, principal, collection)
+    grant = await authz_service.load_caller_grant(
+        session, principal, collection.id, collection.slug
+    )
     if not authz_service.can_manage(principal, collection, grant):
         raise CollectionForbiddenError(collection_id)
     return collection

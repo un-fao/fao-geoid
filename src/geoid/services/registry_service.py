@@ -26,7 +26,7 @@ from geoid.models import (
     UQ_PLACE_EXTERNAL_ID,
     Collection,
 )
-from geoid.repositories import collection_repo, place_repo
+from geoid.repositories import place_repo
 from geoid.repositories._pg_errors import (
     GEOJSON_PARSE_SQLSTATES,
     SQLSTATE_CHECK_VIOLATION,
@@ -85,7 +85,9 @@ async def _authorize_write(
     writable_anon). Anonymous denial keeps its own 401-paired error; an authenticated
     non-grantee facing a non-writable collection gets the 403 write error.
     """
-    grant = await authz_service.load_caller_grant(session, principal, collection)
+    grant = await authz_service.load_caller_grant(
+        session, principal, collection.id, collection.slug
+    )
     if authz_service.can_write(principal, collection, grant):
         return
     if principal.is_anonymous:
@@ -104,7 +106,8 @@ async def _may_disclose_incumbent(
     Cheap checks first (no query): sysadmin, ``public_read``, own mint (non-null
     subject guard — an anonymous caller must never match an anonymous incumbent).
     Then ANY grant on the incumbent's collection (viewer suffices — disclosure is
-    a read); ≤2 queries per distinct private collection, memoized in ``cache``.
+    a read); the ``InsertResult`` already carries the incumbent's collection facts,
+    so this is one grant query per distinct private collection, memoized in ``cache``.
 
     The mask protects only the incumbent's collection + uri: the geoid value is
     recomputable offline from the geometry (content-addressed, public recipe) and
@@ -120,11 +123,10 @@ async def _may_disclose_incumbent(
         return False
     if result.collection_id in cache:
         return cache[result.collection_id]
-    collection = await collection_repo.get_by_id(session, result.collection_id)
-    disclosed = False
-    if collection is not None:
-        grant = await authz_service.load_caller_grant(session, principal, collection)
-        disclosed = grant is not None
+    grant = await authz_service.load_caller_grant(
+        session, principal, result.collection_id, result.collection_slug or ""
+    )
+    disclosed = grant is not None
     cache[result.collection_id] = disclosed
     return disclosed
 
