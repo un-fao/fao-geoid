@@ -23,6 +23,7 @@ from geoid.domain.provenance import build_provenance, extract_client
 from geoid.models import (
     PK_GEOID_REGISTRY,
     PK_PLACE,
+    UQ_GEOID_REGISTRY_GEOM_HASH,
     UQ_PLACE_EXTERNAL_ID,
     Collection,
 )
@@ -131,6 +132,22 @@ async def _may_disclose_incumbent(
     return disclosed
 
 
+def _lost_registry_race(exc: IntegrityError) -> bool:
+    """The multi-unique-index gap in the arbiter CTE's ``ON CONFLICT``.
+
+    The arbiter names only the geom_hash UNIQUE, but an identical-geometry loser
+    inserts the same derived geoid too and can trip the registry PK instead —
+    an index the ``ON CONFLICT`` clause doesn't cover. The 23505 fires only after
+    the winner commits, so ONE retry deterministically takes the arbiter's
+    DO NOTHING path and recovers the normal incumbent-carrying conflict.
+    """
+    constraint = pg_fields(exc)[0]
+    if constraint not in (PK_GEOID_REGISTRY, UQ_GEOID_REGISTRY_GEOM_HASH):
+        return False
+    logger.warning("insert lost the registry unique race on %s; retrying once", constraint)
+    return True
+
+
 async def create_place(
     session: AsyncSession,
     *,
@@ -153,25 +170,28 @@ async def create_place(
 
     geojson, external_id, provenance = _build_write_inputs(feature, principal, settings)
 
+    insert_kwargs: dict[str, Any] = {
+        "collection_id": collection.id,
+        "geojson": geojson,
+        "external_id": external_id,
+        "provenance": provenance,
+        "originating_instance": settings.instance_id,
+    }
     # Happy path is one INSERT round-trip: the DB CHECK constraints reject invalid
     # geometry (23514) and we recover ST_IsValidReason for the 422 ONLY on that
     # error path — so a valid POST never pays a separate pre-validation query. The
     # geoid is derived from the geometry inside the insert (DB-side), not minted here.
     try:
-        result = await place_repo.insert_place(
-            session,
-            collection_id=collection.id,
-            geojson=geojson,
-            external_id=external_id,
-            provenance=provenance,
-            originating_instance=settings.instance_id,
-        )
+        result = await place_repo.insert_place(session, **insert_kwargs)
     except IntegrityError as exc:
         if sqlstate_of(exc) == SQLSTATE_CHECK_VIOLATION:
             await session.rollback()
             reason = await place_repo.geometry_invalid_reason(session, geojson)
             raise GeometryInvalidError(reason) from exc
-        raise  # 23505 (external_id / geoid duplicate) → mapped to 409 by api/errors.py
+        if not _lost_registry_race(exc):
+            raise  # 23505 (external_id / place-pk duplicate) → mapped to 409 by api/errors.py
+        await session.rollback()
+        result = await place_repo.insert_place(session, **insert_kwargs)
     except (OperationalError, InterfaceError):
         raise  # genuine infra failure — never mask as a 422
     except DBAPIError as exc:
@@ -293,9 +313,10 @@ async def _mint_one(
     feature, while a full rollback would discard every already-accepted row.
     """
     geojson, external_id, provenance = _build_write_inputs(feature, principal, settings)
-    try:
+
+    async def _attempt() -> place_repo.InsertResult:
         async with session.begin_nested():
-            result = await place_repo.insert_place(
+            return await place_repo.insert_place(
                 session,
                 collection_id=collection.id,
                 geojson=geojson,
@@ -303,10 +324,18 @@ async def _mint_one(
                 provenance=provenance,
                 originating_instance=settings.instance_id,
             )
+
+    try:
+        result = await _attempt()
     except IntegrityError as exc:
         # The SAVEPOINT has already rolled back; the session is usable again, so a
         # CHECK violation can recover ST_IsValidReason exactly as the single row does.
-        return await _classify_integrity(session, index, external_id, geojson, exc)
+        if not _lost_registry_race(exc):
+            return await _classify_integrity(session, index, external_id, geojson, exc)
+        try:
+            result = await _attempt()
+        except IntegrityError as retry_exc:
+            return await _classify_integrity(session, index, external_id, geojson, retry_exc)
     except (OperationalError, InterfaceError):
         raise  # genuine infra failure — never mask as a rejected row
     except DBAPIError as exc:

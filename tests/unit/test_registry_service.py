@@ -14,12 +14,21 @@ from sqlalchemy.exc import DBAPIError, IntegrityError
 
 from geoid.config import Settings
 from geoid.deps import Principal
-from geoid.models import Collection
+from geoid.models import (
+    PK_GEOID_REGISTRY,
+    UQ_GEOID_REGISTRY_GEOM_HASH,
+    UQ_PLACE_EXTERNAL_ID,
+    Collection,
+)
 from geoid.repositories import place_repo
 from geoid.repositories.place_repo import InsertResult
 from geoid.schemas.place import PlaceCreate
 from geoid.services import registry_service
-from geoid.services.exceptions import GeometryInvalidError, RegistryConsistencyError
+from geoid.services.exceptions import (
+    GeometryConflictError,
+    GeometryInvalidError,
+    RegistryConsistencyError,
+)
 
 pytestmark = pytest.mark.unit
 
@@ -153,6 +162,126 @@ async def test_bulk_geojson_parse_sqlstate_rejects_the_row(monkeypatch):
     )
     assert report.summary.rejected == 1
     assert report.rejected[0].reason == "invalid_geometry"
+
+
+# --- registry unique-index race: one retry converges on the normal dedup 409 ----
+# The arbiter CTE names only the geom_hash UNIQUE; an identical-geometry loser can
+# trip the registry PK instead. The 23505 fires only after the winner commits, so
+# a single retry must recover the incumbent-carrying conflict.
+
+
+def _unique_violation(constraint: str) -> IntegrityError:
+    # Mirrors the asyncpg shape pg_fields() reads: sqlstate on exc.orig,
+    # constraint_name on exc.orig.__cause__.
+    cause = _FakeDriverError("23505")
+    cause.constraint_name = constraint
+    orig = Exception("duplicate key value violates unique constraint")
+    orig.__cause__ = cause
+    return IntegrityError("INSERT ...", {}, orig)
+
+
+def _raise_once_then_loser(constraint: str, incumbent: InsertResult):
+    calls = {"n": 0}
+
+    async def _insert(*args, **kwargs):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise _unique_violation(constraint)
+        return incumbent
+
+    return _insert, calls
+
+
+def _incumbent_loser() -> InsertResult:
+    return InsertResult(
+        geoid=uuid.uuid4(),
+        created=False,
+        collection_slug="public",
+        collection_id=uuid.uuid4(),
+        collection_public_read=True,
+    )
+
+
+@pytest.mark.parametrize("constraint", [PK_GEOID_REGISTRY, UQ_GEOID_REGISTRY_GEOM_HASH])
+async def test_create_place_retries_once_after_losing_registry_race(monkeypatch, constraint):
+    incumbent = _incumbent_loser()
+    insert, calls = _raise_once_then_loser(constraint, incumbent)
+    monkeypatch.setattr(place_repo, "insert_place", insert)
+    session = _FakeSession()
+
+    with pytest.raises(GeometryConflictError) as exc_info:
+        await registry_service.create_place(
+            session,
+            settings=Settings(),
+            principal=Principal.admin(),
+            collection=_collection(),
+            feature=PlaceCreate.model_validate(_SQUARE),
+        )
+
+    assert calls["n"] == 2
+    assert session.rolled_back is True
+    assert exc_info.value.geoid == incumbent.geoid
+    assert exc_info.value.collection == "public"
+
+
+async def test_create_place_does_not_retry_external_id_conflict(monkeypatch):
+    insert, calls = _raise_once_then_loser(UQ_PLACE_EXTERNAL_ID, _incumbent_loser())
+    monkeypatch.setattr(place_repo, "insert_place", insert)
+
+    with pytest.raises(IntegrityError):
+        await registry_service.create_place(
+            _FakeSession(),
+            settings=Settings(),
+            principal=Principal.admin(),
+            collection=_collection(),
+            feature=PlaceCreate.model_validate(_SQUARE),
+        )
+    assert calls["n"] == 1
+
+
+@pytest.mark.parametrize("constraint", [PK_GEOID_REGISTRY, UQ_GEOID_REGISTRY_GEOM_HASH])
+async def test_bulk_retries_registry_race_and_reports_geometry_conflict(monkeypatch, constraint):
+    incumbent = _incumbent_loser()
+    insert, calls = _raise_once_then_loser(constraint, incumbent)
+    monkeypatch.setattr(place_repo, "insert_place", insert)
+
+    report = await registry_service.create_places_bulk(
+        _FakeSession(),
+        settings=Settings(),
+        principal=Principal.admin(),
+        collection=_collection(),
+        features=[_SQUARE],
+    )
+
+    assert calls["n"] == 2
+    assert report.summary.rejected == 1
+    row = report.rejected[0]
+    assert row.reason == "geometry_conflict"
+    assert str(incumbent.geoid) in (row.geoid or "")
+    assert row.collection == "public"
+
+
+async def test_bulk_second_race_loss_falls_back_to_geoid_conflict_reject(monkeypatch):
+    # Retry is bounded: a second loss classifies via the existing backstop instead
+    # of looping.
+    calls = {"n": 0}
+
+    async def _always_race(*args, **kwargs):
+        calls["n"] += 1
+        raise _unique_violation(PK_GEOID_REGISTRY)
+
+    monkeypatch.setattr(place_repo, "insert_place", _always_race)
+
+    report = await registry_service.create_places_bulk(
+        _FakeSession(),
+        settings=Settings(),
+        principal=Principal.admin(),
+        collection=_collection(),
+        features=[_SQUARE],
+    )
+
+    assert calls["n"] == 2
+    assert report.rejected[0].reason == "geoid_conflict"
 
 
 async def test_classify_integrity_unknown_constraint_is_internal_error(monkeypatch):
