@@ -254,3 +254,39 @@ async def test_me_geoids_pagination(oidc_client, make_token, bearer):
     assert len(page1) == 2 and len(page2) == 1
     assert {r["geoid"] for r in page1 + page2} == minted
     assert (await oidc_client.get("/me/geoids?limit=0", headers=carol)).status_code == 422
+
+
+# --- sysadmin /manage item inventory ------------------------------------------------
+
+
+async def test_manage_items_auth_and_404(oidc_client, make_token, bearer):
+    await _create(oidc_client, "inv")
+    assert (await oidc_client.get("/manage/collections/inv/items")).status_code == 401
+    user = bearer(make_token(sub="kc-u", email="u@x.org"))
+    assert (await oidc_client.get("/manage/collections/inv/items", headers=user)).status_code == 403
+    assert (
+        await oidc_client.get("/manage/collections/nope/items", headers=ADMIN)
+    ).status_code == 404
+
+
+async def test_manage_items_lists_collection_inventory(client, admin_headers):
+    await _create(client, "inv2", public_read=False)
+    first = await _mint(client, "inv2", _square(120, 30))
+    second = await _mint(client, "inv2", _square(122, 30, external_id="b"))
+
+    records = (await client.get("/manage/collections/inv2/items", headers=admin_headers)).json()
+    assert [r["geoid"] for r in records] == [second["geoid"], first["geoid"]]
+    assert all(
+        set(r) == {"geoid", "uri", "collection", "external_id", "created_at"} for r in records
+    )
+    assert all(r["collection"] == "inv2" for r in records)
+
+    page = (
+        await client.get("/manage/collections/inv2/items?limit=1", headers=admin_headers)
+    ).json()
+    assert len(page) == 1
+
+
+async def test_public_items_path_is_still_405(client):
+    # The public enumeration surface stays removed: POST owns /items, GET answers 405.
+    assert (await client.get("/collections/public/items")).status_code == 405

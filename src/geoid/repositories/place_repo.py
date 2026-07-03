@@ -291,6 +291,36 @@ async def list_by_creator(
     return [dict(r) for r in rows]
 
 
+async def list_by_collection(
+    session: AsyncSession, collection_id: uuid.UUID, *, limit: int, offset: int
+) -> list[dict[str, Any]]:
+    """A collection's items, newest first (the sysadmin-only /manage inventory).
+
+    # ponytail: unindexed sort — 0007 dropped the (collection_id, created_at, id)
+    # paging index as write amplification; this admin-only inventory tolerates the
+    # seq-scan sort. Re-add that index if the listing ever gets hot.
+    """
+    stmt = text(
+        f"""
+        SELECT {_READ_COLUMNS}
+        FROM place p JOIN collection c ON c.id = p.collection_id
+        WHERE p.collection_id = :collection_id
+        ORDER BY p.created_at DESC, p.id
+        LIMIT :limit OFFSET :offset
+        """
+    )
+    rows = (
+        (
+            await session.execute(
+                stmt, {"collection_id": collection_id, "limit": limit, "offset": offset}
+            )
+        )
+        .mappings()
+        .all()
+    )
+    return [dict(r) for r in rows]
+
+
 async def collection_extent(
     session: AsyncSession, collection_id: uuid.UUID
 ) -> tuple[float, float, float, float] | None:
