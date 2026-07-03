@@ -75,20 +75,25 @@ async def test_concurrent_distinct_posts_all_mint(client, session):
     assert place_count == k
 
 
-async def test_resolve_incumbent_slug_returns_committed_collection(
-    client, session, unit_square_ccw
-):
-    """The slug-recovery helper reads back the incumbent's collection once visible.
+async def test_resolve_incumbent_returns_committed_collection(client, session, unit_square_ccw):
+    """The incumbent-recovery helper reads back the incumbent's facts once visible.
 
-    Covers ``_resolve_incumbent_slug``'s success path deterministically (no race):
+    Covers ``_resolve_incumbent``'s success path deterministically (no race):
     mint a place via the API (committed), then call the helper directly — it must
-    return the incumbent's collection slug from the now-visible registry row. The
-    concurrent path only reaches this helper when the in-statement LEFT JOIN missed.
+    return the incumbent's collection facts (id/slug/public_read/creator) from the
+    now-visible registry row. The concurrent path only reaches this helper when
+    the in-statement LEFT JOIN missed.
     """
-    from geoid.repositories.place_repo import _resolve_incumbent_slug
+    from geoid.repositories.place_repo import _resolve_incumbent
     from geoid.schemas.place import PlaceCreate, geometry_to_geojson
 
     assert (await client.post("/collections/public/items", json=unit_square_ccw)).status_code == 201
 
     geojson = geometry_to_geojson(PlaceCreate.model_validate(unit_square_ccw))
-    assert await _resolve_incumbent_slug(session, geojson) == "public"
+    incumbent = await _resolve_incumbent(session, geojson)
+    assert incumbent is not None
+    collection_id, slug, public_read, created_by = incumbent
+    assert slug == "public"
+    assert public_read is True
+    assert collection_id is not None
+    assert created_by is None  # minted anonymously above

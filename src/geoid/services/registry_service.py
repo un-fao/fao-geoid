@@ -8,6 +8,7 @@ are identical for both — anonymity is not a special case.
 from __future__ import annotations
 
 import logging
+import uuid
 from typing import Any
 
 from pydantic import ValidationError
@@ -25,7 +26,7 @@ from geoid.models import (
     UQ_PLACE_EXTERNAL_ID,
     Collection,
 )
-from geoid.repositories import place_repo
+from geoid.repositories import collection_repo, place_repo
 from geoid.repositories._pg_errors import (
     GEOJSON_PARSE_SQLSTATES,
     SQLSTATE_CHECK_VIOLATION,
@@ -92,6 +93,42 @@ async def _authorize_write(
     raise WriteNotAuthorizedError(collection.slug)
 
 
+async def _may_disclose_incumbent(
+    session: AsyncSession,
+    principal: Principal,
+    result: place_repo.InsertResult,
+    cache: dict[uuid.UUID, bool],
+) -> bool:
+    """May this caller see the incumbent's geoid/uri/collection in the dedup 409?
+
+    Cheap checks first (no query): sysadmin, ``public_read``, own mint (non-null
+    subject guard — an anonymous caller must never match an anonymous incumbent).
+    Then ANY grant on the incumbent's collection (viewer suffices — disclosure is
+    a read); ≤2 queries per distinct private collection, memoized in ``cache``.
+
+    The mask protects only the incumbent's collection + uri: the geoid value is
+    recomputable offline from the geometry (content-addressed, public recipe) and
+    409-vs-201 inherently reveals existence.
+    """
+    if principal.is_admin:
+        return True
+    if result.collection_public_read:
+        return True
+    if principal.subject is not None and result.created_by == principal.subject:
+        return True
+    if principal.is_anonymous or result.collection_id is None:
+        return False
+    if result.collection_id in cache:
+        return cache[result.collection_id]
+    collection = await collection_repo.get_by_id(session, result.collection_id)
+    disclosed = False
+    if collection is not None:
+        grant = await authz_service.load_caller_grant(session, principal, collection)
+        disclosed = grant is not None
+    cache[result.collection_id] = disclosed
+    return disclosed
+
+
 async def create_place(
     session: AsyncSession,
     *,
@@ -151,8 +188,7 @@ async def create_place(
         raise GeometryInvalidError("unparseable GeoJSON geometry") from exc
 
     if not result.created:
-        # Identical geometry already registered (anywhere in the catalog): the
-        # insert failed, and the 409 must carry the incumbent geoid + collection.
+        # Identical geometry already registered (anywhere in the catalog).
         if result.collection_slug is None:
             # Genuine registry/recipe drift — the repo couldn't resolve the incumbent
             # collection. Surface a structured 500 rather than crashing on a None slug.
@@ -160,7 +196,9 @@ async def create_place(
                 "registry drift: dedup loser geoid=%s has no incumbent collection", result.geoid
             )
             raise RegistryConsistencyError(result.geoid)
-        raise GeometryConflictError(geoid=result.geoid, collection=result.collection_slug)
+        if await _may_disclose_incumbent(session, principal, result, {}):
+            raise GeometryConflictError(geoid=result.geoid, collection=result.collection_slug)
+        raise GeometryConflictError(geoid=None, collection=None)
 
     ids = derive_identifiers(result.geoid, base_url=settings.base_url_clean)
     return MintResponse(
@@ -199,6 +237,8 @@ async def create_places_bulk(
 
     accepted: list[BulkAccepted] = []
     rejected: list[BulkRejected] = []
+    # Losers pointing at one private collection pay its grant lookup once, not per feature.
+    disclosure_cache: dict[uuid.UUID, bool] = {}
 
     for index, raw in enumerate(features):
         try:
@@ -216,6 +256,7 @@ async def create_places_bulk(
             collection=collection,
             index=index,
             feature=feature,
+            disclosure_cache=disclosure_cache,
         )
         (accepted if isinstance(outcome, BulkAccepted) else rejected).append(outcome)
 
@@ -237,6 +278,7 @@ async def _mint_one(
     collection: Collection,
     index: int,
     feature: PlaceCreate,
+    disclosure_cache: dict[uuid.UUID, bool],
 ) -> BulkAccepted | BulkRejected:
     """Insert one validated feature inside a SAVEPOINT; classify the outcome.
 
@@ -292,7 +334,7 @@ async def _mint_one(
 
     if not result.created:
         # Identical geometry already registered (catalog-wide or an earlier row in
-        # THIS batch): the arbiter looked the incumbent up — carry it like the 409.
+        # THIS batch).
         if result.collection_slug is None:
             # Genuine registry/recipe drift — abort the batch with a structured 500
             # rather than emitting a malformed reject row with no incumbent collection.
@@ -302,6 +344,13 @@ async def _mint_one(
                 index,
             )
             raise RegistryConsistencyError(result.geoid)
+        if not await _may_disclose_incumbent(session, principal, result, disclosure_cache):
+            return BulkRejected(
+                index=index,
+                reason="geometry_conflict",
+                detail="identical geometry already exists in the catalog",
+                external_id=external_id,
+            )
         ids = derive_identifiers(result.geoid, base_url=settings.base_url_clean)
         return BulkRejected(
             index=index,

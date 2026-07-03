@@ -152,11 +152,13 @@ class GeometryConflictResponse(BaseModel):
     identifiers. The ``constraint`` field discriminates this conflict from the
     external_id 409.
 
-    The incumbent fields are OPTIONAL in the schema (though always populated
-    today): geometry dedup is global, so a conflict can point at an incumbent in
-    another collection — when private collections land, those fields may be
-    withheld (null) rather than leak a private collection's contents. Declaring
-    them nullable now means that change won't be schema-breaking.
+    The incumbent fields are CONDITIONAL: geometry dedup is global, so a conflict
+    can point at an incumbent in another collection — they are withheld (null)
+    unless the caller may read the incumbent's collection (sysadmin, a
+    ``public_read`` collection, the caller's own mint, or any grant on it).
+    Note the geoid value itself is recomputable from the submitted geometry
+    (content-addressed, public recipe); the mask protects the incumbent's
+    collection + uri, not the identifier.
     """
 
     code: int = Field(description="HTTP status code (409).")
@@ -164,17 +166,17 @@ class GeometryConflictResponse(BaseModel):
     geoid: str | None = Field(
         default=None,
         description="The INCUMBENT geoid the geometry is already registered under. "
-        "May be withheld once private collections land.",
+        "Withheld (null) when the caller may not read the incumbent's collection.",
     )
     uri: str | None = Field(
         default=None,
         description="Durable resolver URI of the incumbent geoid. "
-        "May be withheld once private collections land.",
+        "Withheld (null) when the caller may not read the incumbent's collection.",
     )
     collection: str | None = Field(
         default=None,
         description="Collection slug the incumbent belongs to. "
-        "May be withheld once private collections land.",
+        "Withheld (null) when the caller may not read the incumbent's collection.",
     )
     constraint: str = Field(description='Always "uq_geoid_registry_geom_hash" for this conflict.')
 
@@ -221,8 +223,9 @@ class BulkRejected(BaseModel):
 
     Partial success is the contract: one bad feature never aborts the batch. The
     fields mirror the single-row error envelope — for a geometry conflict the
-    incumbent ``geoid``/``uri``/``collection`` are carried (the same payload a
-    single duplicate POST's 409 returns).
+    incumbent ``geoid``/``uri``/``collection`` are carried under the same
+    caller-aware disclosure gate as the single duplicate POST's 409 (withheld
+    when the caller may not read the incumbent's collection).
     """
 
     index: int = Field(description="Zero-based position in the submitted features array.")

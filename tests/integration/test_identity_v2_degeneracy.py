@@ -122,6 +122,7 @@ async def test_bulk_service_backstop_rejects_the_row_not_the_batch(session):
         collection=collection,
         index=0,
         feature=_constructed_sliver(),
+        disclosure_cache={},
     )
     assert outcome.reason == "invalid_geometry"
     assert "identity precision" in outcome.detail

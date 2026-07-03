@@ -58,10 +58,12 @@ router = APIRouter(tags=["registry"])
         status.HTTP_409_CONFLICT: {
             "model": GeometryConflictResponse,
             "description": (
-                "An identical geometry already exists in the catalog; the body "
-                "carries the incumbent geoid (geometry dedup is global). An "
-                "external_id duplicate also answers 409 — discriminate on "
-                "``constraint``."
+                "An identical geometry already exists in the catalog (geometry "
+                "dedup is global). The body carries the incumbent "
+                "geoid/uri/collection when the caller may read the incumbent's "
+                "collection (sysadmin / public_read / own mint / any grant); "
+                "otherwise those fields are null. An external_id duplicate also "
+                "answers 409 — discriminate on ``constraint``."
             ),
         },
     },

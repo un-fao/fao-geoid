@@ -100,12 +100,12 @@ class BulkLimitExceededError(GeoidServiceError):
 class GeometryConflictError(GeoidServiceError):
     """An identical geometry already exists in the catalog (global dedup, 409).
 
-    Carries the incumbent geoid + its collection so the 409 body can point the
-    client at the existing registration: the insert fails AND the response names
-    the existing geoid.
+    ``geoid``/``collection`` name the incumbent when the caller may read its
+    collection (sysadmin / public_read / own mint / any grant); both are None
+    otherwise and the 409 body carries null incumbent fields.
     """
 
-    def __init__(self, geoid: uuid.UUID, collection: str) -> None:
+    def __init__(self, geoid: uuid.UUID | None, collection: str | None) -> None:
         self.geoid = geoid
         self.collection = collection
         super().__init__("identical geometry already exists in the catalog")
