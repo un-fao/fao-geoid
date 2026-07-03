@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Iterator
+from datetime import datetime
 from typing import Any, Literal
 
 from geojson_pydantic import Feature
@@ -12,6 +13,7 @@ from pydantic import BaseModel, Field, model_validator
 
 from geoid.domain.geometry_format import decode_geometry
 from geoid.domain.geometry_identity import DegenerateGeometryError, canonical_bytes
+from geoid.domain.identifiers import derive_identifiers
 
 # Accepted geometry types. Lines and GeometryCollection are NOT accepted and are
 # rejected at the schema boundary (422).
@@ -143,6 +145,33 @@ class MintResponse(BaseModel):
     uri: str = Field(description="Durable resolver URI, e.g. https://data.fao.org/geoid/<uuid>.")
     collection: str = Field(description="Collection slug the place was minted into.")
     external_id: str | None = Field(default=None)
+
+
+class PlaceRecord(BaseModel):
+    """A geometry-free place record — one row of a listing.
+
+    Backs both ``GET /me/geoids`` (the caller's own mints) and the sysadmin
+    ``GET /manage/collections/{id}/items`` inventory. Deliberately carries NO
+    geometry: listings answer "which geoids", never "which shapes" — resolve a
+    geoid for the feature itself.
+    """
+
+    geoid: str
+    uri: str
+    collection: str
+    external_id: str | None = None
+    created_at: datetime
+
+    @classmethod
+    def from_row(cls, row: dict[str, Any], *, base_url: str) -> PlaceRecord:
+        ids = derive_identifiers(row["geoid"], base_url=base_url)
+        return cls(
+            geoid=ids["geoid"],
+            uri=ids["uri"],
+            collection=row["collection_slug"],
+            external_id=row.get("external_id"),
+            created_at=row["created_at"],
+        )
 
 
 class GeometryConflictResponse(BaseModel):

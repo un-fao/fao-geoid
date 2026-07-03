@@ -266,6 +266,31 @@ async def get_by_external_id(
     return dict(row) if row else None
 
 
+async def list_by_creator(
+    session: AsyncSession, created_by: str, *, limit: int, offset: int
+) -> list[dict[str, Any]]:
+    """The caller's own mints, newest first (backs ``GET /me/geoids``).
+
+    Filter + ORDER BY ride ``place_provenance_created_by_idx`` (migration 0009);
+    ``id`` tiebreaks equal timestamps for a stable page order.
+    """
+    stmt = text(
+        f"""
+        SELECT {_READ_COLUMNS}
+        FROM place p JOIN collection c ON c.id = p.collection_id
+        WHERE p.provenance->>'created_by' = :created_by
+        ORDER BY p.created_at DESC, p.id
+        LIMIT :limit OFFSET :offset
+        """
+    )
+    rows = (
+        (await session.execute(stmt, {"created_by": created_by, "limit": limit, "offset": offset}))
+        .mappings()
+        .all()
+    )
+    return [dict(r) for r in rows]
+
+
 async def collection_extent(
     session: AsyncSession, collection_id: uuid.UUID
 ) -> tuple[float, float, float, float] | None:

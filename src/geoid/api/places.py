@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import uuid
 
-from fastapi import APIRouter, Depends, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from geoid.api.format_param import output_format
@@ -27,6 +27,7 @@ from geoid.schemas.place import (
     GeometryConflictResponse,
     MintResponse,
     PlaceCreate,
+    PlaceRecord,
 )
 from geoid.services import authz_service, ogc_service, registry_service
 from geoid.services.exceptions import (
@@ -141,6 +142,34 @@ async def _can_read_collection(
     """
     grant = await authz_service.load_caller_grant(session, principal, collection)
     return authz_service.can_read(principal, collection, grant)
+
+
+@router.get(
+    "/me/geoids",
+    response_model=list[PlaceRecord],
+    summary="List the geoids the authenticated caller has minted (newest first)",
+    description=(
+        "Keyed on the caller's stable subject (Keycloak `sub`) recorded at mint "
+        "time. Anonymous callers have no identity to list — 401. Geometry-free "
+        "records; resolve a geoid for the feature itself."
+    ),
+)
+async def list_my_geoids(
+    principal: Principal = Depends(require_principal),
+    limit: int = Query(default=100, ge=1, le=1000),
+    offset: int = Query(default=0, ge=0),
+    session: AsyncSession = Depends(get_session),
+    settings: Settings = Depends(get_settings),
+) -> list[PlaceRecord]:
+    if principal.is_anonymous:
+        # 401 (not 403): same anonymous split as grants._require_manageable.
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Authentication required",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    rows = await place_repo.list_by_creator(session, principal.subject, limit=limit, offset=offset)
+    return [PlaceRecord.from_row(row, base_url=settings.base_url_clean) for row in rows]
 
 
 @router.get(

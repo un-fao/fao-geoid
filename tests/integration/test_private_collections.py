@@ -213,3 +213,44 @@ async def test_bulk_geometry_conflict_masked_and_disclosed(oidc_client, make_tok
     assert disclosed["reason"] == "geometry_conflict"
     assert disclosed["geoid"] == minted["geoid"]
     assert disclosed["collection"] == "priv-b"
+
+
+# --- GET /me/geoids ---------------------------------------------------------------
+
+
+async def test_me_geoids_requires_authentication(client):
+    assert (await client.get("/me/geoids")).status_code == 401
+
+
+async def test_me_geoids_lists_only_own_mints_newest_first(oidc_client, make_token, bearer):
+    alice = bearer(make_token(sub="kc-alice", email="alice@x.org"))
+    bob = bearer(make_token(sub="kc-bob", email="bob@x.org"))
+    first = await _mint(oidc_client, "public", _square(100, 10), headers=alice)
+    second = await _mint(oidc_client, "public", _square(102, 10, external_id="mine"), headers=alice)
+    await _mint(oidc_client, "public", _square(104, 10), headers=bob)
+
+    resp = await oidc_client.get("/me/geoids", headers=alice)
+    assert resp.status_code == 200
+    records = resp.json()
+    assert [r["geoid"] for r in records] == [second["geoid"], first["geoid"]]
+    assert all(
+        set(r) == {"geoid", "uri", "collection", "external_id", "created_at"} for r in records
+    )
+    assert records[0]["external_id"] == "mine"
+    assert records[0]["collection"] == "public"
+
+    bobs = (await oidc_client.get("/me/geoids", headers=bob)).json()
+    assert len(bobs) == 1
+
+
+async def test_me_geoids_pagination(oidc_client, make_token, bearer):
+    carol = bearer(make_token(sub="kc-carol", email="carol@x.org"))
+    minted = {
+        (await _mint(oidc_client, "public", _square(110 + 2 * i, 20), headers=carol))["geoid"]
+        for i in range(3)
+    }
+    page1 = (await oidc_client.get("/me/geoids?limit=2", headers=carol)).json()
+    page2 = (await oidc_client.get("/me/geoids?limit=2&offset=2", headers=carol)).json()
+    assert len(page1) == 2 and len(page2) == 1
+    assert {r["geoid"] for r in page1 + page2} == minted
+    assert (await oidc_client.get("/me/geoids?limit=0", headers=carol)).status_code == 422
