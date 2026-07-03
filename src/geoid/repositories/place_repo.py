@@ -235,6 +235,15 @@ _READ_COLUMNS = """
     p.originating_instance
 """
 
+# Listings are geometry-free (PlaceRecord): never pay ST_AsGeoJSON or ship
+# provenance for rows whose geometry the response discards.
+_LIST_COLUMNS = """
+    p.id AS geoid,
+    c.slug AS collection_slug,
+    p.external_id,
+    p.created_at
+"""
+
 
 async def get_by_geoid(session: AsyncSession, geoid: uuid.UUID) -> dict[str, Any] | None:
     stmt = text(
@@ -276,7 +285,7 @@ async def list_by_creator(
     """
     stmt = text(
         f"""
-        SELECT {_READ_COLUMNS}
+        SELECT {_LIST_COLUMNS}
         FROM place p JOIN collection c ON c.id = p.collection_id
         WHERE p.provenance->>'created_by' = :created_by
         ORDER BY p.created_at DESC, p.id
@@ -302,7 +311,7 @@ async def list_by_collection(
     """
     stmt = text(
         f"""
-        SELECT {_READ_COLUMNS}
+        SELECT {_LIST_COLUMNS}
         FROM place p JOIN collection c ON c.id = p.collection_id
         WHERE p.collection_id = :collection_id
         ORDER BY p.created_at DESC, p.id
