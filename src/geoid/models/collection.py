@@ -26,6 +26,11 @@ class Collection(Base):
     writable_anon: Mapped[bool] = mapped_column(
         Boolean, nullable=False, server_default=text("false")
     )
+    # When false, reads are grant-gated (404-masked); see authz_service.can_read.
+    # default=True alongside server_default avoids an async refetch after flush.
+    public_read: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=True, server_default=text("true")
+    )
     meta: Mapped[dict[str, Any]] = mapped_column(
         "metadata", JSONB, nullable=False, server_default=text("'{}'::jsonb")
     )

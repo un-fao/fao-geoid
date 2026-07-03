@@ -14,6 +14,7 @@ def _collection_out(collection: Collection) -> CollectionOut:
         id=collection.slug,
         title=collection.title,
         writable_anon=collection.writable_anon,
+        public_read=collection.public_read,
         metadata=collection.meta,
     )
 
@@ -43,6 +44,7 @@ async def create_collection(session: AsyncSession, body: CollectionCreate) -> Co
         slug=body.id,
         title=body.title,
         writable_anon=body.writable_anon,
+        public_read=body.public_read,
         metadata=body.metadata,
     )
     return _collection_out(collection)

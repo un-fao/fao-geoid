@@ -30,6 +30,10 @@ async def get_by_slug(
     return (await session.execute(stmt)).scalar_one_or_none()
 
 
+async def get_by_id(session: AsyncSession, collection_id: uuid.UUID) -> Collection | None:
+    return await session.get(Collection, collection_id)
+
+
 async def list_all(session: AsyncSession) -> list[Collection]:
     stmt = select(Collection).order_by(Collection.slug.asc())
     return list((await session.execute(stmt)).scalars().all())
@@ -42,6 +46,7 @@ async def create(
     slug: str,
     title: str | None = None,
     writable_anon: bool = False,
+    public_read: bool = True,
     metadata: dict[str, Any] | None = None,
 ) -> Collection:
     collection = Collection(
@@ -50,6 +55,7 @@ async def create(
         slug=slug,
         title=title,
         writable_anon=writable_anon,
+        public_read=public_read,
         meta=metadata or {},
     )
     session.add(collection)

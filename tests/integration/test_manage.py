@@ -28,7 +28,7 @@ async def test_create_collection(client, admin_headers):
     assert body["writable_anon"] is False
     # The catalog tier is hidden: no internal UUID, no catalog_id in the response.
     assert "catalog_id" not in body
-    assert set(body) == {"id", "title", "writable_anon", "metadata"}
+    assert set(body) == {"id", "title", "writable_anon", "public_read", "metadata"}
 
 
 async def test_create_collection_id_round_trips_in_url(client, admin_headers):
