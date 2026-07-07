@@ -15,6 +15,7 @@ from geoid.models.change_log import ChangeLog
 from geoid.models.collection import Collection
 from geoid.models.collection_grant import CollectionGrant
 from geoid.models.geoid_registry import GeoidRegistry
+from geoid.models.import_job import ImportJob
 from geoid.models.place import Place
 from geoid.models.stubs import ApiKey, AuthorityAssertion
 
@@ -22,6 +23,7 @@ __all__ = [
     "Catalog",
     "Collection",
     "CollectionGrant",
+    "ImportJob",
     "Place",
     "GeoidRegistry",
     "ChangeLog",

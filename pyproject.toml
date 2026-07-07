@@ -38,6 +38,17 @@ oidc = ["pyjwt[crypto]>=2.10"]
 # sync psycopg driver, which is otherwise dev-only. Installed via the Dockerfile's
 # `uv sync --extra ops`.
 ops = ["psycopg[binary]>=3.2"]
+# Async bulk import jobs (POST /items/import): the worker's blob fetch (httpx),
+# streaming parse (ijson), GCS listing/reads (google-cloud-storage), and the
+# API-side Cloud Run Jobs dispatch (google-cloud-run). All imported lazily so a
+# static image built WITHOUT this extra still serves the core API; the deployed
+# image installs it (Dockerfile `uv sync --extra jobs`).
+jobs = [
+    "httpx>=0.27",
+    "ijson>=3.3",
+    "google-cloud-run>=0.10",
+    "google-cloud-storage>=2.18",
+]
 
 [project.scripts]
 geoid = "geoid.cli:main"
@@ -56,6 +67,11 @@ dev = [
     # OIDC auth deps available to the test suite (test_oidc.py mints synthetic RS256
     # JWTs); production gets the same via the `oidc` extra.
     "pyjwt[crypto]>=2.10",
+    # Import-jobs deps available to the test suite (worker + executor tests);
+    # production gets the same via the `jobs` extra.
+    "ijson>=3.3",
+    "google-cloud-run>=0.10",
+    "google-cloud-storage>=2.18",
 ]
 
 [build-system]

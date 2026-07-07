@@ -42,19 +42,36 @@ from geoid.services.exceptions import (
     GeometryConflictError,
     GeometryInvalidError,
     GrantNotFoundError,
+    JobFailedError,
+    JobLaunchError,
+    JobNotFoundError,
+    JobRefRejectedError,
+    JobResultsNotReadyError,
     LastOwnerGuardError,
     PlaceNotFoundError,
     RegistryConsistencyError,
+    TooManyJobsError,
     WriteNotAuthorizedError,
 )
 
 logger = logging.getLogger(__name__)
+
+# OGC API - Processes Part 1 v1.0 registered exception types (RFC 7807-shaped
+# bodies; used by the /jobs read surface, not the standard envelope below).
+_OGC_EXC = "http://www.opengis.net/def/exceptions/ogcapi-processes-1/1.0"
 
 
 def _error(status_code: int, message: str, **extra: object) -> JSONResponse:
     return JSONResponse(
         status_code=status_code,
         content={"code": status_code, "message": message, **extra},
+    )
+
+
+def _ogc_exception(status_code: int, exc_type: str, title: str, detail: str) -> JSONResponse:
+    return JSONResponse(
+        status_code=status_code,
+        content={"type": exc_type, "title": title, "status": status_code, "detail": detail},
     )
 
 
@@ -123,6 +140,46 @@ def register_exception_handlers(app: FastAPI) -> None:
             uri=ids["uri"],
             collection=exc.collection,
             constraint=UQ_GEOID_REGISTRY_GEOM_HASH,
+        )
+
+    @app.exception_handler(JobNotFoundError)
+    async def _job_not_found(_: Request, exc: JobNotFoundError) -> JSONResponse:
+        # Existence-masking: unknown id and not-the-creator answer identically.
+        return _ogc_exception(
+            status.HTTP_404_NOT_FOUND, f"{_OGC_EXC}/no-such-job", "no such job", str(exc)
+        )
+
+    @app.exception_handler(JobResultsNotReadyError)
+    async def _job_results_not_ready(_: Request, exc: JobResultsNotReadyError) -> JSONResponse:
+        return _ogc_exception(
+            status.HTTP_404_NOT_FOUND,
+            f"{_OGC_EXC}/result-not-ready",
+            "result not ready",
+            str(exc),
+        )
+
+    @app.exception_handler(JobFailedError)
+    async def _job_failed(_: Request, exc: JobFailedError) -> JSONResponse:
+        # Req 46: a failed job's /results carries the stored failure message in an
+        # RFC 7807-shaped body. No registered OGC type exists for this case, so
+        # about:blank (the status code carries the semantics).
+        return _ogc_exception(
+            status.HTTP_500_INTERNAL_SERVER_ERROR, "about:blank", "import job failed", str(exc)
+        )
+
+    @app.exception_handler(JobRefRejectedError)
+    async def _job_ref_rejected(_: Request, exc: JobRefRejectedError) -> JSONResponse:
+        return _error(status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc))
+
+    @app.exception_handler(JobLaunchError)
+    async def _job_launch_failed(_: Request, exc: JobLaunchError) -> JSONResponse:
+        logger.exception("import job %s failed to launch", exc.job_id)
+        return _error(status.HTTP_500_INTERNAL_SERVER_ERROR, str(exc), job_id=exc.job_id)
+
+    @app.exception_handler(TooManyJobsError)
+    async def _too_many_jobs(_: Request, exc: TooManyJobsError) -> JSONResponse:
+        return _error(
+            status.HTTP_429_TOO_MANY_REQUESTS, str(exc), active=exc.active, limit=exc.limit
         )
 
     @app.exception_handler(RegistryConsistencyError)

@@ -217,6 +217,33 @@ jobs:
             --project "$PROJECT" \
             --wait
 
+      # Async bulk import worker: one Cloud Run Job execution per submitted import
+      # (the API triggers it via run_v2 with a GEOID_JOB_ID env override). Deploy-only
+      # — NEVER `execute` here; executions are created by the service at submit time.
+      # Both secrets: the worker builds full Settings (needs the real admin token
+      # outside development) and mints URIs (needs BASE_URL/ROOT_PATH/INSTANCE_ID).
+      # Pool 2 + overflow 0: N concurrent executions cost 2N conns against the ~100
+      # budget. One-time IAM (documented in DEPLOYMENT.md): the runtime SA needs
+      # roles/run.jobsExecutorWithOverrides ON THIS JOB + storage.objectViewer on
+      # each allowed source bucket.
+      - name: Deploy import worker (Cloud Run Job, no execute)
+        run: |
+          gcloud run jobs deploy "${SERVICE}-import" \
+            --image "$IMAGE" \
+            --region "$REGION" \
+            --project "$PROJECT" \
+            --service-account "$RUN_SERVICE_ACCOUNT" \
+            --set-cloudsql-instances "$CLOUD_SQL_INSTANCE" \
+            --network "${{ vars.VPC_NETWORK }}" \
+            --subnet "${{ vars.VPC_SUBNET }}" \
+            --vpc-egress private-ranges-only \
+            --set-secrets GEOID_DATABASE_URL=geoid-database-url:latest,GEOID_ADMIN_TOKEN=geoid-admin-token:latest \
+            --set-env-vars "^@^GEOID_ENVIRONMENT=$TARGET_ENV@GEOID_BASE_URL=${{ vars.GEOID_BASE_URL }}@GEOID_ROOT_PATH=${{ vars.GEOID_ROOT_PATH }}@GEOID_INSTANCE_ID=${{ vars.GEOID_INSTANCE_ID }}@GEOID_PUBLIC_COLLECTION=${{ vars.GEOID_PUBLIC_COLLECTION }}@GEOID_DB_POOL_SIZE=2@GEOID_DB_MAX_OVERFLOW=0@GEOID_JOB_ALLOWED_BUCKETS=${{ vars.GEOID_JOB_ALLOWED_BUCKETS }}" \
+            --command geoid --args import \
+            --memory 2Gi \
+            --task-timeout 3600 \
+            --max-retries 0
+
       - name: Deploy service (Cloud Run)
         run: |
           # OIDC dual-auth is enabled at REVIEW only (the static admin token is
@@ -241,7 +268,7 @@ jobs:
             --subnet "${{ vars.VPC_SUBNET }}" \
             --vpc-egress private-ranges-only \
             --set-secrets GEOID_DATABASE_URL=geoid-database-url:latest,GEOID_ADMIN_TOKEN=geoid-admin-token:latest \
-            --set-env-vars "^@^GEOID_ENVIRONMENT=$TARGET_ENV@GEOID_BASE_URL=${{ vars.GEOID_BASE_URL }}@GEOID_ROOT_PATH=${{ vars.GEOID_ROOT_PATH }}@GEOID_INSTANCE_ID=${{ vars.GEOID_INSTANCE_ID }}@GEOID_PUBLIC_COLLECTION=${{ vars.GEOID_PUBLIC_COLLECTION }}@GEOID_BULK_MAX_FEATURES=2500@GEOID_DB_POOL_SIZE=5@GEOID_DB_MAX_OVERFLOW=15${OIDC_ENV}" \
+            --set-env-vars "^@^GEOID_ENVIRONMENT=$TARGET_ENV@GEOID_BASE_URL=${{ vars.GEOID_BASE_URL }}@GEOID_ROOT_PATH=${{ vars.GEOID_ROOT_PATH }}@GEOID_INSTANCE_ID=${{ vars.GEOID_INSTANCE_ID }}@GEOID_PUBLIC_COLLECTION=${{ vars.GEOID_PUBLIC_COLLECTION }}@GEOID_BULK_MAX_FEATURES=2500@GEOID_DB_POOL_SIZE=5@GEOID_DB_MAX_OVERFLOW=15@GEOID_JOB_EXECUTOR=cloud_run_job@GEOID_IMPORT_JOB_NAME=projects/$PROJECT/locations/$REGION/jobs/$SERVICE-import@GEOID_JOB_ALLOWED_BUCKETS=${{ vars.GEOID_JOB_ALLOWED_BUCKETS }}${OIDC_ENV}" \
             --port 8000 \
             --allow-unauthenticated \
             --execution-environment gen2 \

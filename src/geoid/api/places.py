@@ -10,6 +10,7 @@ from __future__ import annotations
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
+from fastapi.responses import JSONResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from geoid.api.format_param import output_format
@@ -19,6 +20,7 @@ from geoid.db import get_session
 from geoid.deps import Principal, require_principal
 from geoid.domain.geometry_format import GeometryFormat
 from geoid.repositories import collection_repo, place_repo
+from geoid.schemas.job import ImportSubmission, StatusInfo, status_info_from_job
 from geoid.schemas.ogc import FeatureModel
 from geoid.schemas.place import (
     BulkFeatureCollection,
@@ -28,7 +30,7 @@ from geoid.schemas.place import (
     PlaceCreate,
     PlaceRecord,
 )
-from geoid.services import authz_service, ogc_service, registry_service
+from geoid.services import authz_service, job_service, ogc_service, registry_service
 from geoid.services.exceptions import (
     BulkLimitExceededError,
     CollectionNotFoundError,
@@ -128,6 +130,71 @@ async def create_items_bulk(
         principal=principal,
         collection=collection,
         features=body.features,
+    )
+
+
+@router.post(
+    "/collections/{collection_id}/items/import",
+    status_code=status.HTTP_201_CREATED,
+    response_model=StatusInfo,
+    summary="Submit an async bulk import from a storage blob (GCS/S3) — returns a job",
+    description=(
+        "Point GeoID at a GeoJSON source (`href`: an HTTPS (pre)signed URL or a "
+        "`gs://` object; or `prefix`: every matching object under a `gs://` "
+        "prefix) and poll the returned job URL (OGC API - Processes statusInfo) "
+        "until the per-feature outcome report is ready at `/jobs/{jobID}/results`. "
+        "Authenticated callers only. Failures mid-run keep already-committed "
+        "chunks; resubmitting converges via global dedup (already-minted features "
+        "report `geometry_conflict`)."
+    ),
+    responses={
+        status.HTTP_201_CREATED: {
+            "headers": {
+                "Location": {
+                    "description": "The job's statusInfo URL (poll it).",
+                    "schema": {"type": "string", "format": "uri"},
+                }
+            }
+        },
+        status.HTTP_429_TOO_MANY_REQUESTS: {
+            "description": "Too many import jobs are active; retry after one finishes."
+        },
+    },
+)
+async def create_items_import(
+    collection_id: str,
+    body: ImportSubmission,
+    principal: Principal = Depends(require_principal),
+    session: AsyncSession = Depends(get_session),
+    settings: Settings = Depends(get_settings),
+) -> JSONResponse:
+    # Job creation is authenticated-only (unlike the inline bulk route, where
+    # anonymous writes into writable_anon collections stay allowed): a job row
+    # snapshots its creator for later authz re-checks and status visibility.
+    if principal.is_anonymous:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Authentication required",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    collection = await collection_repo.get_by_slug(session, collection_id)
+    if collection is None:
+        raise CollectionNotFoundError(collection_id)
+    job = await job_service.create_job(
+        session,
+        settings=settings,
+        principal=principal,
+        collection=collection,
+        submission=body,
+    )
+    status_url = f"{settings.base_url_clean}/jobs/{job.id}"
+    info = status_info_from_job(job)
+    # Spec-exact (18-062r2 Req 34): async creation answers 201 + Location + the
+    # statusInfo body.
+    return JSONResponse(
+        status_code=status.HTTP_201_CREATED,
+        content=info.model_dump(mode="json", exclude_none=True),
+        headers={"Location": status_url},
     )
 
 

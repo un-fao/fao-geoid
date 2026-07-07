@@ -111,6 +111,67 @@ class GeometryConflictError(GeoidServiceError):
         super().__init__("identical geometry already exists in the catalog")
 
 
+class JobNotFoundError(GeoidServiceError):
+    """Unknown job id — OR a job the caller may not see (existence-masking 404).
+
+    Mapped to the OGC ``no-such-job`` exception body: a non-creator probing a real
+    job id gets the byte-identical response an unknown id gets.
+    """
+
+    def __init__(self, job_id: str) -> None:
+        self.job_id = job_id
+        super().__init__(f"no job with id {job_id}")
+
+
+class JobResultsNotReadyError(GeoidServiceError):
+    """Results requested while the job is still accepted/running (OGC 404)."""
+
+    def __init__(self, job_id: str) -> None:
+        self.job_id = job_id
+        super().__init__(f"results of job {job_id} are not ready")
+
+
+class JobFailedError(GeoidServiceError):
+    """Results requested for a failed job — 500 + the stored failure message (Req 46)."""
+
+    def __init__(self, job_id: str, message: str | None) -> None:
+        self.job_id = job_id
+        self.message = message
+        super().__init__(message or f"job {job_id} failed")
+
+
+class JobRefRejectedError(GeoidServiceError):
+    """Submitted href/prefix failed validation (scheme/host/bucket allowlists, 422)."""
+
+    def __init__(self, reason: str) -> None:
+        self.reason = reason
+        super().__init__(reason)
+
+
+class JobLaunchError(GeoidServiceError):
+    """The executor could not start the import execution (500).
+
+    The job row is already flipped to ``failed`` when this is raised — an
+    auditable failure, never an orphan ``accepted`` row.
+    """
+
+    def __init__(self, job_id: str) -> None:
+        self.job_id = job_id
+        super().__init__("failed to start import execution")
+
+
+class TooManyJobsError(GeoidServiceError):
+    """Submit-time concurrency valve: too many active import jobs (429)."""
+
+    def __init__(self, active: int, limit: int) -> None:
+        self.active = active
+        self.limit = limit
+        super().__init__(
+            f"import job rejected: {active} jobs already active, limit is {limit} "
+            "(GEOID_JOB_MAX_CONCURRENT); retry after one finishes"
+        )
+
+
 class RegistryConsistencyError(GeoidServiceError):
     """A dedup loser whose incumbent collection never materialised (500).
 

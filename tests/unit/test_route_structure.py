@@ -58,12 +58,15 @@ def test_every_mutating_route_is_in_the_authorized_inventory():
     }
     # Every entry's authorization mechanism, verified at review time:
     #   items / items/bulk  -> registry_service._authorize_write (service layer)
+    #   items/import        -> anonymous→401 in the route, then _authorize_write
+    #                          via job_service.create_job (authenticated-only jobs)
     #   grants routes       -> api.grants._require_manageable (anon→401, owner|sysadmin)
     #   /manage/*           -> require_admin router dependency
     # Adding a mutating route? Wire its authz, then extend this set.
     assert mutating == {
         ("POST", "/collections/{collection_id}/items"),
         ("POST", "/collections/{collection_id}/items/bulk"),
+        ("POST", "/collections/{collection_id}/items/import"),
         ("POST", "/collections/{collection_id}/grants"),
         ("DELETE", "/collections/{collection_id}/grants/{email}"),
         ("POST", "/manage/collections"),

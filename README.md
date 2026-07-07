@@ -176,5 +176,9 @@ ALTER TABLE change_log     ENABLE TRIGGER USER;  -- keeps catalog/collection see
 
 **Authenticated access is live**: hybrid Keycloak OIDC + a static admin token, with per-collection
 owner/editor/viewer grants — see [`local-scripts/docs/auth.html`](local-scripts/docs/auth.html).
-**Synchronous bulk write is live**: `POST /collections/{id}/items/bulk`. Planned next: an
+**Synchronous bulk write is live**: `POST /collections/{id}/items/bulk`.
+**Async bulk import is live**: `POST /collections/{id}/items/import` — point GeoID at a storage
+blob (an HTTPS pre-signed URL or `gs://`) or a whole `gs://` prefix, then poll the returned
+`GET /jobs/{jobID}` (OGC API - Processes status subset) until the per-feature report is ready at
+`GET /jobs/{jobID}/results` (ADR-008). Planned next: an
 open-source release, and standalone country instances with federation.

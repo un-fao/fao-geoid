@@ -9,7 +9,7 @@ from fastapi import Depends, FastAPI
 from sqlalchemy.exc import InterfaceError, OperationalError
 
 from geoid import __version__
-from geoid.api import grants, health, manage, ogc, places
+from geoid.api import grants, health, jobs, manage, ogc, places
 from geoid.api.errors import register_exception_handlers
 from geoid.config import Settings, get_settings
 from geoid.db import dispose_engine, get_sessionmaker
@@ -25,6 +25,8 @@ provenance — served over **OGC API Features**.
 * **Write / registry** — `POST /collections/{id}/items` → `{geoid, uri}`
 * **Bulk write** — `POST /collections/{id}/items/bulk` (a GeoJSON FeatureCollection,
   processed in-request, returns a per-feature report)
+* **Async import** — `POST /collections/{id}/items/import` (point GeoID at a storage
+  blob or `gs://` prefix, poll `GET /jobs/{jobID}`, fetch `GET /jobs/{jobID}/results`)
 * **Resolve** — `GET /{uuid}`, `GET /collections/{id}/external/{external_id}`
 * **Health** — `GET /health` (DB connectivity probe)
 """
@@ -110,6 +112,7 @@ def create_app() -> FastAPI:
     app.include_router(health.router)
     app.include_router(ogc.router, include_in_schema=False)  # live, but hidden from /docs
     app.include_router(grants.router)
+    app.include_router(jobs.router)
     app.include_router(places.router)
     app.include_router(manage.router)
 

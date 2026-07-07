@@ -173,3 +173,35 @@ def test_database_settings_excludes_app_level_fields():
 
 def test_settings_inherits_database_fields():
     assert _settings().db_pool_size == 10
+
+
+def test_cloud_run_job_executor_requires_the_job_name():
+    with pytest.raises(ValidationError, match="GEOID_IMPORT_JOB_NAME"):
+        _settings(job_executor="cloud_run_job")
+
+
+def test_cloud_run_job_executor_boots_with_the_job_name():
+    settings = _settings(
+        job_executor="cloud_run_job",
+        import_job_name="projects/p/locations/r/jobs/geoid-import",
+    )
+    assert settings.import_job_name.endswith("/jobs/geoid-import")
+
+
+def test_inline_executor_is_the_default_and_needs_no_job_name():
+    settings = _settings()
+    assert settings.job_executor == "inline"
+    assert settings.import_job_name is None
+
+
+def test_job_allowlists_parse_csv_with_whitespace():
+    settings = _settings(
+        job_allowed_url_hosts=" a.example.org , *.b.example.org ",
+        job_allowed_buckets=" bucket-a ,bucket-b ",
+    )
+    assert settings.job_allowed_url_hosts_list == ("a.example.org", "*.b.example.org")
+    assert settings.job_allowed_buckets_list == ("bucket-a", "bucket-b")
+
+
+def test_gs_buckets_default_to_disabled():
+    assert _settings().job_allowed_buckets_list == ()

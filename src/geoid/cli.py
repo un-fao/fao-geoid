@@ -1,7 +1,9 @@
-"""CLI entrypoints — one image, two commands: ``web`` and ``migrate``.
+"""CLI entrypoints — one image, three commands: ``web``, ``migrate``, ``import``.
 
 geoid web      # run the API (uvicorn)
 geoid migrate  # apply Alembic migrations to head (Cloud Run Job)
+geoid import   # run ONE async import job to completion (Cloud Run Job);
+               # job id from GEOID_JOB_ID (the per-execution env override) or argv
 """
 
 from __future__ import annotations
@@ -65,14 +67,42 @@ def run_migrate() -> None:
     command.upgrade(config, "head")
 
 
+def run_import() -> int:
+    import asyncio
+
+    # Same rationale as run_web: without a root handler the worker's INFO records
+    # (claim/finish/failure) never emit in the deployed image.
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+    )
+    job_id = os.environ.get("GEOID_JOB_ID") or (sys.argv[2] if len(sys.argv) > 2 else None)
+    if not job_id:
+        logger.error("no job id: set GEOID_JOB_ID or pass it as the second argument")
+        return 2
+
+    from geoid.db import dispose_engine
+    from geoid.services import import_service
+
+    async def _run() -> int:
+        try:
+            return await import_service.run_job(job_id)
+        finally:
+            await dispose_engine()
+
+    return asyncio.run(_run())
+
+
 def main() -> int:
     command = sys.argv[1] if len(sys.argv) > 1 else "web"
     if command == "web":
         run_web()
     elif command == "migrate":
         run_migrate()
+    elif command == "import":
+        return run_import()
     else:
-        logger.error("unknown command %r; use 'web' or 'migrate'", command)
+        logger.error("unknown command %r; use 'web', 'migrate' or 'import'", command)
         return 2
     return 0
 

@@ -119,6 +119,71 @@ class Settings(DatabaseSettings):
         ),
     )
 
+    # --- Async bulk import jobs (OGC Processes subset; POST /items/import) -----
+    job_executor: Literal["inline", "cloud_run_job"] = Field(
+        default="inline",
+        description=(
+            "How submitted import jobs run: 'inline' = an asyncio task in this "
+            "process (dev/compose/tests, zero cloud deps); 'cloud_run_job' = one "
+            "Cloud Run Job execution per import (the deployed shape)."
+        ),
+    )
+    import_job_name: str | None = Field(
+        default=None,
+        description=(
+            "Fully-qualified Cloud Run Job name the executor triggers "
+            "(projects/P/locations/R/jobs/NAME). Required iff "
+            "job_executor='cloud_run_job'."
+        ),
+    )
+    job_max_bytes: int = Field(
+        default=104_857_600,
+        ge=1,
+        description="Per-blob download cap (bytes); counted while streaming, never trusted.",
+    )
+    job_max_features: int = Field(
+        default=100_000,
+        ge=1,
+        description=(
+            "Hard cap on total features across one import job. A write bound MUST "
+            "error (job fails), never silently truncate — enforced mid-stream."
+        ),
+    )
+    job_max_files: int = Field(
+        default=1_000, ge=1, description="Cap on objects a gs:// prefix job may ingest."
+    )
+    job_max_concurrent: int = Field(
+        default=3,
+        ge=1,
+        description="Submit-time valve: active (accepted/running) jobs beyond this → 429.",
+    )
+    job_stale_seconds: int = Field(
+        default=600,
+        ge=1,
+        description=(
+            "On-read reaper threshold: a 'running' job whose heartbeat (updated_at) "
+            "is older than this is flipped to failed when its status is next read."
+        ),
+    )
+    job_allowed_url_hosts: str = Field(
+        default=(
+            "storage.googleapis.com,*.storage.googleapis.com,"
+            "s3.amazonaws.com,*.s3.amazonaws.com,*.amazonaws.com"
+        ),
+        description=(
+            "CSV host allowlist for https import refs ('*.suffix' wildcards). THE "
+            "SSRF control: only vendor storage hosts are fetchable by the worker."
+        ),
+    )
+    job_allowed_buckets: str = Field(
+        default="",
+        description=(
+            "CSV allowlist of GCS buckets reachable via native gs:// refs/prefixes. "
+            "Default EMPTY = gs:// disabled — kills the confused-deputy problem "
+            "(callers pointing our service account at any bucket it can read)."
+        ),
+    )
+
     # --- OIDC resource-server auth (Keycloak / FAO `<realm>` realm).
     #     DISABLED by default: oidc_enabled stays gated on issuer + jwks_url, so a
     #     bare config is static-token-only. Set GEOID_OIDC_ISSUER + GEOID_OIDC_JWKS_URL
@@ -165,6 +230,25 @@ class Settings(DatabaseSettings):
         rp = self.root_path.strip()
         object.__setattr__(self, "root_path", "/" + rp.strip("/") if rp else "")
         return self
+
+    @model_validator(mode="after")
+    def _require_import_job_name(self) -> Settings:
+        # Fail fast at boot, not at first submit: the cloud_run_job executor cannot
+        # dispatch without the fully-qualified job name.
+        if self.job_executor == "cloud_run_job" and not self.import_job_name:
+            raise ValueError(
+                "GEOID_IMPORT_JOB_NAME is required when GEOID_JOB_EXECUTOR=cloud_run_job "
+                "(projects/P/locations/R/jobs/NAME)."
+            )
+        return self
+
+    @property
+    def job_allowed_url_hosts_list(self) -> tuple[str, ...]:
+        return tuple(h.strip().lower() for h in self.job_allowed_url_hosts.split(",") if h.strip())
+
+    @property
+    def job_allowed_buckets_list(self) -> tuple[str, ...]:
+        return tuple(b.strip() for b in self.job_allowed_buckets.split(",") if b.strip())
 
     @model_validator(mode="after")
     def _forbid_dev_token_in_prod(self) -> Settings:
