@@ -5,7 +5,7 @@ the ``PyJWKClient`` as a parameter so it stays unit-testable with a fake (inject
 JWKS — ``tests/unit/test_oidc.py`` mints synthetic RS256 tokens against an in-test
 keypair, no network. PyJWT is imported at module top because this module is only
 ever loaded when OIDC is active (``deps.py`` imports it lazily) or under tests
-(where the ``oidc`` dev extra is present); a static-token-only image never imports
+(where the ``oidc`` dev extra is present); an image without the extra never imports
 it, so ``deps.py`` still imports cleanly without PyJWT.
 
 Confirmed from the live ``<realm>`` realm metadata: RS256; our API

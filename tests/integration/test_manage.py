@@ -7,7 +7,7 @@ import pytest
 pytestmark = pytest.mark.integration
 
 
-async def test_manage_requires_admin_token(client):
+async def test_manage_requires_auth(client):
     assert (await client.get("/manage/collections")).status_code == 401
 
 

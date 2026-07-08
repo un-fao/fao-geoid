@@ -1,9 +1,9 @@
-"""Integration: hybrid dual-auth dispatch (static admin token + Keycloak JWT).
+"""Integration: Keycloak-only auth dispatch.
 
-Pins that enabling OIDC does NOT regress the static-token contract, that a valid
-``geoid.sysadmin`` JWT is treated as admin, that a valid non-admin JWT is a
-*non-anonymous* 403 (not 401) on admin routes, and that every rejected credential
-returns the SAME byte-identical 401 the static path returns.
+Pins that a valid ``geoid.sysadmin`` JWT is treated as admin, that a valid
+non-admin JWT is a *non-anonymous* 403 (not 401) on admin routes, and that every
+rejected credential — malformed, expired, forged, JWKS outage — returns the SAME
+byte-identical 401.
 """
 
 from __future__ import annotations
@@ -11,13 +11,6 @@ from __future__ import annotations
 import pytest
 
 pytestmark = pytest.mark.integration
-
-ADMIN = {"Authorization": "Bearer test-admin-token"}
-
-
-async def test_static_admin_token_still_works_with_oidc_enabled(oidc_client):
-    resp = await oidc_client.get("/manage/collections", headers=ADMIN)
-    assert resp.status_code == 200
 
 
 async def test_anonymous_public_reads_still_work_with_oidc_enabled(oidc_client):
@@ -78,10 +71,10 @@ async def test_wrong_issuer_jwt_is_401(oidc_client, make_token, bearer):
 async def test_sysadmin_jwt_can_mint_into_managed_collection(
     oidc_client, make_token, bearer, unit_square_ccw
 ):
-    await oidc_client.post(
-        "/manage/collections", headers=ADMIN, json={"id": "sm", "writable_anon": False}
-    )
     token = make_token(sub="kc-admin", email="admin@fao.org", roles=["geoid.sysadmin"])
+    await oidc_client.post(
+        "/manage/collections", headers=bearer(token), json={"id": "sm", "writable_anon": False}
+    )
     resp = await oidc_client.post(
         "/collections/sm/items", headers=bearer(token), json=unit_square_ccw
     )
@@ -154,25 +147,28 @@ async def test_unknown_kid_jwks_failure_is_401(jwks_error_client, make_token, be
     assert resp.json() == {"detail": "Invalid bearer token"}
 
 
-async def test_static_and_oidc_rejections_are_byte_identical(oidc_client, make_token, bearer):
-    # Cross-path parity asserted as response EQUALITY, not against a literal: a
-    # wrong static token (which falls through to the OIDC path) and a properly
-    # signed but expired JWT must be indistinguishable on the wire.
-    wrong_static = await oidc_client.get("/manage/collections", headers=bearer("wrong-token"))
+async def test_rejection_401s_are_byte_identical_across_failure_modes(
+    oidc_client, make_token, bearer
+):
+    # Cross-failure parity asserted as response EQUALITY, not against a literal: a
+    # bearer that is not a JWT at all (decode error) and a properly signed but
+    # expired JWT (claims error) must be indistinguishable on the wire.
+    not_a_jwt = await oidc_client.get("/manage/collections", headers=bearer("wrong-token"))
     bad_jwt = await oidc_client.get(
         "/manage/collections", headers=bearer(make_token(exp_delta=-3600))
     )
-    assert wrong_static.status_code == bad_jwt.status_code == 401
-    assert wrong_static.content == bad_jwt.content
-    assert wrong_static.headers.get("www-authenticate") == bad_jwt.headers.get("www-authenticate")
-    assert wrong_static.headers.get("content-type") == bad_jwt.headers.get("content-type")
+    assert not_a_jwt.status_code == bad_jwt.status_code == 401
+    assert not_a_jwt.content == bad_jwt.content
+    assert not_a_jwt.headers.get("www-authenticate") == bad_jwt.headers.get("www-authenticate")
+    assert not_a_jwt.headers.get("content-type") == bad_jwt.headers.get("content-type")
 
 
 async def test_non_ascii_bearer_token_is_401_not_500(client):
-    # Starlette decodes headers as latin-1, so non-ASCII bytes reach the static
-    # compare; compare_digest on str would raise TypeError → 500. The bytes-compare
-    # fix must keep this an ordinary 401 (H1). Value passed as bytes because httpx
-    # itself refuses non-ASCII str header values.
+    # Starlette decodes headers as latin-1, so non-ASCII bytes reach the OIDC
+    # validation path as a str; a stray "Bearer café" must be an ordinary 401,
+    # never a 500 (an unauthenticated-input crash would break the anti-oracle
+    # 401). Value passed as bytes because httpx itself refuses non-ASCII str
+    # header values.
     headers = {b"Authorization": "Bearer caf\xe9".encode("latin-1")}
     resp = await client.get("/manage/collections", headers=headers)
     assert resp.status_code == 401

@@ -219,18 +219,11 @@ jobs:
 
       - name: Deploy service (Cloud Run)
         run: |
-          # OIDC dual-auth is enabled at REVIEW only (the static admin token is
-          # unaffected either way — no flag day). Prod stays OIDC-off until CSI
-          # delivers the production realm, so the fragment is empty for production and
-          # the env-var string is byte-identical to before. The review issuer + JWKS
-          # URL come from the review GitHub Environment's vars (realm <realm>);
-          # audience/roles-client/admin-role use the config.py defaults. The Swagger
-          # sign-in button is also turned on at review (it renders now; it only
-          # completes once CSI registers the geoid-fe Swagger redirect URI).
-          OIDC_ENV=""
-          if [ "$TARGET_ENV" = "review" ]; then
-            OIDC_ENV="@GEOID_OIDC_ISSUER=${{ vars.GEOID_OIDC_ISSUER }}@GEOID_OIDC_JWKS_URL=${{ vars.GEOID_OIDC_JWKS_URL }}@GEOID_SWAGGER_OAUTH2_ENABLED=true"
-          fi
+          # Auth is Keycloak-only: the issuer + JWKS URL are REQUIRED (the service
+          # refuses to boot without them outside development) and come from the
+          # selected GitHub Environment's vars — realm <realm> at review,
+          # <realm> in production. Audience/roles-client/admin-role use the
+          # config.py defaults. The Swagger SSO sign-in button is on in both envs.
           gcloud run deploy "$SERVICE" \
             --image "$IMAGE" \
             --region "$REGION" \
@@ -240,8 +233,8 @@ jobs:
             --network "${{ vars.VPC_NETWORK }}" \
             --subnet "${{ vars.VPC_SUBNET }}" \
             --vpc-egress private-ranges-only \
-            --set-secrets GEOID_DATABASE_URL=geoid-database-url:latest,GEOID_ADMIN_TOKEN=geoid-admin-token:latest \
-            --set-env-vars "^@^GEOID_ENVIRONMENT=$TARGET_ENV@GEOID_BASE_URL=${{ vars.GEOID_BASE_URL }}@GEOID_ROOT_PATH=${{ vars.GEOID_ROOT_PATH }}@GEOID_INSTANCE_ID=${{ vars.GEOID_INSTANCE_ID }}@GEOID_PUBLIC_COLLECTION=${{ vars.GEOID_PUBLIC_COLLECTION }}@GEOID_BULK_MAX_FEATURES=2500@GEOID_DB_POOL_SIZE=5@GEOID_DB_MAX_OVERFLOW=15${OIDC_ENV}" \
+            --set-secrets GEOID_DATABASE_URL=geoid-database-url:latest \
+            --set-env-vars "^@^GEOID_ENVIRONMENT=$TARGET_ENV@GEOID_BASE_URL=${{ vars.GEOID_BASE_URL }}@GEOID_ROOT_PATH=${{ vars.GEOID_ROOT_PATH }}@GEOID_INSTANCE_ID=${{ vars.GEOID_INSTANCE_ID }}@GEOID_PUBLIC_COLLECTION=${{ vars.GEOID_PUBLIC_COLLECTION }}@GEOID_BULK_MAX_FEATURES=2500@GEOID_DB_POOL_SIZE=5@GEOID_DB_MAX_OVERFLOW=15@GEOID_OIDC_ISSUER=${{ vars.GEOID_OIDC_ISSUER }}@GEOID_OIDC_JWKS_URL=${{ vars.GEOID_OIDC_JWKS_URL }}@GEOID_SWAGGER_OAUTH2_ENABLED=true" \
             --port 8000 \
             --allow-unauthenticated \
             --execution-environment gen2 \

@@ -23,7 +23,7 @@ target_metadata = Base.metadata
 
 def _url() -> str:
     # DatabaseSettings, not Settings: migrations must not require app-level
-    # config (e.g. a real GEOID_ADMIN_TOKEN) to reach the database.
+    # config (e.g. the OIDC issuer/JWKS URL) to reach the database.
     return DatabaseSettings().database_url
 
 

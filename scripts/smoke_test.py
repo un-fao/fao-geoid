@@ -15,9 +15,11 @@ Env:
                        every returned link/uri must carry its host (catches the
                        BASE_URL misconfiguration, the #1 launch risk)
     GEOID_COLLECTION   default public
-    GEOID_ADMIN_TOKEN  enables the admin-gated collection read checks (GET /collections,
-                       GET /collections/{id}); also required to mint into a managed
-                       (non-anon) collection. Without it those read checks are skipped.
+    GEOID_BEARER_TOKEN a valid Keycloak access token (JWT). One carrying the
+                       sysadmin role enables the admin-gated collection read checks
+                       (GET /collections, GET /collections/{id}) and minting into a
+                       managed (non-anon) collection. Without it those read checks
+                       are skipped.
 
 Exit codes: 0 all checks passed · 1 one or more failed (CI / Cloud Run job friendly)
 """
@@ -34,7 +36,7 @@ from _timing import print_timings, record
 
 BASE = os.environ.get("GEOID_BASE_URL", "http://localhost:8000").rstrip("/")
 COLLECTION = os.environ.get("GEOID_COLLECTION", "public")
-ADMIN_TOKEN = os.environ.get("GEOID_ADMIN_TOKEN")
+BEARER_TOKEN = os.environ.get("GEOID_BEARER_TOKEN")
 
 SENTINEL_EXTERNAL_ID = "geoid-smoke-sentinel"
 # Fixed tiny (~11 m) square in the Gulf of Guinea. Constant on purpose: the
@@ -64,7 +66,7 @@ def _ensure(condition: bool, message: str) -> None:
 
 
 def _headers() -> dict[str, str]:
-    return {"Authorization": f"Bearer {ADMIN_TOKEN}"} if ADMIN_TOKEN else {}
+    return {"Authorization": f"Bearer {BEARER_TOKEN}"} if BEARER_TOKEN else {}
 
 
 def _expected_netloc() -> str:
@@ -112,7 +114,7 @@ def check_conformance(client: httpx.Client) -> str:
 
 
 def check_collections(client: httpx.Client) -> str:
-    # /collections is admin-gated — send the admin token.
+    # /collections is admin-gated — send the bearer token.
     ids = [
         c.get("id")
         for c in _get_json(client, "/collections", headers=_headers()).get("collections", [])
@@ -133,7 +135,7 @@ READ_CHECKS: tuple[tuple[str, Callable[[httpx.Client], str]], ...] = (
     ("conformance", check_conformance),
 )
 
-# Admin-gated read checks — only run when GEOID_ADMIN_TOKEN is set.
+# Admin-gated read checks — only run when GEOID_BEARER_TOKEN is set.
 ADMIN_READ_CHECKS: tuple[tuple[str, Callable[[httpx.Client], str]], ...] = (
     ("collections list", check_collections),
     ("collection describe", check_collection_desc),
@@ -244,12 +246,14 @@ def main() -> int:
             print(f"✗ cannot reach GeoID at {BASE} ({exc})")
             return 1
         results = [_run_check(name, lambda fn=fn: fn(client)) for name, fn in READ_CHECKS]
-        if ADMIN_TOKEN:
+        if BEARER_TOKEN:
             results += [
                 _run_check(name, lambda fn=fn: fn(client)) for name, fn in ADMIN_READ_CHECKS
             ]
         else:
-            print("  – collection read checks skipped (no GEOID_ADMIN_TOKEN; they are admin-gated)")
+            print(
+                "  – collection read checks skipped (no GEOID_BEARER_TOKEN; they are admin-gated)"
+            )
         if args.mint:
             results += run_mint_probe(client)
 

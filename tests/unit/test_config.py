@@ -21,7 +21,6 @@ def _isolate_env(monkeypatch):
         "GEOID_OIDC_JWKS_URL",
         "GEOID_OIDC_AUDIENCE",
         "GEOID_DEDUP_GRID_DEFAULT",
-        "GEOID_ADMIN_TOKEN",
         "GEOID_ENVIRONMENT",
         "GEOID_ROOT_PATH",
     ):
@@ -117,39 +116,40 @@ def test_bulk_max_features_default_is_1000():
 
 
 @pytest.mark.parametrize("environment", ["review", "production"])
-def test_default_admin_token_outside_development_is_rejected(environment):
+def test_missing_oidc_outside_development_is_rejected(environment):
+    # A deployed environment must never boot with zero authentication paths.
     with pytest.raises(ValidationError):
         _settings(environment=environment)
 
 
-def test_default_admin_token_in_development_is_allowed():
+@pytest.mark.parametrize("environment", ["review", "production"])
+def test_issuer_alone_outside_development_is_rejected(environment):
+    # Half-configured OIDC (issuer without JWKS URL) leaves oidc_enabled false.
+    with pytest.raises(ValidationError):
+        _settings(environment=environment, oidc_issuer="https://idp.fao.org/realms/geoid")
+
+
+@pytest.mark.parametrize("environment", ["review", "production"])
+def test_configured_oidc_outside_development_is_allowed(environment):
+    settings = _settings(
+        environment=environment,
+        oidc_issuer="https://idp.fao.org/realms/geoid",
+        oidc_jwks_url="https://idp.fao.org/realms/geoid/protocol/openid-connect/certs",
+    )
+    assert settings.environment == environment
+    assert settings.oidc_enabled is True
+
+
+def test_development_needs_no_oidc():
     settings = _settings()
     assert settings.environment == "development"
-    assert settings.admin_token == "change-me-dev-only"
-
-
-def test_real_admin_token_in_production_is_allowed():
-    settings = _settings(environment="production", admin_token="a-real-secret")
-    assert settings.environment == "production"
-    assert settings.admin_token == "a-real-secret"
+    assert settings.oidc_enabled is False
 
 
 @pytest.mark.parametrize("environment", ["review", "production"])
-@pytest.mark.parametrize("token", ["", "   "])
-def test_empty_or_whitespace_admin_token_outside_development_is_rejected(environment, token):
-    # A mis-mounted secret (empty value) must fail boot, exactly like the dev default.
-    with pytest.raises(ValidationError):
-        _settings(environment=environment, admin_token=token)
-
-
-def test_empty_admin_token_in_development_is_allowed():
-    assert _settings(admin_token="").admin_token == ""
-
-
-@pytest.mark.parametrize("environment", ["review", "production"])
-def test_database_settings_needs_no_admin_token_outside_development(monkeypatch, environment):
+def test_database_settings_needs_no_oidc_outside_development(monkeypatch, environment):
     # The regression pin: the migrate job constructs DatabaseSettings with no
-    # admin token mounted; that must never trip the dev-token guard.
+    # OIDC config mounted; that must never trip the OIDC-required guard.
     monkeypatch.setenv("GEOID_ENVIRONMENT", environment)
 
     settings = DatabaseSettings(_env_file=None)
@@ -167,7 +167,7 @@ def test_database_settings_reads_database_url_from_env(monkeypatch):
 
 def test_database_settings_excludes_app_level_fields():
     # Structural pin: app-layer config must not creep onto the DB-layer surface.
-    for field in ("admin_token", "environment", "base_url", "bulk_max_features"):
+    for field in ("oidc_issuer", "environment", "base_url", "bulk_max_features"):
         assert field not in DatabaseSettings.model_fields
 
 

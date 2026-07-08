@@ -1,22 +1,20 @@
 """Request-scoped dependencies: the auth seam and the DB session.
 
-**Hybrid, no flag day.** ``require_principal`` tries the static ``GEOID_ADMIN_TOKEN``
-bearer first (constant-time compare → the global ``sysadmin`` tier); if it doesn't
-match and ``settings.oidc_enabled`` is true, the credential is validated as a
-Keycloak RS256 JWT (FAO ``<realm>`` realm) and its claims mapped to a
-:class:`Principal`; otherwise the request is 401. The static token therefore keeps
-working unchanged whether or not OIDC is enabled, so nothing regresses.
+**Keycloak-only.** ``require_principal`` resolves the caller from a Keycloak RS256
+JWT: no credentials → anonymous (a valid outcome; routes decide whether anonymity
+is acceptable); a Bearer credential is validated against the configured realm and
+its claims mapped to a :class:`Principal`; when OIDC is not enabled (development
+only — a deployed environment refuses to boot without it) every credential is 401.
 
 The OIDC validation/mapping logic lives in :mod:`geoid.auth.oidc` (pure, network-free,
-unit-tested). PyJWT and ``PyJWKClient`` are imported **lazily** here so a
-static-token-only image built without the ``oidc`` extra still imports this module.
-On any token/JWKS failure the OIDC path raises the **same** 401 the static path uses,
-so the error body and headers are byte-identical regardless of which path ran.
+unit-tested). PyJWT and ``PyJWKClient`` are imported **lazily** here so an image
+built without the ``oidc`` extra still imports this module. Every rejected
+credential — malformed, expired, wrong audience, JWKS outage — raises the same
+byte-identical 401, so an unauthenticated caller learns nothing about the cause.
 """
 
 from __future__ import annotations
 
-import hmac
 import logging
 from dataclasses import dataclass, field
 from functools import lru_cache
@@ -37,13 +35,12 @@ _BEARER = "Bearer"
 _WWW_AUTH = {"WWW-Authenticate": _BEARER}
 
 # auto_error=False -> anonymous requests (no header) are allowed through; routes
-# decide whether anonymity is acceptable. Also renders an Authorize button in /docs.
-# The same paste-a-bearer field carries BOTH credential types (static admin token
-# AND a Keycloak JWT) — there is no separate static-only scheme.
+# decide whether anonymity is acceptable. Also renders an Authorize button in /docs;
+# the pasted credential is a Keycloak access token (JWT).
 bearer_scheme = HTTPBearer(
     auto_error=False,
     scheme_name="GeoIDBearer",
-    description="Paste your access token here to authorize your requests.",
+    description="Paste your Keycloak access token (JWT) here to authorize your requests.",
 )
 
 
@@ -51,10 +48,10 @@ bearer_scheme = HTTPBearer(
 class Principal:
     """The resolved caller. Anonymous principals have ``subject is None``.
 
-    ``email``/``email_verified`` are populated only on the Keycloak path (the static
-    admin and anonymous principals leave them at their defaults). They are appended
-    after the original three fields so ``admin()``/``anonymous()`` and every existing
-    call site stay valid.
+    ``email``/``email_verified`` are populated from the Keycloak claims (anonymous
+    principals leave them at their defaults). They are appended after the original
+    three fields so ``admin()``/``anonymous()`` and every existing call site stay
+    valid. ``admin()`` is the sysadmin-tier constructor (tests and tooling).
 
     ``roles`` is audit/logging-only — every authorization decision branches on the
     precomputed ``is_admin`` (and the per-collection grant ladder), never on this
@@ -81,7 +78,7 @@ class Principal:
 
 
 def _invalid_token() -> HTTPException:
-    """The single 401 both the static and OIDC paths raise (byte-identical body)."""
+    """The single 401 every rejected credential raises (byte-identical body)."""
     return HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Invalid bearer token",
@@ -119,9 +116,8 @@ async def _resolve_oidc(
     """Validate ``token`` as a Keycloak JWT and map its claims to a Principal.
 
     The (rare, cache-missing) blocking JWKS fetch is offloaded to a worker thread so
-    it never stalls the event loop. Any validation/JWKS failure becomes the same 401
-    the static path raises; only the exception *type* is logged — never the token or
-    the JWKS body.
+    it never stalls the event loop. Any validation/JWKS failure becomes the shared
+    401; only the exception *type* is logged — never the token or the JWKS body.
     """
     import anyio
     import jwt
@@ -155,10 +151,10 @@ async def require_principal(
 ) -> Principal:
     """Resolve the caller's identity. Anonymous is a valid (non-error) outcome.
 
-    Dispatch: no credentials → anonymous; non-Bearer scheme → 401; the static admin
-    token (constant-time compare) → ``sysadmin``; else, when OIDC is enabled, validate
-    as a Keycloak JWT; otherwise 401. ``settings``/``jwks_client`` are injected (not
-    fetched directly) so the auth path honours ``app.dependency_overrides`` in tests.
+    Dispatch: no credentials → anonymous; non-Bearer scheme → 401; when OIDC is
+    enabled, validate as a Keycloak JWT; otherwise 401 (a bare development config
+    is anonymous-only). ``settings``/``jwks_client`` are injected (not fetched
+    directly) so the auth path honours ``app.dependency_overrides`` in tests.
     """
     if creds is None:
         return Principal.anonymous()
@@ -168,12 +164,6 @@ async def require_principal(
             detail="Unsupported authorization scheme",
             headers=_WWW_AUTH,
         )
-    # Constant-time comparison so a wrong token can't be recovered via timing.
-    # Compared as bytes: compare_digest raises TypeError on non-ASCII *str* input,
-    # and Starlette decodes headers as latin-1, so a stray "Bearer café" must 401,
-    # never 500 (an unauthenticated-input crash would break the anti-oracle 401).
-    if hmac.compare_digest(creds.credentials.encode(), settings.admin_token.encode()):
-        return Principal.admin()
     if settings.oidc_enabled:
         return await _resolve_oidc(creds.credentials, settings, jwks_client)
     raise _invalid_token()

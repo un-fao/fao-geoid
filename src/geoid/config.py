@@ -13,9 +13,6 @@ from typing import Literal
 from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-# Shipped dev/demo default; rejected outside development (see _forbid_dev_token_in_prod).
-_DEV_ADMIN_TOKEN = "change-me-dev-only"
-
 
 class DatabaseSettings(BaseSettings):
     """DB-layer configuration — the full surface the migrate job needs."""
@@ -50,9 +47,9 @@ class Settings(DatabaseSettings):
     environment: Literal["development", "review", "production"] = Field(
         default="development",
         description=(
-            "Deployment mode (env: GEOID_ENVIRONMENT). Outside development the "
-            "default admin token is rejected at startup — see the validator. "
-            "'review' is a deployed pre-production env: it enforces the real-token "
+            "Deployment mode (env: GEOID_ENVIRONMENT). Outside development OIDC "
+            "must be configured or the service refuses to boot — see the validator. "
+            "'review' is a deployed pre-production env: it enforces the OIDC-required "
             "guard exactly like 'production'."
         ),
     )
@@ -70,15 +67,6 @@ class Settings(DatabaseSettings):
             "Swagger/OpenAPI resolve behind the proxy, and prepended to BASE_URL when "
             "deriving public URIs/OGC links. The proxy is expected to strip this prefix "
             "before forwarding."
-        ),
-    )
-
-    # --- Auth (temporary static-token stopgap; unified auth service later) -
-    admin_token: str = Field(
-        default=_DEV_ADMIN_TOKEN,
-        description=(
-            "Static bearer token gating create/manage/list endpoints "
-            "(temporary stopgap until the FAO unified auth service)."
         ),
     )
 
@@ -119,11 +107,11 @@ class Settings(DatabaseSettings):
         ),
     )
 
-    # --- OIDC resource-server auth (Keycloak / FAO `<realm>` realm).
-    #     DISABLED by default: oidc_enabled stays gated on issuer + jwks_url, so a
-    #     bare config is static-token-only. Set GEOID_OIDC_ISSUER + GEOID_OIDC_JWKS_URL
-    #     to enable the dual-auth path — the static admin token keeps working
-    #     unchanged (it maps to the global `sysadmin` tier), so there is no flag day. -
+    # --- OIDC resource-server auth (Keycloak) — the ONLY authentication path.
+    #     oidc_enabled gates on issuer + jwks_url. Unset (development only) the
+    #     service is anonymous-only: every bearer credential is rejected with 401.
+    #     Outside development both MUST be set or the service refuses to boot
+    #     (see _require_oidc_outside_development). ----------------------------
     oidc_issuer: str | None = Field(
         default=None,
         description="OIDC issuer (the realm URL); auth/token endpoints derive from it.",
@@ -153,9 +141,9 @@ class Settings(DatabaseSettings):
     )
 
     # --- Swagger OAuth2 (Authorization Code + PKCE) — OFF by default. The paste-a-
-    #     bearer button is always present (it carries the static token AND a Keycloak
-    #     JWT); this flag only adds the interactive login flow, gated so /openapi.json
-    #     and /docs are byte-identical to today when it is off.
+    #     bearer button is always present (it carries a Keycloak JWT); this flag only
+    #     adds the interactive login flow, gated so /openapi.json and /docs are
+    #     byte-identical to today when it is off.
     swagger_oauth2_enabled: bool = Field(default=False)
     swagger_oauth2_client_id: str = Field(default="geoid-fe")
 
@@ -167,22 +155,15 @@ class Settings(DatabaseSettings):
         return self
 
     @model_validator(mode="after")
-    def _forbid_dev_token_in_prod(self) -> Settings:
-        # Fail fast so a missing secret mount can't leave the dev token live in prod.
-        if self.environment != "development":
-            if self.admin_token == _DEV_ADMIN_TOKEN:
-                raise ValueError(
-                    f"GEOID_ADMIN_TOKEN is the insecure default in {self.environment!r}; "
-                    "set a real GEOID_ADMIN_TOKEN (the dev default is only allowed when "
-                    "GEOID_ENVIRONMENT=development)."
-                )
-            if not self.admin_token.strip():
-                # An empty/whitespace token would make HTTPBearer-less requests and the
-                # static compare behave surprisingly; a mis-mounted secret must not boot.
-                raise ValueError(
-                    f"GEOID_ADMIN_TOKEN is empty/whitespace in {self.environment!r}; "
-                    "set a real GEOID_ADMIN_TOKEN."
-                )
+    def _require_oidc_outside_development(self) -> Settings:
+        # Fail fast so a missing OIDC env var can never leave a deployed environment
+        # with zero authentication paths (Keycloak is the only credential validator).
+        if self.environment != "development" and not self.oidc_enabled:
+            raise ValueError(
+                f"OIDC is not configured in {self.environment!r}; set GEOID_OIDC_ISSUER "
+                "and GEOID_OIDC_JWKS_URL (Keycloak is the only authentication path; "
+                "running without it is only allowed when GEOID_ENVIRONMENT=development)."
+            )
         return self
 
     @property

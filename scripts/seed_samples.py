@@ -7,7 +7,7 @@
 Env:
     GEOID_BASE_URL    default http://localhost:8000
     GEOID_COLLECTION  default public  (anonymous-writable; no token needed)
-    GEOID_ADMIN_TOKEN required only when seeding a managed (non-anon) collection
+    GEOID_BEARER_TOKEN a Keycloak JWT; required only when seeding a managed (non-anon) collection
 
 Exit codes: 0 all demos behaved · 1 unreachable or any unexpected response
 """
@@ -23,12 +23,12 @@ from _timing import print_timings, record
 
 BASE = os.environ.get("GEOID_BASE_URL", "http://localhost:8000").rstrip("/")
 COLLECTION = os.environ.get("GEOID_COLLECTION", "public")
-ADMIN_TOKEN = os.environ.get("GEOID_ADMIN_TOKEN")
+BEARER_TOKEN = os.environ.get("GEOID_BEARER_TOKEN")
 SAMPLES = Path(__file__).resolve().parents[1] / "samples"
 
 
 def _headers() -> dict[str, str]:
-    return {"Authorization": f"Bearer {ADMIN_TOKEN}"} if ADMIN_TOKEN else {}
+    return {"Authorization": f"Bearer {BEARER_TOKEN}"} if BEARER_TOKEN else {}
 
 
 def _post(client: httpx.Client, feature: dict) -> httpx.Response:

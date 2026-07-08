@@ -12,7 +12,15 @@ import pytest
 
 pytestmark = pytest.mark.integration
 
-ADMIN = {"Authorization": "Bearer test-admin-token"}
+# Module helpers close over ADMIN; the autouse fixture repopulates it per test
+# with a fresh sysadmin JWT (there is no static credential to inline anymore).
+ADMIN: dict[str, str] = {}
+
+
+@pytest.fixture(autouse=True)
+def _admin_credential(admin_headers):
+    ADMIN.clear()
+    ADMIN.update(admin_headers)
 
 
 async def _create(client, slug: str, **over) -> None:

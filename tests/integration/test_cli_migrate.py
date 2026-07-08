@@ -1,5 +1,5 @@
 """`geoid migrate` as the Cloud Run job runs it: a subprocess whose environment
-carries only the database URL — no admin token, GEOID_ENVIRONMENT=review."""
+carries only the database URL — no OIDC config, GEOID_ENVIRONMENT=review."""
 
 from __future__ import annotations
 
@@ -15,15 +15,15 @@ pytestmark = pytest.mark.integration
 ROOT = Path(__file__).resolve().parents[2]
 
 
-def test_migrate_succeeds_without_admin_token_in_review_environment(_migrated):
-    # Strip all GEOID_* (conftest exports GEOID_ADMIN_TOKEN session-wide), then
+def test_migrate_succeeds_without_oidc_config_in_review_environment(_migrated):
+    # Strip all GEOID_* (conftest exports the OIDC env session-wide), then
     # provide exactly what the Cloud Run migrate job mounts.
     env = {key: value for key, value in os.environ.items() if not key.startswith("GEOID_")}
     env["GEOID_DATABASE_URL"] = _migrated
     env["GEOID_ENVIRONMENT"] = "review"
 
-    # cwd=ROOT: alembic.ini paths are cwd-relative. Caveat: a local .env with a
-    # real token can mask the pre-fix red here; CI has no .env.
+    # cwd=ROOT: alembic.ini paths are cwd-relative. Caveat: a local .env with
+    # OIDC config can mask the pre-fix red here; CI has no .env.
     result = subprocess.run(
         [sys.executable, "-m", "geoid.cli", "migrate"],
         env=env,

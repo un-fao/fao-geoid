@@ -29,7 +29,7 @@ def _item_row() -> dict:
 def _isolate_env(monkeypatch):
     # Integration fixtures export GEOID_* into os.environ; clear what these
     # assertions depend on so unit tests are order-independent.
-    for key in ("GEOID_ENVIRONMENT", "GEOID_ADMIN_TOKEN", "GEOID_BASE_URL"):
+    for key in ("GEOID_ENVIRONMENT", "GEOID_BASE_URL"):
         monkeypatch.delenv(key, raising=False)
 
 

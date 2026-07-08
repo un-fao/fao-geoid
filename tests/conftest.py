@@ -80,7 +80,10 @@ def _migrated(_postgis):
 
     url = _postgis.get_connection_url()
     os.environ["GEOID_DATABASE_URL"] = url
-    os.environ["GEOID_ADMIN_TOKEN"] = "test-admin-token"
+    # The default app is OIDC-enabled (Keycloak is the only auth path); the JWKS
+    # fetch is faked per-fixture via the get_jwks_client dependency override.
+    os.environ["GEOID_OIDC_ISSUER"] = _OIDC_ISSUER
+    os.environ["GEOID_OIDC_JWKS_URL"] = "https://idp.test/jwks"
     os.environ["GEOID_BASE_URL"] = "http://testserver"
     os.environ["GEOID_INSTANCE_ID"] = "test-instance"
     os.environ["GEOID_PUBLIC_COLLECTION"] = "public"
@@ -125,26 +128,43 @@ async def session(db_clean):
 
 
 @pytest.fixture
-async def client(db_clean):
-    """An httpx AsyncClient bound to a freshly built app (in-process ASGI)."""
+async def client(db_clean, oidc_keypair):
+    """An httpx AsyncClient bound to a freshly built app (in-process ASGI).
+
+    The app reads the OIDC-enabled env from ``_migrated``; ``get_jwks_client`` is
+    overridden with a fake returning the in-test public key, so synthetic Keycloak
+    JWTs (``make_token``) validate without any network.
+    """
     from httpx import ASGITransport, AsyncClient
 
+    from geoid.deps import get_jwks_client
     from geoid.main import create_app
 
     app = create_app()
+    app.dependency_overrides[get_jwks_client] = lambda: _fake_jwks(oidc_keypair)
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://testserver") as http_client:
         yield http_client
 
 
 @pytest.fixture
-def admin_headers() -> dict[str, str]:
-    return {"Authorization": "Bearer test-admin-token"}
+def admin_headers(make_token) -> dict[str, str]:
+    """A sysadmin credential: a synthetic Keycloak JWT carrying ``geoid.sysadmin``."""
+    token = make_token(sub="kc-sysadmin", email="sysadmin@fao.org", roles=("geoid.sysadmin",))
+    return {"Authorization": f"Bearer {token}"}
 
 
 # --- OIDC / Keycloak test infra (synthetic RS256 tokens, fake JWKS, no network) -
 
 _OIDC_ISSUER = "https://idp.test/realms/geoid"
+
+
+def _fake_jwks(oidc_keypair):
+    """A stand-in JWKS client returning the in-test public key for any token."""
+    from types import SimpleNamespace
+
+    _, public_key = oidc_keypair
+    return SimpleNamespace(get_signing_key_from_jwt=lambda _token: SimpleNamespace(key=public_key))
 
 
 @pytest.fixture(scope="session")
@@ -195,31 +215,26 @@ def bearer():
 
 @pytest.fixture
 async def oidc_client(db_clean, oidc_keypair):
-    """An httpx client bound to an app with OIDC ENABLED and a fake (no-network) JWKS.
+    """An httpx client bound to an app with OIDC settings pinned explicitly.
 
     ``get_settings`` is overridden only for request-time dependency injection (the DB
     engine keeps using the real testcontainer settings), and ``get_jwks_client`` is
-    overridden with a fake that returns the in-test public key for any token. The
-    static admin token (read from the same env) keeps working — dual auth.
+    overridden with a fake that returns the in-test public key for any token.
+    Equivalent to the default ``client`` (which reads the same OIDC env) — kept for
+    the auth suites that pin the settings→dependency wiring itself.
     """
-    from types import SimpleNamespace
-
     from httpx import ASGITransport, AsyncClient
 
     from geoid.config import Settings, get_settings
     from geoid.deps import get_jwks_client
     from geoid.main import create_app
 
-    _, public_key = oidc_keypair
     settings = Settings(
         _env_file=None, oidc_issuer=_OIDC_ISSUER, oidc_jwks_url="https://idp.test/jwks"
     )
-    fake_jwks = SimpleNamespace(
-        get_signing_key_from_jwt=lambda _token: SimpleNamespace(key=public_key)
-    )
     app = create_app()
     app.dependency_overrides[get_settings] = lambda: settings
-    app.dependency_overrides[get_jwks_client] = lambda: fake_jwks
+    app.dependency_overrides[get_jwks_client] = lambda: _fake_jwks(oidc_keypair)
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://testserver") as http_client:
         yield http_client

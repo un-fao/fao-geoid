@@ -93,7 +93,7 @@ every CI run and by the post-deploy canary (`scripts/dedup_vectors.py --check`).
 
 ```bash
 uv sync                       # create venv + install (editable) from the lockfile
-cp .env.example .env          # set DATABASE_URL, GEOID_ADMIN_TOKEN, BASE_URL
+cp .env.example .env          # set DATABASE_URL, BASE_URL (OIDC required outside development)
 
 # local stack (FastAPI + postgis/postgis:17)
 docker compose up -d db
@@ -174,7 +174,7 @@ ALTER TABLE change_log     ENABLE TRIGGER USER;  -- keeps catalog/collection see
 
 ## Status
 
-**Authenticated access is live**: hybrid Keycloak OIDC + a static admin token, with per-collection
+**Authenticated access is live and Keycloak-only**: OIDC (RS256 JWTs) with per-collection
 owner/editor/viewer grants — see [`local-scripts/docs/auth.html`](local-scripts/docs/auth.html).
 **Synchronous bulk write is live**: `POST /collections/{id}/items/bulk`. Planned next: an
 open-source release, and standalone country instances with federation.

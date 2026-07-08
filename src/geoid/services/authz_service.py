@@ -1,7 +1,7 @@
 """Per-collection authorization decisions (precedence + the one grant DB touch).
 
-Precedence (highest first): **sysadmin** (static admin token OR Keycloak
-``geoid.sysadmin``) bypasses every per-collection check; then the grant ladder
+Precedence (highest first): **sysadmin** (Keycloak's ``geoid.sysadmin`` role)
+bypasses every per-collection check; then the grant ladder
 **owner > editor > viewer**; then the data-layer fallback (``writable_anon`` for
 writes, ``public_read`` for reads) for callers with no grant.
 
