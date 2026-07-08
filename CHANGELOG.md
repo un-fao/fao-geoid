@@ -4,9 +4,16 @@ All notable changes to GeoID are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.4.0] - 2026-07-08
 
 ### Changed — BREAKING
+- **Authentication is Keycloak-only: the static admin token is removed.** Every
+  authenticated call now presents a Keycloak access token (RS256 JWT); the
+  `GEOID_ADMIN_TOKEN` bearer no longer exists, and the global sysadmin tier is
+  granted solely by the `geoid.sysadmin` role. Outside development the service
+  refuses to start unless OIDC is configured, so a deployed environment can
+  never run with zero authentication paths. Anonymous access is unchanged
+  (public reads, and writes into the anonymous-writable collection).
 - **Identity recipe v2 (migration 0008, ADR-007): every geoid re-mints.** The
   geometry fingerprint the geoid is derived from is no longer computed by the
   database's GEOS library (whose builds provably disagree with each other); it is
@@ -25,14 +32,24 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   byte-identical to the pure-Python reference.
 
 ### Added
-- **Hybrid authentication** — Keycloak OIDC (RS256 JWT) validated alongside the
-  static admin token, with no flag day: the static token keeps working unchanged.
-  OIDC is enabled at the review deployment; disabled by default elsewhere.
-- **Per-collection RBAC grants** — `owner`/`editor` roles keyed by verified email
-  (`viewer` reserved, not yet enforced), managed via
+- **Keycloak authentication** — access tokens (RS256 JWT) validated against the
+  FAO realm, mapping the `geoid.sysadmin` role to the global admin tier. Enabled
+  at both deployed environments (review and production realms).
+- **Per-collection RBAC grants** — `owner`/`editor`/`viewer` roles keyed by
+  verified email, managed via
   `POST`/`GET`/`DELETE /collections/{id}/grants[/{email}]` (owner or sysadmin).
-- Swagger single-sign-on button (Authorization Code + PKCE), gated behind
-  `GEOID_SWAGGER_OAUTH2_ENABLED` (off by default).
+- **Private collections** — a collection can be marked `public_read: false`
+  (migration 0009): its features are hidden from the external-id resolver (the
+  same 404 an unknown id gets) except to sysadmin or grant holders (`viewer` and
+  up), and the duplicate-geometry 409 names the incumbent geoid only to callers
+  allowed to read the incumbent's collection. Resolution by geoid
+  (`GET /{geoid}`) is deliberately unaffected: the geoid itself is the read
+  capability.
+- `GET /me/geoids` — the authenticated caller's own minted geoids, newest first.
+- Sysadmin item inventory: `GET /manage/collections/{id}/items` lists a
+  collection's records (geometry-free) for administrators.
+- Swagger single-sign-on button (Authorization Code + PKCE), on at the deployed
+  environments (gated behind `GEOID_SWAGGER_OAUTH2_ENABLED` elsewhere).
 - Post-deploy golden-vector canary: `dedup_vectors.py --check` runs as a Cloud Run
   job against the live database after every migration, failing the deploy on
   identity-recipe drift before the service ships.
@@ -61,6 +78,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   in the deployed image; JWKS infrastructure failures log at ERROR.
 - Concurrent cold-start bootstrap no longer crashes on the public-collection
   create race.
+- Two identical geometries POSTed at the same instant now always converge on the
+  ordinary 409-with-incumbent; the loser of the internal insert race no longer
+  surfaces an internal error.
 
 ## [0.3.0] - 2026-06-24
 
