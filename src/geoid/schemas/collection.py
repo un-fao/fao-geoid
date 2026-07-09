@@ -30,10 +30,11 @@ class CollectionCreate(BaseModel):
     public_write: bool = Field(default=False, examples=[False])
     public_read: bool = Field(
         default=True,
-        description="When false, features are 404-masked on the external-id "
-        "resolver unless the caller holds a grant on this collection (viewer or "
-        "above) or is sysadmin. Does not affect the dedup-409 incumbent, which is "
-        "always masked for non-members.",
+        description="Governs whether a duplicate-geometry 409 names the "
+        "incumbent (geoid/uri/collection) to non-members; members (sysadmin / "
+        "creator / any grant) always see it. Does not affect feature reads: "
+        "both resolvers answer 200 to every caller, with member-only full "
+        "bodies.",
         examples=[True],
     )
     metadata: dict[str, Any] = Field(default_factory=dict, examples=[{}])

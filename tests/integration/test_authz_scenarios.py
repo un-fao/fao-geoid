@@ -189,12 +189,12 @@ async def test_dedup_409_disclosure_matrix(oidc_client, personas, config):
         body = resp.json()
         assert body["message"] == CONFLICT_MESSAGE
         assert body["constraint"] == "uq_geoid_registry_geom_hash"
-        if persona in MEMBERS:
+        if persona in MEMBERS or cfg["public_read"]:
             assert body["geoid"] == seed["geoid"], f"{persona} on {config} should disclose"
             assert body["uri"] == seed["uri"]
             assert body["collection"] == slug
         else:
-            # Masked for anonymous + strangers EVEN when public_read is true.
+            # Masked only for non-members of a PRIVATE incumbent.
             assert body["geoid"] is None, f"{persona} on {config} should be masked"
             assert body["uri"] is None
             assert body["collection"] is None

@@ -114,9 +114,9 @@ class BulkLimitExceededError(GeoidServiceError):
 class GeometryConflictError(GeoidServiceError):
     """An identical geometry already exists in the catalog (global dedup, 409).
 
-    ``geoid``/``collection`` name the incumbent only for members of its
-    collection (sysadmin / own mint / any grant — ``public_read`` does not
-    disclose); both are None otherwise and the 409 body carries null incumbent
+    ``geoid``/``collection`` name the incumbent when its collection is
+    ``public_read`` or the caller is a member of it (sysadmin / own mint / any
+    grant); both are None otherwise and the 409 body carries null incumbent
     fields.
     """
 

@@ -54,8 +54,8 @@ async def test_identical_geometry_returns_409_with_incumbent_geoid(
 
     # Same square, reversed winding + rotated ring start -> identical canonical
     # geometry -> the insert FAILS (409) and the body carries the incumbent.
-    # Sysadmin caller: disclosure is membership-based (a non-member's 409 is
-    # masked even for a public incumbent — pinned in test_authz_scenarios).
+    # Sysadmin caller (disclosure would hold for any caller here — the
+    # incumbent's collection is public_read; pinned in test_authz_scenarios).
     second = await client.post(
         "/collections/public/items", headers=admin_headers, json=unit_square_reversed
     )

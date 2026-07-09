@@ -53,8 +53,8 @@ Identity and deduplication now share **one fingerprint**: the geoid is derived f
 canonical `geom_hash` (see below) that enforces uniqueness, so the two can never disagree and the same
 geometry yields the same geoid on every deployment. One geometry → one geoid across the whole catalog —
 POSTing an identical geometry fails with **409**; the body names the **incumbent geoid** (plus its
-uri and collection) only when the caller is a member of the incumbent's collection (sysadmin, the
-incumbent's creator, or any grant) — for everyone else those fields are null.
+uri and collection) when the incumbent's collection is `public_read` or the caller is a member of it
+(sysadmin, the incumbent's creator, or any grant) — otherwise those fields are null.
 
 ## The identity recipe (load-bearing correctness)
 
@@ -118,9 +118,10 @@ mint → dedup → validation → resolve in one command:
 uv run python scripts/seed_samples.py
 ```
 
-Expected: 5 plots minted, a reversed-winding duplicate rejected with 409 (the incumbent geoid is
-masked for the anonymous seeder — membership-based disclosure), a self-intersecting polygon
-rejected (422), and the first plot resolved by its geoid. See `samples/README.md` for details.
+Expected: 5 plots minted, a reversed-winding duplicate rejected with 409 naming the incumbent geoid
+(the `public` collection is `public_read`, so it discloses even to the anonymous seeder), a
+self-intersecting polygon rejected (422), and the first plot resolved by its geoid. See
+`samples/README.md` for details.
 
 ## Tests
 
@@ -176,11 +177,12 @@ ALTER TABLE change_log     ENABLE TRIGGER USER;  -- keeps catalog/collection see
 ## Status
 
 **Authenticated access is live and Keycloak-only**: OIDC (RS256 JWTs) with per-collection
-owner/editor/viewer grants (the owner role itself is sysadmin-granted). Authorization is
-membership-based end to end: full feature bodies and the dedup-409 incumbent are visible only to
-sysadmin, the feature's creator, or grant holders — everyone else gets a geometry-only body and a
-masked 409; per-collection `public_read`/`public_write` flags govern external-id lookups and open
-minting. The matrix is pinned in `tests/integration/test_authz_scenarios.py`; see
+owner/editor/viewer grants (the owner role itself is sysadmin-granted). Existence is never masked:
+both resolvers answer 200 to every caller for an existing feature, with full bodies member-only
+(sysadmin, the feature's creator, or grant holders — everyone else gets a geometry-only body). The
+dedup-409 names the incumbent to members and to everyone when the incumbent's collection is
+`public_read`; `public_write` governs open minting. The matrix is pinned in
+`tests/integration/test_authz_scenarios.py`; see
 [`local-scripts/docs/auth.html`](local-scripts/docs/auth.html).
 **Synchronous bulk write is live**: `POST /collections/{id}/items/bulk`. Planned next: an
 open-source release, and standalone country instances with federation.

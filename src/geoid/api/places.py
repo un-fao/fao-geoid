@@ -65,10 +65,11 @@ def _created_by(row: dict) -> str | None:
             "description": (
                 "An identical geometry already exists in the catalog (geometry "
                 "dedup is global). The body carries the incumbent "
-                "geoid/uri/collection only for members of the incumbent's "
-                "collection (sysadmin / own mint / any grant — public_read does "
-                "NOT disclose); otherwise those fields are null. An external_id "
-                "duplicate also answers 409 — discriminate on ``constraint``."
+                "geoid/uri/collection when the incumbent's collection is "
+                "public_read or the caller is a member of it (sysadmin / own "
+                "mint / any grant); otherwise those fields are null. An "
+                "external_id duplicate also answers 409 — discriminate on "
+                "``constraint``."
             ),
         },
     },

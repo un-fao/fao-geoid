@@ -26,7 +26,8 @@ async def test_dual_geometry_and_external_id_duplicate_yields_geometry_409(
     base = await client.post("/collections/public/items", json=feature)
     assert base.status_code == 201
 
-    # Sysadmin resubmit: the 409 discloses the incumbent (a non-member's is masked).
+    # Sysadmin resubmit: the 409 discloses the incumbent (only a private
+    # incumbent is masked for non-members).
     resub = await client.post("/collections/public/items", headers=admin_headers, json=feature)
     assert resub.status_code == 409
     assert resub.json()["constraint"] == "uq_geoid_registry_geom_hash"

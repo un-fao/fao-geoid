@@ -87,9 +87,9 @@ async def test_resolve_incumbent_returns_committed_collection(client, session, u
 
     Covers ``_resolve_incumbent``'s success path deterministically (no race):
     mint a place via the API (committed), then call the helper directly — it must
-    return the incumbent's collection facts (id/slug/creator) from the
-    now-visible registry row. The concurrent path only reaches this helper when
-    the in-statement LEFT JOIN missed.
+    return the incumbent's collection facts (id/slug/public_read/creator) from
+    the now-visible registry row. The concurrent path only reaches this helper
+    when the in-statement LEFT JOIN missed.
     """
     from geoid.repositories.place_repo import _resolve_incumbent
     from geoid.schemas.place import PlaceCreate, geometry_to_geojson
@@ -99,7 +99,8 @@ async def test_resolve_incumbent_returns_committed_collection(client, session, u
     geojson = geometry_to_geojson(PlaceCreate.model_validate(unit_square_ccw))
     incumbent = await _resolve_incumbent(session, geojson)
     assert incumbent is not None
-    collection_id, slug, created_by = incumbent
+    collection_id, slug, public_read, created_by = incumbent
     assert slug == "public"
     assert collection_id is not None
+    assert public_read is True  # the bootstrap `public` collection
     assert created_by is None  # minted anonymously above

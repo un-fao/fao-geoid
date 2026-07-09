@@ -5,9 +5,11 @@ Read-only by default, so it is safe against production (places are append-only;
 nothing is minted unless asked). ``--mint`` adds a write probe that mints ONE
 fixed sentinel feature; global exact-match dedup makes it idempotent — first
 run 201, every later run 409 with ``constraint == "uq_geoid_registry_geom_hash"``.
-The 409's incumbent fields are disclosed only to members of the incumbent's
-collection (sysadmin / creator / any grant); an unauthenticated re-run gets a
-MASKED 409 (null geoid) — reported as such, with the resolve probes skipped.
+The 409's incumbent fields are disclosed when the incumbent's collection is
+``public_read`` (the default ``public`` collection is — so the full three-probe
+run works anonymously) or the caller is a member (sysadmin / creator / any
+grant); a PRIVATE incumbent yields a MASKED 409 (null geoid) for non-members —
+reported as such, with the resolve probes skipped.
 At most one permanent row per catalog, ever.
 
     uv run python scripts/smoke_test.py            # read-only checks
@@ -162,8 +164,9 @@ def run_mint_probe(client: httpx.Client) -> list[bool]:
             body = resp.json()
             if body.get("constraint") == "uq_geoid_registry_geom_hash":
                 # Expected on every run after the first: global dedup rejects the
-                # duplicate. The incumbent is disclosed only to members of its
-                # collection — a masked body (null geoid) is still a healthy dedup.
+                # duplicate. A public_read incumbent (the default `public`
+                # collection) discloses to every caller; only a PRIVATE incumbent
+                # is masked for non-members — still a healthy dedup.
                 minted.update(body)
                 if body.get("geoid") is None:
                     return "[409] duplicate geometry → incumbent masked (caller is not a member)"
@@ -211,8 +214,9 @@ def run_mint_probe(client: httpx.Client) -> list[bool]:
         print("  – resolve checks skipped (mint failed)")
         return results
     if minted.get("geoid") is None:
-        # Masked 409: dedup verified, but there is no geoid to resolve. Run with
-        # a member/sysadmin GEOID_BEARER_TOKEN for the full probe.
+        # Masked 409 (private incumbent, caller not a member): dedup verified,
+        # but there is no geoid to resolve. Run with a member/sysadmin
+        # GEOID_BEARER_TOKEN for the full probe.
         print("  – resolve checks skipped (incumbent masked for this caller)")
         return results
     return results + [

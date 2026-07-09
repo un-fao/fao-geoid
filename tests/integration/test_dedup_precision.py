@@ -45,8 +45,8 @@ async def test_within_cell_conflicts_across_cell_mints(client, admin_headers):
     base = base_resp.json()
 
     # +1e-8 deg (~1mm): every vertex snaps back to the base cell -> identical
-    # canonical geometry -> 409 carrying the incumbent geoid (sysadmin caller,
-    # so the body discloses it).
+    # canonical geometry -> 409 carrying the incumbent geoid (disclosed — the
+    # public collection is public_read).
     same_cell = await client.post(
         "/collections/public/items", headers=admin_headers, json=_square(1e-8)
     )

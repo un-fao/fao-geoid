@@ -92,7 +92,7 @@ async def test_dedup_is_global_across_collections(client, admin_headers, unit_sq
         json={"id": "cola", "public_write": True},
     )
     a = await client.post("/collections/public/items", json=unit_square_ccw)
-    # Sysadmin caller so the cross-collection 409 discloses the incumbent.
+    # The cross-collection 409 names the public_read incumbent to any caller.
     b = await client.post("/collections/cola/items", headers=admin_headers, json=unit_square_ccw)
     assert a.status_code == 201
     assert b.status_code == 409

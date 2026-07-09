@@ -29,7 +29,9 @@ class Collection(Base):
     public_write: Mapped[bool] = mapped_column(
         "writable_anon", Boolean, nullable=False, server_default=text("false")
     )
-    # When false, reads are grant-gated (404-masked); see authz_service.can_read.
+    # Governs only dedup-409 incumbent disclosure to non-members (see
+    # registry_service._may_disclose_incumbent); feature reads are never
+    # existence-masked and full bodies are member-only regardless of this flag.
     # default=True alongside server_default avoids an async refetch after flush.
     public_read: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=True, server_default=text("true")

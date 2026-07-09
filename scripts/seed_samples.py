@@ -66,9 +66,9 @@ def main() -> int:
                 resp.status_code == 409 and body.get("constraint") == "uq_geoid_registry_geom_hash"
             ):
                 # Re-running the seed: the geometry is already registered. The
-                # incumbent geoid is masked (null) for non-members — anonymous
-                # re-runs see "masked", a sysadmin bearer sees the geoid.
-                shown = body.get("geoid") or "masked (caller is not a member)"
+                # public collection is public_read, so the 409 names the incumbent
+                # even for the anonymous seeder; only a private incumbent masks.
+                shown = body.get("geoid") or "masked (private incumbent, not a member)"
                 print(f"  [409] {ext:<22} {'duplicate→existing':<18} geoid={shown}")
             else:
                 print(f"  [{resp.status_code}] {ext:<22} ERROR {body}")
@@ -87,8 +87,9 @@ def main() -> int:
             status = f"?? {resp.status_code}"
             errors += 1
         if body.get("geoid") is None:
-            # Membership-based disclosure: anonymous callers never see the incumbent.
-            print(f"  [{status}] insert rejected; incumbent masked for anonymous callers")
+            # Masked only when the incumbent lives in a private collection —
+            # a public_read incumbent (the demo's case) discloses to anonymous.
+            print(f"  [{status}] insert rejected; incumbent masked (private collection)")
         else:
             print(
                 f"  [{status}] insert rejected; incumbent geoid={body.get('geoid')} "

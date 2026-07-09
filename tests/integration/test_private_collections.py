@@ -225,16 +225,14 @@ async def test_dedup_409_masked_for_stranger_and_anonymous(oidc_client, make_tok
         assert body["collection"] is None
 
 
-async def test_dedup_409_masked_even_when_incumbent_is_public(
+async def test_dedup_409_disclosed_when_incumbent_is_public(
     oidc_client, make_token, bearer, unit_square_ccw
 ):
-    # R1 (client ruling 2026-07-09): disclosure is membership-based (sysadmin /
-    # creator / any grant) — public_read does NOT disclose. Anonymous and
-    # authenticated non-members get null incumbent fields even though the
-    # incumbent lives in the public collection.
-    assert (
-        await oidc_client.post("/collections/public/items", json=unit_square_ccw)
-    ).status_code == 201
+    # Client ruling 2026-07-09 round 2 (restoring the public_read leg):
+    # a public_read incumbent's 409 names the incumbent to EVERY caller —
+    # anonymous and authenticated non-members included. Only a private
+    # incumbent is masked for non-members (pinned above).
+    minted = (await oidc_client.post("/collections/public/items", json=unit_square_ccw)).json()
 
     stranger = bearer(make_token(sub="kc-st", email="stranger@x.org"))
     for headers in (None, stranger):
@@ -245,9 +243,9 @@ async def test_dedup_409_masked_even_when_incumbent_is_public(
         body = resp.json()
         assert body["message"] == CONFLICT_MESSAGE
         assert body["constraint"] == "uq_geoid_registry_geom_hash"
-        assert body["geoid"] is None
-        assert body["uri"] is None
-        assert body["collection"] is None
+        assert body["geoid"] == minted["geoid"]
+        assert body["uri"] == minted["uri"]
+        assert body["collection"] == "public"
 
 
 async def test_dedup_409_disclosed_for_viewer_and_sysadmin(oidc_client, make_token, bearer):

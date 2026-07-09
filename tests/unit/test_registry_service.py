@@ -198,6 +198,7 @@ def _incumbent_loser() -> InsertResult:
         created=False,
         collection_slug="public",
         collection_id=uuid.uuid4(),
+        collection_public_read=True,
     )
 
 
@@ -284,19 +285,24 @@ async def test_bulk_second_race_loss_falls_back_to_geoid_conflict_reject(monkeyp
 
 
 # --- _may_disclose_incumbent truth table -----------------------------------------
-# Disclosure is MEMBERSHIP-based: sysadmin / the incumbent's creator / any grant.
-# Deliberately NO public_read leg — a non-member's 409 is masked even when the
-# incumbent's collection is public (client ruling 2026-07-09).
+# Disclosure = membership OR a public incumbent: sysadmin / the incumbent's
+# collection being public_read / the incumbent's creator / any grant. Only a
+# PRIVATE incumbent is masked for non-members (client ruling 2026-07-09 round 2,
+# restoring the public_read leg).
 
 
 def _loser(
-    *, created_by: str | None = None, collection_id: uuid.UUID | None = None
+    *,
+    created_by: str | None = None,
+    collection_id: uuid.UUID | None = None,
+    public_read: bool = False,
 ) -> InsertResult:
     return InsertResult(
         geoid=uuid.uuid4(),
         created=False,
         collection_slug="somewhere",
         collection_id=collection_id or uuid.uuid4(),
+        collection_public_read=public_read,
         created_by=created_by,
     )
 
@@ -316,9 +322,20 @@ async def test_disclosure_sysadmin_true_without_grant_query(monkeypatch):
     )
 
 
-async def test_disclosure_anonymous_false_even_for_public_incumbent(monkeypatch):
-    # The R1 pin: there is no public_read leg — anonymity masks unconditionally
-    # (InsertResult no longer even carries the incumbent's public_read flag).
+async def test_disclosure_anonymous_true_for_public_incumbent(monkeypatch):
+    # The restored public_read leg: a public incumbent discloses to every
+    # caller, anonymous included — and without a grant query.
+    _no_grant_query(monkeypatch)
+    assert (
+        await registry_service._may_disclose_incumbent(
+            None, Principal.anonymous(), _loser(public_read=True), {}
+        )
+        is True
+    )
+
+
+async def test_disclosure_anonymous_false_for_private_incumbent(monkeypatch):
+    # Anonymity still masks a PRIVATE incumbent (no grant to hold, no sub).
     _no_grant_query(monkeypatch)
     assert (
         await registry_service._may_disclose_incumbent(None, Principal.anonymous(), _loser(), {})
