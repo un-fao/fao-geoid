@@ -1,7 +1,7 @@
 """The registry service — the product: mint + dedup + provenance.
 
 Anonymous and managed contributions share this ONE code path; the only branch is
-the data-layer policy check (``writable_anon``). The geoid/dedup/external-id rules
+the data-layer policy check (``public_write``). The geoid/dedup/external-id rules
 are identical for both — anonymity is not a special case.
 """
 
@@ -83,7 +83,7 @@ async def _authorize_write(
     session: AsyncSession, principal: Principal, collection: Collection
 ) -> None:
     """Gate a write on the per-collection authz ladder (sysadmin > editor/owner >
-    writable_anon). Anonymous denial keeps its own 401-paired error; an authenticated
+    public_write). Anonymous denial keeps its own 401-paired error; an authenticated
     non-grantee facing a non-writable collection gets the 403 write error.
     """
     grant = await authz_service.load_caller_grant(

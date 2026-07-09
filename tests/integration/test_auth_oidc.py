@@ -73,7 +73,7 @@ async def test_sysadmin_jwt_can_mint_into_managed_collection(
 ):
     token = make_token(sub="kc-admin", email="admin@fao.org", roles=["geoid.sysadmin"])
     await oidc_client.post(
-        "/manage/collections", headers=bearer(token), json={"id": "sm", "writable_anon": False}
+        "/manage/collections", headers=bearer(token), json={"id": "sm", "public_write": False}
     )
     resp = await oidc_client.post(
         "/collections/sm/items", headers=bearer(token), json=unit_square_ccw

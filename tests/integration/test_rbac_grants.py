@@ -24,7 +24,7 @@ def _admin_credential(admin_headers):
 
 
 async def _create(client, slug: str, **over) -> None:
-    body = {"id": slug, "writable_anon": False, **over}
+    body = {"id": slug, "public_write": False, **over}
     resp = await client.post("/manage/collections", headers=ADMIN, json=body)
     assert resp.status_code == 201, resp.text
 

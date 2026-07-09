@@ -278,9 +278,9 @@ async def test_bulk_anonymous_into_non_writable_collection_403(client, admin_hea
     await client.post(
         "/manage/collections",
         headers=admin_headers,
-        json={"id": "locked", "writable_anon": False},
+        json={"id": "locked", "public_write": False},
     )
-    # Anonymous (no token) into a non-writable_anon collection -> fail-fast 403.
+    # Anonymous (no token) into a non-public_write collection -> fail-fast 403.
     resp = await client.post(
         "/collections/locked/items/bulk", json=_fc(_square(0, 0), _square(5, 5))
     )

@@ -54,7 +54,7 @@ async def test_create_place_raises_registry_consistency_when_incumbent_missing(m
     monkeypatch.setattr(place_repo, "insert_place", _drift)
 
     feature = PlaceCreate.model_validate(_SQUARE)
-    collection = Collection(id=uuid.uuid4(), catalog_id=uuid.uuid4(), slug="x", writable_anon=True)
+    collection = Collection(id=uuid.uuid4(), catalog_id=uuid.uuid4(), slug="x", public_write=True)
 
     with pytest.raises(RegistryConsistencyError) as exc_info:
         await registry_service.create_place(
@@ -98,7 +98,7 @@ class _FakeSession:
 
 
 def _collection() -> Collection:
-    return Collection(id=uuid.uuid4(), catalog_id=uuid.uuid4(), slug="x", writable_anon=True)
+    return Collection(id=uuid.uuid4(), catalog_id=uuid.uuid4(), slug="x", public_write=True)
 
 
 def _raise_dbapi(sqlstate: str):

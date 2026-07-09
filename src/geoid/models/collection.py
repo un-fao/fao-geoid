@@ -22,9 +22,12 @@ class Collection(Base):
     )
     slug: Mapped[str] = mapped_column(String, nullable=False)
     title: Mapped[str | None] = mapped_column(String, nullable=True)
-    # When true this collection accepts anonymous writes (the reserved `public`).
-    writable_anon: Mapped[bool] = mapped_column(
-        Boolean, nullable=False, server_default=text("false")
+    # When true anyone may write (anonymous included — the reserved `public`).
+    # Mapped onto the legacy `writable_anon` DB column: the 2026-07-09 rename is
+    # API/ORM-only, deliberately without a migration. Use `public_write` in
+    # Python, `writable_anon` in SQL.
+    public_write: Mapped[bool] = mapped_column(
+        "writable_anon", Boolean, nullable=False, server_default=text("false")
     )
     # When false, reads are grant-gated (404-masked); see authz_service.can_read.
     # default=True alongside server_default avoids an async refetch after flush.

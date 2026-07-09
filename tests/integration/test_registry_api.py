@@ -263,7 +263,7 @@ async def test_anonymous_write_to_managed_collection_forbidden(
     await client.post(
         "/manage/collections",
         headers=admin_headers,
-        json={"id": "managed", "writable_anon": False},
+        json={"id": "managed", "public_write": False},
     )
     # anonymous (no auth header) -> 403
     anon = await client.post("/collections/managed/items", json=unit_square_ccw)

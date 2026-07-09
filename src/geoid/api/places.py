@@ -1,7 +1,7 @@
 """Write / registry router — the product surface.
 
 POST a polygon → ``{geoid, uri}``; resolve durably by geoid; resolve by
-``(external_id, collection)``. Anonymous POSTs are allowed into ``writable_anon``
+``(external_id, collection)``. Anonymous POSTs are allowed into ``public_write``
 collections via the shared registry service (no special code path).
 """
 
@@ -115,7 +115,7 @@ async def create_items_bulk(
     settings: Settings = Depends(get_settings),
 ) -> BulkReport:
     # A write bound MUST error, never truncate: too many features rejects the
-    # whole request (413) before any insert. Auth (anon → writable_anon) is checked
+    # whole request (413) before any insert. Auth (anon → public_write) is checked
     # once up front in the service, since it depends on principal + collection only.
     if len(body.features) > settings.bulk_max_features:
         raise BulkLimitExceededError(len(body.features), settings.bulk_max_features)

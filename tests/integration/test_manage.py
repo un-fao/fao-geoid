@@ -20,15 +20,15 @@ async def test_create_collection(client, admin_headers):
     coll = await client.post(
         "/manage/collections",
         headers=admin_headers,
-        json={"id": "eudr", "title": "EUDR plots", "writable_anon": False},
+        json={"id": "eudr", "title": "EUDR plots", "public_write": False},
     )
     assert coll.status_code == 201
     body = coll.json()
     assert body["id"] == "eudr"
-    assert body["writable_anon"] is False
+    assert body["public_write"] is False
     # The catalog tier is hidden: no internal UUID, no catalog_id in the response.
     assert "catalog_id" not in body
-    assert set(body) == {"id", "title", "writable_anon", "public_read", "metadata"}
+    assert set(body) == {"id", "title", "public_write", "public_read", "metadata"}
 
 
 async def test_create_collection_id_round_trips_in_url(client, admin_headers):

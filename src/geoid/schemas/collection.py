@@ -27,7 +27,7 @@ class CollectionCreate(BaseModel):
         examples=["land-parcels"],
     )
     title: str | None = Field(default=None, examples=["Land Parcels"])
-    writable_anon: bool = Field(default=False, examples=[False])
+    public_write: bool = Field(default=False, examples=[False])
     public_read: bool = Field(
         default=True,
         description="When false, features are 404-masked on the external-id "
@@ -56,7 +56,7 @@ class CollectionCreate(BaseModel):
 class CollectionOut(BaseModel):
     id: str
     title: str | None = None
-    writable_anon: bool = False
+    public_write: bool = False
     public_read: bool = True
     metadata: dict[str, Any] = Field(default_factory=dict)
 

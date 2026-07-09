@@ -40,7 +40,7 @@ def _square(x: float, y: float, *, external_id: str | None = None) -> dict:
 
 
 async def _create(client, slug: str, **over) -> None:
-    body = {"id": slug, "writable_anon": False, **over}
+    body = {"id": slug, "public_write": False, **over}
     resp = await client.post("/manage/collections", headers=ADMIN, json=body)
     assert resp.status_code == 201, resp.text
 
@@ -278,7 +278,7 @@ async def test_dedup_409_disclosed_to_the_creator_via_sub(oidc_client, make_toke
 async def test_dedup_409_anonymous_incumbent_never_matches_anonymous_caller(oidc_client):
     # Both created_by and the caller's subject are None; the non-null guard must
     # keep None == None from reading as "own mint".
-    await _create(oidc_client, "dropbox", writable_anon=True, public_read=False)
+    await _create(oidc_client, "dropbox", public_write=True, public_read=False)
     await _mint(oidc_client, "dropbox", _square(60, 60), headers={})
 
     resp = await oidc_client.post("/collections/dropbox/items", json=_square(60, 60))

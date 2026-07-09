@@ -24,7 +24,7 @@ class GeometryInvalidError(GeoidServiceError):
 
 
 class AnonymousWriteForbiddenError(GeoidServiceError):
-    """Anonymous POST to a collection that is not ``writable_anon``."""
+    """Anonymous POST to a collection that is not ``public_write``."""
 
     def __init__(self, slug: str) -> None:
         self.slug = slug

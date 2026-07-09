@@ -2,7 +2,7 @@
 
 Precedence (highest first): **sysadmin** (Keycloak's ``geoid.sysadmin`` role)
 bypasses every per-collection check; then the grant ladder
-**owner > editor > viewer**; then the data-layer fallback (``writable_anon`` for
+**owner > editor > viewer**; then the data-layer fallback (``public_write`` for
 writes, ``public_read`` for reads) for callers with no grant.
 
 :func:`load_caller_grant` is the single grant lookup — it returns ``None`` (no
@@ -69,16 +69,16 @@ async def load_caller_grant(
 
 
 def can_write(principal: Principal, collection: Collection, grant: CollectionGrant | None) -> bool:
-    """sysadmin OR an editor/owner grant OR a writable_anon collection → may write.
+    """sysadmin OR an editor/owner grant OR a public_write collection → may write.
 
-    Preserves both legacy paths: anonymous-into-writable_anon and
-    authenticated-into-writable_anon. An authenticated non-grantee facing a
+    Preserves both legacy paths: anonymous-into-public_write and
+    authenticated-into-public_write. An authenticated non-grantee facing a
     non-writable collection falls through to False → 403.
     """
     return (
         principal.is_admin
         or (grant is not None and role_at_least(grant.role, Role.EDITOR))
-        or collection.writable_anon
+        or collection.public_write
     )
 
 

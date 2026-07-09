@@ -89,7 +89,7 @@ async def test_dedup_is_global_across_collections(client, admin_headers, unit_sq
     await client.post(
         "/manage/collections",
         headers=admin_headers,
-        json={"id": "cola", "writable_anon": True},
+        json={"id": "cola", "public_write": True},
     )
     a = await client.post("/collections/public/items", json=unit_square_ccw)
     # Sysadmin caller so the cross-collection 409 discloses the incumbent.

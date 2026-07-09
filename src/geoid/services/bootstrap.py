@@ -1,7 +1,7 @@
 """Startup bootstrap — guarantee the reserved anonymous collection exists.
 
 Anonymous contributions land in one reserved ``public`` collection
-(``writable_anon=true``). The slug is config-driven (``GEOID_PUBLIC_COLLECTION``),
+(``public_write=true``). The slug is config-driven (``GEOID_PUBLIC_COLLECTION``),
 so seeding lives here (idempotent) rather than in a migration.
 """
 
@@ -34,7 +34,7 @@ async def ensure_public_collection(session: AsyncSession, settings: Settings) ->
                 catalog_id=catalog.id,
                 slug=settings.public_collection,
                 title="Public (anonymous contributions)",
-                writable_anon=True,
+                public_write=True,
             )
         except IntegrityError:
             await session.rollback()
