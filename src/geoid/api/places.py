@@ -202,7 +202,13 @@ async def resolve_geoid(
     "/collections/{collection_id}/external/{external_id}",
     response_model=FeatureModel,
     response_class=GeoJSONResponse,
-    summary="Resolve a place by (external_id, collection)",
+    summary="Resolve a place by (external_id, collection) — answers like the geoid resolver",
+    description=(
+        "Behaves exactly like `GET /{geoid}`: an existing (collection, "
+        "external_id) answers 200 to every caller — the full feature for "
+        "sysadmin / the creator / grant holders, the geometry-only masked body "
+        "for everyone else. 404 only for an unknown collection or external_id."
+    ),
     responses={200: {"content": {"text/plain": {}}}},
 )
 async def resolve_by_external_id(
@@ -216,19 +222,18 @@ async def resolve_by_external_id(
     collection = await collection_repo.get_by_slug(session, collection_id)
     if collection is None:
         raise CollectionNotFoundError(collection_id)
-    # ONE grant load serves both gates: existence (the unchanged 404 mask on
-    # non-public collections — same body as an unknown external_id) and metadata
-    # visibility. Deliberate cost: public collections now pay this grant SELECT
-    # for authenticated non-admin callers, and load_caller_grant's idempotent
-    # sub-backfill UPDATE can fire on a public read.
-    grant = await authz_service.load_caller_grant(
-        session, principal, collection.id, collection.slug
-    )
-    if not authz_service.can_read(principal, collection.public_read, grant):
-        raise PlaceNotFoundError(f"{collection_id}/{external_id}")
     row = await place_repo.get_by_external_id(session, collection.id, external_id)
     if row is None:
         raise PlaceNotFoundError(f"{collection_id}/{external_id}")
-    full = authz_service.can_see_metadata(principal, _created_by(row), grant)
+    # Existence is never masked (client ruling 2026-07-09 round 2 — consistent
+    # with the geoid resolver); only the BODY is caller-aware, on the same
+    # query-avoiding order as resolve_geoid.
+    created_by = _created_by(row)
+    full = authz_service.can_see_metadata(principal, created_by, None)
+    if not full and not principal.is_anonymous:
+        grant = await authz_service.load_caller_grant(
+            session, principal, collection.id, collection.slug
+        )
+        full = authz_service.can_see_metadata(principal, created_by, grant)
     feature = ogc_service.build_feature(settings, row, full=full)
     return feature_response(feature, fmt)

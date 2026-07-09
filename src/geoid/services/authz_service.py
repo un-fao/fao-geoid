@@ -2,8 +2,9 @@
 
 Precedence (highest first): **sysadmin** (Keycloak's ``geoid.sysadmin`` role)
 bypasses every per-collection check; then the grant ladder
-**owner > editor > viewer**; then the data-layer fallback (``public_write`` for
-writes, ``public_read`` for reads) for callers with no grant.
+**owner > editor > viewer**; then the data-layer fallback (``public_write``)
+for callers with no grant. (``public_read``'s one remaining function — dedup-409
+incumbent disclosure — is decided in the registry service, not here.)
 
 :func:`load_caller_grant` is the single grant lookup — it returns ``None`` (no
 query needed) for sysadmin / anonymous / unverified-email callers, who never carry
@@ -79,21 +80,6 @@ def can_write(principal: Principal, collection: Collection, grant: CollectionGra
         principal.is_admin
         or (grant is not None and role_at_least(grant.role, Role.EDITOR))
         or collection.public_write
-    )
-
-
-def can_read(principal: Principal, public_read: bool, grant: CollectionGrant | None) -> bool:
-    """sysadmin OR a public_read collection OR any grant (viewer+) → may read.
-
-    Mirrors :func:`can_write` one rung lower on the ladder: reads only need
-    ``viewer``. Takes the ``public_read`` flag as a scalar — read paths hold it on
-    the row already. A public collection stays readable by everyone (anonymous
-    included); a non-public one is 404-masked for callers this returns False for.
-    """
-    return (
-        principal.is_admin
-        or public_read
-        or (grant is not None and role_at_least(grant.role, Role.VIEWER))
     )
 
 

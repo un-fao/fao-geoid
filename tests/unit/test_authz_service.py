@@ -1,8 +1,8 @@
-"""Unit truth-table for the pure authz predicates (can_write / can_read / can_manage).
+"""Unit truth-table for the pure authz predicates (can_write / can_see_metadata /
+can_manage).
 
 ``load_caller_grant`` touches the DB and is exercised in the integration suite; here
-the predicates are pure functions over (principal, collection-view / public_read
-flag, grant).
+the predicates are pure functions over (principal, collection-view, grant).
 """
 
 from __future__ import annotations
@@ -31,10 +31,6 @@ USER = Principal(subject="kc-1", email="u@x.org", email_verified=True)
 
 CLOSED = _collection(public_write=False)
 OPEN = _collection(public_write=True)
-
-# can_read takes the public_read flag as a scalar (read paths hold it on the row).
-PUBLIC_READ = True
-PRIVATE_READ = False
 
 
 # --- can_write ----------------------------------------------------------------
@@ -67,34 +63,6 @@ def test_authenticated_non_grantee_cannot_write_closed_collection():
 def test_authenticated_non_grantee_can_write_open_collection():
     # public_write means open-to-all writes (anonymous AND authenticated).
     assert authz_service.can_write(USER, OPEN, None) is True
-
-
-# --- can_read -----------------------------------------------------------------
-
-
-def test_sysadmin_reads_anything():
-    assert authz_service.can_read(ADMIN, PRIVATE_READ, None) is True
-
-
-def test_public_read_allows_anonymous_read():
-    assert authz_service.can_read(ANON, PUBLIC_READ, None) is True
-
-
-def test_private_collection_blocks_anonymous_read():
-    assert authz_service.can_read(ANON, PRIVATE_READ, None) is False
-
-
-def test_any_grant_reads_private_collection():
-    for role in ("viewer", "editor", "owner"):
-        assert authz_service.can_read(USER, PRIVATE_READ, _grant(role)) is True
-
-
-def test_authenticated_non_grantee_cannot_read_private_collection():
-    assert authz_service.can_read(USER, PRIVATE_READ, None) is False
-
-
-def test_authenticated_non_grantee_reads_public_collection():
-    assert authz_service.can_read(USER, PUBLIC_READ, None) is True
 
 
 # --- can_see_metadata -----------------------------------------------------------

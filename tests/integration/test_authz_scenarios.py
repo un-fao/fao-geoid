@@ -7,14 +7,14 @@ creator (minted the seed feature; holds NO grant at assert time — provenance
 Collection configs (public_read, public_write): publicish (T,T) — the bootstrap
 ``public``'s shape; open-read (T,F); dropbox (F,T); vault (F,F).
 
-The rules this file pins (client meeting 2026-07-07 + rulings 2026-07-09):
+The rules this file pins (client meeting 2026-07-07 + rulings 2026-07-09, round 2):
 - WRITE ladder: editor/owner/sysadmin always; everyone else iff ``public_write``.
-- Dedup-409 disclosure is MEMBERSHIP-based: sysadmin / creator / any grant —
-  masked for anonymous and strangers even when the incumbent is public.
-- ``GET /{geoid}`` is un-gated for any geoid holder (200 for everyone), but the
-  BODY is full only for members/creator/sysadmin — flag-independent.
-- External-id existence follows ``public_read`` for non-members; the creator
-  holds no grant, so a private collection 404s them too (deliberate — pinned).
+- Dedup-409 disclosure: sysadmin / creator / any grant, OR the incumbent's
+  collection is ``public_read`` — masked only for non-members of a private
+  incumbent.
+- BOTH resolvers answer 200 to every caller for an existing feature (no 404
+  existence mask anywhere); the BODY is full only for members/creator/sysadmin —
+  flag-independent. 404 is reserved for a genuinely unknown id.
 - ``/me/geoids`` is authenticated and own-only.
 - ``/manage`` + ``GET /collections[/{id}]`` are sysadmin-only (401 anonymous,
   403 for everyone else — a collection's own owner included).
@@ -219,7 +219,7 @@ async def test_resolver_body_matrix(oidc_client, personas, config):
             _assert_masked(feature)
 
 
-# --- external-id resolver: existence follows public_read; body follows membership ---
+# --- external-id resolver: open existence (like /{geoid}); body follows membership --
 
 
 @pytest.mark.parametrize("config", CONFIGS)
@@ -230,19 +230,18 @@ async def test_external_id_matrix(oidc_client, personas, config):
     url = f"/collections/{slug}/external/seed-{slug}"
 
     for persona, headers in personas.items():
+        # Existence is never masked (mirrors GET /{geoid}); only the body is
+        # caller-aware. The creator's full body rides created_by == sub alone,
+        # on EVERY config — the old private-collection 404 is gone.
         resp = await oidc_client.get(url, headers=headers)
-        # can_read is membership/public_read only — deliberately NO creator leg:
-        # the creator holds no grant, so a private collection 404s them too.
-        visible = persona == "sysadmin" or persona in GRANTEES or cfg["public_read"]
-        if not visible:
-            assert resp.status_code == 404, f"{persona} on {config}: {resp.text}"
-            continue
         assert resp.status_code == 200, f"{persona} on {config}: {resp.text}"
         feature = resp.json()
         if persona in MEMBERS:
             _assert_full(feature, external_id=f"seed-{slug}")
         else:
             _assert_masked(feature)
+        unknown = await oidc_client.get(f"/collections/{slug}/external/nope", headers=headers)
+        assert unknown.status_code == 404, f"{persona} on {config}: {unknown.text}"
 
 
 # --- /me/geoids: authenticated, own-only --------------------------------------------

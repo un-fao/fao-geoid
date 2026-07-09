@@ -1,10 +1,11 @@
 """Integration: non-public collections (``public_read=false``) end to end.
 
-Covers the four 2026-07-03 surfaces: 404-masking on the external-id resolver
-only (existence-masked, the body identical to an unknown id's — ``GET /{geoid}``
-is deliberately ungated: the geoid is the capability), caller-aware dedup-409
-disclosure (single + bulk), ``GET /me/geoids``, and the sysadmin ``/manage``
-item inventory.
+Existence is never masked on either resolver (client ruling 2026-07-09 round 2):
+an existing feature answers 200 to every caller — the full body for members,
+the geometry-only masked body for everyone else; 404 is reserved for a genuinely
+unknown id. Also covers caller-aware dedup-409 disclosure (single + bulk;
+membership OR a ``public_read`` incumbent), ``GET /me/geoids``, and the sysadmin
+``/manage`` item inventory.
 """
 
 from __future__ import annotations
@@ -70,7 +71,7 @@ async def test_public_read_defaults_true(client, admin_headers):
     assert by_id["public"]["public_read"] is True
 
 
-# --- resolver gating: /{geoid} open, external-id masked ---------------------------
+# --- resolver existence: open on both, body member-only ---------------------------
 
 
 async def test_resolver_serves_private_collection_to_any_geoid_holder(
@@ -90,24 +91,33 @@ async def test_resolver_serves_private_collection_to_any_geoid_holder(
         assert feature["id"] == geoid
 
 
-async def test_external_id_resolver_masks_private_collection(oidc_client, make_token, bearer):
+async def test_external_id_resolver_serves_private_collection_masked(
+    oidc_client, make_token, bearer
+):
+    # Consistent with GET /{geoid}: an existing (collection, external_id) answers
+    # 200 to every caller — only the BODY is caller-aware. 404 is reserved for a
+    # genuinely unknown external_id, for members and non-members alike.
     await _create(oidc_client, "priv-x", public_read=False)
     await _grant(oidc_client, "priv-x", "viewer@x.org", "viewer")
     await _mint(oidc_client, "priv-x", _square(20, 20, external_id="ext-1"))
 
     url = "/collections/priv-x/external/ext-1"
-    assert (await oidc_client.get(url)).status_code == 404
     stranger = bearer(make_token(sub="kc-st", email="stranger@x.org"))
-    masked = await oidc_client.get(url, headers=stranger)
-    assert masked.status_code == 404
-    # Feature-level mask: same body an unknown external_id in this collection gets.
     viewer = bearer(make_token(sub="kc-vw", email="viewer@x.org"))
-    unknown = await oidc_client.get("/collections/priv-x/external/nope", headers=viewer)
-    assert masked.json()["message"] == "place not found: priv-x/ext-1"
-    assert set(masked.json()) == set(unknown.json())
+    for headers in (None, stranger):
+        resp = await oidc_client.get(url, headers=headers)
+        assert resp.status_code == 200, resp.text
+        assert set(resp.json()["properties"]) == {"geoid", "uri"}
 
-    assert (await oidc_client.get(url, headers=viewer)).status_code == 200
-    assert (await oidc_client.get(url, headers=ADMIN)).status_code == 200
+    for headers in (viewer, ADMIN):
+        resp = await oidc_client.get(url, headers=headers)
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["properties"]["external_id"] == "ext-1"
+
+    for headers in (None, stranger, viewer, ADMIN):
+        unknown = await oidc_client.get("/collections/priv-x/external/nope", headers=headers)
+        assert unknown.status_code == 404
+        assert unknown.json()["message"] == "place not found: priv-x/nope"
 
 
 async def test_public_collection_still_resolves_anonymously(client, unit_square_ccw):
