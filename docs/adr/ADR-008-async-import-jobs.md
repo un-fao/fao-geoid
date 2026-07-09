@@ -77,7 +77,7 @@ object under it, name-ordered, capped by `GEOID_JOB_MAX_FILES`).
   `import_job.source_ref` for the worker, but never echoed — results/logs/error
   text carry only the query-stripped form.
 - Validation runs at submit (422) AND re-runs in the worker (defense in depth).
-- Job creation is **authenticated-only** (anon → 401) even for `writable_anon`
+- Job creation is **authenticated-only** (anon → 401) even for `public_write`
   collections: a job snapshots its creator for later authz re-checks and status
   visibility. Status reads are creator-or-sysadmin; everyone else gets the
   masked `no-such-job` 404.

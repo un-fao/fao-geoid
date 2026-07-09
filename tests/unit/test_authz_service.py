@@ -17,8 +17,8 @@ from geoid.services import authz_service
 pytestmark = pytest.mark.unit
 
 
-def _collection(*, writable_anon: bool):
-    return SimpleNamespace(writable_anon=writable_anon)
+def _collection(*, public_write: bool):
+    return SimpleNamespace(public_write=public_write)
 
 
 def _grant(role: str):
@@ -29,8 +29,8 @@ ANON = Principal.anonymous()
 ADMIN = Principal.admin()
 USER = Principal(subject="kc-1", email="u@x.org", email_verified=True)
 
-CLOSED = _collection(writable_anon=False)
-OPEN = _collection(writable_anon=True)
+CLOSED = _collection(public_write=False)
+OPEN = _collection(public_write=True)
 
 # can_read takes the public_read flag as a scalar (read paths hold it on the row).
 PUBLIC_READ = True
@@ -44,7 +44,7 @@ def test_sysadmin_writes_anything():
     assert authz_service.can_write(ADMIN, CLOSED, None) is True
 
 
-def test_writable_anon_allows_anonymous_write():
+def test_public_write_allows_anonymous_write():
     assert authz_service.can_write(ANON, OPEN, None) is True
 
 
@@ -65,7 +65,7 @@ def test_authenticated_non_grantee_cannot_write_closed_collection():
 
 
 def test_authenticated_non_grantee_can_write_open_collection():
-    # writable_anon means open-to-all writes (anonymous AND authenticated).
+    # public_write means open-to-all writes (anonymous AND authenticated).
     assert authz_service.can_write(USER, OPEN, None) is True
 
 
@@ -95,6 +95,43 @@ def test_authenticated_non_grantee_cannot_read_private_collection():
 
 def test_authenticated_non_grantee_reads_public_collection():
     assert authz_service.can_read(USER, PUBLIC_READ, None) is True
+
+
+# --- can_see_metadata -----------------------------------------------------------
+# Full-feature visibility is MEMBERSHIP-based and public_read-independent:
+# sysadmin OR the feature's creator (non-null sub) OR any grant. Everyone else
+# gets the geometry-only masked body.
+
+
+def test_sysadmin_sees_metadata():
+    assert authz_service.can_see_metadata(ADMIN, None, None) is True
+
+
+def test_creator_sees_metadata():
+    assert authz_service.can_see_metadata(USER, "kc-1", None) is True
+
+
+def test_non_creator_without_grant_sees_nothing():
+    assert authz_service.can_see_metadata(USER, "kc-someone-else", None) is False
+
+
+def test_any_grant_sees_metadata():
+    for role in ("viewer", "editor", "owner"):
+        assert authz_service.can_see_metadata(USER, None, _grant(role)) is True
+
+
+def test_anonymous_never_sees_metadata():
+    assert authz_service.can_see_metadata(ANON, "kc-1", None) is False
+
+
+def test_anonymous_creator_never_matches_anonymous_caller():
+    # created_by None == subject None must NOT read as "creator" — the non-null
+    # subject guard is load-bearing (anonymous mints record created_by=None).
+    assert authz_service.can_see_metadata(ANON, None, None) is False
+
+
+def test_authenticated_non_grantee_masked_when_creator_unknown():
+    assert authz_service.can_see_metadata(USER, None, None) is False
 
 
 # --- can_manage ---------------------------------------------------------------

@@ -76,8 +76,7 @@ async def test_finish_is_guarded_on_the_expected_status(session):
     assert await job_repo.finish(session, job.id, status="successful") is False
     await job_repo.claim(session, job.id)
     assert (
-        await job_repo.finish(session, job.id, status="successful", report={"summary": {}})
-        is True
+        await job_repo.finish(session, job.id, status="successful", report={"summary": {}}) is True
     )
     # Terminal is terminal: no second transition.
     assert await job_repo.finish(session, job.id, status="failed", message="late") is False
@@ -93,7 +92,9 @@ async def test_reap_flips_only_stale_rows(session):
     await session.commit()
     # A live (fresh-heartbeat) running row must NOT be reaped.
     assert (
-        await job_repo.reap(session, fresh.id, running_stale_seconds=600, accepted_stale_seconds=900)
+        await job_repo.reap(
+            session, fresh.id, running_stale_seconds=600, accepted_stale_seconds=900
+        )
         is False
     )
 
@@ -104,7 +105,9 @@ async def test_reap_flips_only_stale_rows(session):
         {"id": stale.id},
     )
     assert (
-        await job_repo.reap(session, stale.id, running_stale_seconds=600, accepted_stale_seconds=900)
+        await job_repo.reap(
+            session, stale.id, running_stale_seconds=600, accepted_stale_seconds=900
+        )
         is True
     )
     row = await job_repo.get(session, stale.id)
@@ -143,7 +146,7 @@ async def test_reaped_worker_cannot_resurrect_the_row(session):
 
 async def test_count_active_counts_only_accepted_and_running(session):
     assert await job_repo.count_active(session) == 0
-    first = await _insert(session)
+    await _insert(session)  # stays 'accepted'
     second = await _insert(session)
     third = await _insert(session)
     await job_repo.claim(session, second.id)

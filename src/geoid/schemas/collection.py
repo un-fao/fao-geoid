@@ -27,12 +27,13 @@ class CollectionCreate(BaseModel):
         examples=["land-parcels"],
     )
     title: str | None = Field(default=None, examples=["Land Parcels"])
-    writable_anon: bool = Field(default=False, examples=[False])
+    public_write: bool = Field(default=False, examples=[False])
     public_read: bool = Field(
         default=True,
-        description="When false, features are 404-masked on the resolvers and the "
-        "dedup 409 withholds the incumbent's identifiers unless the caller holds a "
-        "grant on this collection (viewer or above) or is sysadmin.",
+        description="When false, features are 404-masked on the external-id "
+        "resolver unless the caller holds a grant on this collection (viewer or "
+        "above) or is sysadmin. Does not affect the dedup-409 incumbent, which is "
+        "always masked for non-members.",
         examples=[True],
     )
     metadata: dict[str, Any] = Field(default_factory=dict, examples=[{}])
@@ -55,7 +56,7 @@ class CollectionCreate(BaseModel):
 class CollectionOut(BaseModel):
     id: str
     title: str | None = None
-    writable_anon: bool = False
+    public_write: bool = False
     public_read: bool = True
     metadata: dict[str, Any] = Field(default_factory=dict)
 
@@ -65,7 +66,9 @@ class GrantCreate(BaseModel):
 
     ``viewer`` is the read tier: on a non-public collection it unlocks the
     resolvers (no more 404 mask) and the dedup-409 incumbent disclosure; it does
-    NOT authorize writes (``editor``+) or grant management (``owner``).
+    NOT authorize writes (``editor``+) or grant management (``owner``). The
+    ``owner`` role itself is sysadmin-only to grant — a collection owner may
+    grant ``editor``/``viewer`` only.
     """
 
     email: str = Field(min_length=3, max_length=320, examples=["alice@example.org"])

@@ -1,7 +1,7 @@
 """Write / registry router — the product surface.
 
 POST a polygon → ``{geoid, uri}``; resolve durably by geoid; resolve by
-``(external_id, collection)``. Anonymous POSTs are allowed into ``writable_anon``
+``(external_id, collection)``. Anonymous POSTs are allowed into ``public_write``
 collections via the shared registry service (no special code path).
 """
 
@@ -40,6 +40,11 @@ from geoid.services.exceptions import (
 router = APIRouter(tags=["registry"])
 
 
+def _created_by(row: dict) -> str | None:
+    """The mint-time creator ``sub`` recorded in provenance (None for anonymous mints)."""
+    return (row.get("provenance") or {}).get("created_by")
+
+
 @router.post(
     "/collections/{collection_id}/items",
     response_model=MintResponse,
@@ -62,10 +67,10 @@ router = APIRouter(tags=["registry"])
             "description": (
                 "An identical geometry already exists in the catalog (geometry "
                 "dedup is global). The body carries the incumbent "
-                "geoid/uri/collection when the caller may read the incumbent's "
-                "collection (sysadmin / public_read / own mint / any grant); "
-                "otherwise those fields are null. An external_id duplicate also "
-                "answers 409 — discriminate on ``constraint``."
+                "geoid/uri/collection only for members of the incumbent's "
+                "collection (sysadmin / own mint / any grant — public_read does "
+                "NOT disclose); otherwise those fields are null. An external_id "
+                "duplicate also answers 409 — discriminate on ``constraint``."
             ),
         },
     },
@@ -117,7 +122,7 @@ async def create_items_bulk(
     settings: Settings = Depends(get_settings),
 ) -> BulkReport:
     # A write bound MUST error, never truncate: too many features rejects the
-    # whole request (413) before any insert. Auth (anon → writable_anon) is checked
+    # whole request (413) before any insert. Auth (anon → public_write) is checked
     # once up front in the service, since it depends on principal + collection only.
     if len(body.features) > settings.bulk_max_features:
         raise BulkLimitExceededError(len(body.features), settings.bulk_max_features)
@@ -169,7 +174,7 @@ async def create_items_import(
     settings: Settings = Depends(get_settings),
 ) -> JSONResponse:
     # Job creation is authenticated-only (unlike the inline bulk route, where
-    # anonymous writes into writable_anon collections stay allowed): a job row
+    # anonymous writes into public_write collections stay allowed): a job row
     # snapshots its creator for later authz re-checks and status visibility.
     if principal.is_anonymous:
         raise HTTPException(
@@ -196,27 +201,6 @@ async def create_items_import(
         content=info.model_dump(mode="json", exclude_none=True),
         headers={"Location": status_url},
     )
-
-
-async def _can_read_collection(
-    session: AsyncSession,
-    principal: Principal,
-    *,
-    collection_id: uuid.UUID,
-    collection_slug: str,
-    public_read: bool,
-) -> bool:
-    """Grant lookup + the pure ``can_read`` predicate.
-
-    Takes the collection facts as scalars — both resolvers already hold them (on
-    the read row / the Collection), so no refetch. NOTE: ``load_caller_grant``
-    backfills the Keycloak ``sub`` on first authorized access, so this read path
-    can issue one idempotent UPDATE.
-    """
-    grant = await authz_service.load_caller_grant(
-        session, principal, collection_id, collection_slug
-    )
-    return authz_service.can_read(principal, public_read, grant)
 
 
 @router.get(
@@ -257,16 +241,27 @@ async def list_my_geoids(
 async def resolve_geoid(
     geoid: uuid.UUID,
     fmt: GeometryFormat = Depends(output_format),
+    principal: Principal = Depends(require_principal),
     session: AsyncSession = Depends(get_session),
     settings: Settings = Depends(get_settings),
 ) -> FeatureModel | WKTResponse:
-    # Deliberately ungated (2026-07-03): the geoid is the capability —
-    # public_read hides discovery (external-id lookup, dedup-409 incumbent),
-    # never exact-geoid resolution.
+    # Existence stays un-gated for any geoid holder (the geoid is the capability;
+    # no 404 mask), but the BODY is caller-aware since 2026-07-09: full metadata
+    # only for sysadmin / creator / members, the geometry-only masked body for
+    # everyone else. Taking a principal also makes a present-but-malformed
+    # bearer 401 (it used to be ignored).
     row = await place_repo.get_by_geoid(session, geoid)
     if row is None:
         raise PlaceNotFoundError(str(geoid))
-    feature = ogc_service.build_feature(settings, row)
+    created_by = _created_by(row)
+    # Query-avoiding order: sysadmin/creator need no grant; anonymous can hold none.
+    full = authz_service.can_see_metadata(principal, created_by, None)
+    if not full and not principal.is_anonymous:
+        grant = await authz_service.load_caller_grant(
+            session, principal, row["collection_id"], row["collection_slug"]
+        )
+        full = authz_service.can_see_metadata(principal, created_by, grant)
+    feature = ogc_service.build_feature(settings, row, full=full)
     return feature_response(feature, fmt)
 
 
@@ -288,22 +283,19 @@ async def resolve_by_external_id(
     collection = await collection_repo.get_by_slug(session, collection_id)
     if collection is None:
         raise CollectionNotFoundError(collection_id)
-    # Feature-level mask (same 404 as an unknown external_id), checked before the
-    # place fetch. Public collections skip the grant lookup entirely.
-    if (
-        not collection.public_read
-        and not principal.is_admin
-        and not await _can_read_collection(
-            session,
-            principal,
-            collection_id=collection.id,
-            collection_slug=collection.slug,
-            public_read=collection.public_read,
-        )
-    ):
+    # ONE grant load serves both gates: existence (the unchanged 404 mask on
+    # non-public collections — same body as an unknown external_id) and metadata
+    # visibility. Deliberate cost: public collections now pay this grant SELECT
+    # for authenticated non-admin callers, and load_caller_grant's idempotent
+    # sub-backfill UPDATE can fire on a public read.
+    grant = await authz_service.load_caller_grant(
+        session, principal, collection.id, collection.slug
+    )
+    if not authz_service.can_read(principal, collection.public_read, grant):
         raise PlaceNotFoundError(f"{collection_id}/{external_id}")
     row = await place_repo.get_by_external_id(session, collection.id, external_id)
     if row is None:
         raise PlaceNotFoundError(f"{collection_id}/{external_id}")
-    feature = ogc_service.build_feature(settings, row)
+    full = authz_service.can_see_metadata(principal, _created_by(row), grant)
+    feature = ogc_service.build_feature(settings, row, full=full)
     return feature_response(feature, fmt)

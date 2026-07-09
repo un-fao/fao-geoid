@@ -89,7 +89,10 @@ def test_build_results_aggregates_across_files():
         ImportFileReport(
             source="gs://b/a.geojson",
             summary=ImportFileSummary(received=3, accepted=2, rejected=1),
-            accepted=[BulkAccepted(index=0, geoid="g", uri="u"), BulkAccepted(index=1, geoid="h", uri="v")],
+            accepted=[
+                BulkAccepted(index=0, geoid="g", uri="u"),
+                BulkAccepted(index=1, geoid="h", uri="v"),
+            ],
         ),
         ImportFileReport(
             source="gs://b/b.geojson",

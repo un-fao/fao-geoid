@@ -10,17 +10,24 @@ from sqlalchemy import text
 pytestmark = pytest.mark.integration
 
 
-async def test_concurrent_identical_posts_converge_to_one_geoid(client, session, unit_square_ccw):
+async def test_concurrent_identical_posts_converge_to_one_geoid(
+    client, admin_headers, session, unit_square_ccw
+):
     """K simultaneous POSTs of the SAME geometry → exactly one mint, one row.
 
     Exercises the arbiter CTE (registry ON CONFLICT DO NOTHING + incumbent-lookup)
     race: one arbiter insert wins (201); the rest block on the registry's geom_hash
     UNIQUE, see the conflict, and fail with a 409 that carries the winner's geoid.
-    The invariant is one place row total.
+    The invariant is one place row total. Sysadmin caller on every POST so each
+    loser's 409 discloses (is_admin short-circuits before any grant query — the
+    race semantics and DB traffic are unchanged).
     """
     k = 16
     responses = await asyncio.gather(
-        *[client.post("/collections/public/items", json=unit_square_ccw) for _ in range(k)]
+        *[
+            client.post("/collections/public/items", headers=admin_headers, json=unit_square_ccw)
+            for _ in range(k)
+        ]
     )
 
     # Assert statuses BEFORE reading geoids so a stray 500 surfaces with its body,
@@ -80,7 +87,7 @@ async def test_resolve_incumbent_returns_committed_collection(client, session, u
 
     Covers ``_resolve_incumbent``'s success path deterministically (no race):
     mint a place via the API (committed), then call the helper directly — it must
-    return the incumbent's collection facts (id/slug/public_read/creator) from the
+    return the incumbent's collection facts (id/slug/creator) from the
     now-visible registry row. The concurrent path only reaches this helper when
     the in-statement LEFT JOIN missed.
     """
@@ -92,8 +99,7 @@ async def test_resolve_incumbent_returns_committed_collection(client, session, u
     geojson = geometry_to_geojson(PlaceCreate.model_validate(unit_square_ccw))
     incumbent = await _resolve_incumbent(session, geojson)
     assert incumbent is not None
-    collection_id, slug, public_read, created_by = incumbent
+    collection_id, slug, created_by = incumbent
     assert slug == "public"
-    assert public_read is True
     assert collection_id is not None
     assert created_by is None  # minted anonymously above

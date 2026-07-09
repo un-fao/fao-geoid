@@ -26,6 +26,7 @@ from geoid.services.exceptions import (
     CollectionNotFoundError,
     GrantNotFoundError,
     LastOwnerGuardError,
+    OwnerGrantForbiddenError,
 )
 
 router = APIRouter(tags=["collections"])
@@ -62,11 +63,14 @@ async def _require_manageable(
     "/collections/{collection_id}/grants",
     response_model=GrantOut,
     status_code=status.HTTP_201_CREATED,
-    summary="Grant or update a per-collection role by email (owner or sysadmin)",
+    summary="Grant or update a per-collection role by email (owner or sysadmin; "
+    "the owner role itself is sysadmin-only)",
     description=(
         "Roles: `owner` (manage grants + write + read), `editor` (write + read), "
         "`viewer` (read: resolves features in a non-public collection and unlocks "
         "dedup-409 incumbent disclosure). "
+        "Granting `owner` requires sysadmin (403 otherwise) — a collection owner "
+        "may grant `editor`/`viewer` only. "
         "Demoting the last owner is blocked (409); grant another owner first."
     ),
 )
@@ -77,6 +81,10 @@ async def create_grant(
     session: AsyncSession = Depends(get_session),
 ) -> GrantOut:
     collection = await _require_manageable(session, collection_id, principal)
+    # 401→404→403 precedence is _require_manageable's; only then the owner-role
+    # gate, so a non-owner probing with role=owner still sees the manage 403.
+    if body.role == Role.OWNER.value and not principal.is_admin:
+        raise OwnerGrantForbiddenError(collection_id)
     if body.role != Role.OWNER.value:
         # Last-owner guard: an upsert that would demote the only owner is blocked
         # (sysadmin included — grant a second owner first).

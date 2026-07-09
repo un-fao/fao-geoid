@@ -183,8 +183,8 @@ class GeometryConflictResponse(BaseModel):
 
     The incumbent fields are CONDITIONAL: geometry dedup is global, so a conflict
     can point at an incumbent in another collection — they are withheld (null)
-    unless the caller may read the incumbent's collection (sysadmin, a
-    ``public_read`` collection, the caller's own mint, or any grant on it).
+    unless the caller is a member of the incumbent's collection (sysadmin, the
+    caller's own mint, or any grant on it; ``public_read`` does NOT disclose).
     Note the geoid value itself is recomputable from the submitted geometry
     (content-addressed, public recipe); the mask protects the incumbent's
     collection + uri, not the identifier.
@@ -195,17 +195,17 @@ class GeometryConflictResponse(BaseModel):
     geoid: str | None = Field(
         default=None,
         description="The INCUMBENT geoid the geometry is already registered under. "
-        "Withheld (null) when the caller may not read the incumbent's collection.",
+        "Withheld (null) for callers without membership on the incumbent's collection.",
     )
     uri: str | None = Field(
         default=None,
         description="Durable resolver URI of the incumbent geoid. "
-        "Withheld (null) when the caller may not read the incumbent's collection.",
+        "Withheld (null) for callers without membership on the incumbent's collection.",
     )
     collection: str | None = Field(
         default=None,
         description="Collection slug the incumbent belongs to. "
-        "Withheld (null) when the caller may not read the incumbent's collection.",
+        "Withheld (null) for callers without membership on the incumbent's collection.",
     )
     constraint: str = Field(description='Always "uq_geoid_registry_geom_hash" for this conflict.')
 

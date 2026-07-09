@@ -7,7 +7,7 @@
 Env:
     GEOID_BASE_URL    default http://localhost:8000
     GEOID_COLLECTION  default public  (anonymous-writable; no token needed)
-    GEOID_ADMIN_TOKEN required only when seeding a managed (non-anon) collection
+    GEOID_BEARER_TOKEN a Keycloak JWT; required only when seeding a managed (non-anon) collection
 
 Exit codes: 0 all demos behaved · 1 unreachable or any unexpected response
 """
@@ -23,12 +23,12 @@ from _timing import print_timings, record
 
 BASE = os.environ.get("GEOID_BASE_URL", "http://localhost:8000").rstrip("/")
 COLLECTION = os.environ.get("GEOID_COLLECTION", "public")
-ADMIN_TOKEN = os.environ.get("GEOID_ADMIN_TOKEN")
+BEARER_TOKEN = os.environ.get("GEOID_BEARER_TOKEN")
 SAMPLES = Path(__file__).resolve().parents[1] / "samples"
 
 
 def _headers() -> dict[str, str]:
-    return {"Authorization": f"Bearer {ADMIN_TOKEN}"} if ADMIN_TOKEN else {}
+    return {"Authorization": f"Bearer {BEARER_TOKEN}"} if BEARER_TOKEN else {}
 
 
 def _post(client: httpx.Client, feature: dict) -> httpx.Response:
@@ -65,8 +65,11 @@ def main() -> int:
             elif (
                 resp.status_code == 409 and body.get("constraint") == "uq_geoid_registry_geom_hash"
             ):
-                # Re-running the seed: the geometry is already registered.
-                print(f"  [409] {ext:<22} {'duplicate→existing':<18} geoid={body['geoid']}")
+                # Re-running the seed: the geometry is already registered. The
+                # incumbent geoid is masked (null) for non-members — anonymous
+                # re-runs see "masked", a sysadmin bearer sees the geoid.
+                shown = body.get("geoid") or "masked (caller is not a member)"
+                print(f"  [409] {ext:<22} {'duplicate→existing':<18} geoid={shown}")
             else:
                 print(f"  [{resp.status_code}] {ext:<22} ERROR {body}")
                 errors += 1
@@ -83,10 +86,14 @@ def main() -> int:
         else:
             status = f"?? {resp.status_code}"
             errors += 1
-        print(
-            f"  [{status}] insert rejected; incumbent geoid={body.get('geoid')} "
-            f"(collection={body.get('collection')})"
-        )
+        if body.get("geoid") is None:
+            # Membership-based disclosure: anonymous callers never see the incumbent.
+            print(f"  [{status}] insert rejected; incumbent masked for anonymous callers")
+        else:
+            print(
+                f"  [{status}] insert rejected; incumbent geoid={body.get('geoid')} "
+                f"(collection={body.get('collection')})"
+            )
 
         print("\n== Validation demo (self-intersecting bow-tie) ==")
         invalid = json.loads((SAMPLES / "invalid_selfintersecting.geojson").read_text())
@@ -97,11 +104,18 @@ def main() -> int:
 
         if first_geoid:
             # Resolver lives at the app root (BASE already includes any /geoid root_path).
+            # Full metadata is member-only; an anonymous seeder gets the masked
+            # geometry-only body ({geoid, uri} properties), so print defensively.
             props = record("GET resolve", client.get(f"{BASE}/{first_geoid}")).json()["properties"]
             print(f"\n== Resolve {first_geoid} ==")
             print(f"  uri:         {props['uri']}")
-            print(f"  external_id: {props['external_id']}   commodity: {props.get('commodity')}")
-            print(f"  provenance:  {props['_geoid_provenance']['client']}")
+            if "external_id" in props:
+                print(
+                    f"  external_id: {props['external_id']}   commodity: {props.get('commodity')}"
+                )
+                print(f"  provenance:  {props['_geoid_provenance']['client']}")
+            else:
+                print("  (metadata masked — full features are member/sysadmin-only)")
 
         print_timings()
         if errors:

@@ -268,37 +268,37 @@ async def _spool(
     await _spool_https(source, path, settings.job_max_bytes, transport, label)
 
 
-async def _spool_https(
-    url: str, path: Path, max_bytes: int, transport: Any, label: str
-) -> None:
+async def _spool_https(url: str, path: Path, max_bytes: int, transport: Any, label: str) -> None:
     import httpx
 
     try:
-        async with httpx.AsyncClient(transport=transport, timeout=httpx.Timeout(60.0)) as client:
-            # No redirects (httpx default), no headers attached: the URL itself is
-            # the credential (presigned), and a redirect could step off the
-            # allowlisted host.
-            async with client.stream("GET", url) as response:
-                if response.status_code != 200:
-                    raise ImportSourceError(
-                        f"fetching {label} failed: upstream answered {response.status_code}"
-                    )
-                declared = response.headers.get("content-length")
-                if declared and declared.isdigit() and int(declared) > max_bytes:
-                    raise ImportSourceError(
-                        f"{label} exceeds the {max_bytes}-byte cap (GEOID_JOB_MAX_BYTES)"
-                    )
-                received = 0
-                with path.open("wb") as sink:
-                    async for chunk in response.aiter_bytes(_READ_BLOCK):
-                        received += len(chunk)
-                        # Counted, not trusted: a chunked/lying upstream can't
-                        # blow past the cap.
-                        if received > max_bytes:
-                            raise ImportSourceError(
-                                f"{label} exceeds the {max_bytes}-byte cap (GEOID_JOB_MAX_BYTES)"
-                            )
-                        sink.write(chunk)
+        # No redirects (httpx default), no headers attached: the URL itself is
+        # the credential (presigned), and a redirect could step off the
+        # allowlisted host.
+        async with (
+            httpx.AsyncClient(transport=transport, timeout=httpx.Timeout(60.0)) as client,
+            client.stream("GET", url) as response,
+        ):
+            if response.status_code != 200:
+                raise ImportSourceError(
+                    f"fetching {label} failed: upstream answered {response.status_code}"
+                )
+            declared = response.headers.get("content-length")
+            if declared and declared.isdigit() and int(declared) > max_bytes:
+                raise ImportSourceError(
+                    f"{label} exceeds the {max_bytes}-byte cap (GEOID_JOB_MAX_BYTES)"
+                )
+            received = 0
+            with path.open("wb") as sink:
+                async for chunk in response.aiter_bytes(_READ_BLOCK):
+                    received += len(chunk)
+                    # Counted, not trusted: a chunked/lying upstream can't
+                    # blow past the cap.
+                    if received > max_bytes:
+                        raise ImportSourceError(
+                            f"{label} exceeds the {max_bytes}-byte cap (GEOID_JOB_MAX_BYTES)"
+                        )
+                    sink.write(chunk)
     except httpx.HTTPError as exc:
         # httpx exception text can embed the full URL (query = bearer secret) —
         # surface only the exception class.
@@ -438,9 +438,7 @@ async def _mint_file(
 
     report = ImportFileReport(
         source=label,
-        summary=ImportFileSummary(
-            received=offset, accepted=len(accepted), rejected=len(rejected)
-        ),
+        summary=ImportFileSummary(received=offset, accepted=len(accepted), rejected=len(rejected)),
         accepted=accepted,
         rejected=rejected,
     )

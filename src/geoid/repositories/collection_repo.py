@@ -45,7 +45,7 @@ async def create(
     catalog_id: uuid.UUID,
     slug: str,
     title: str | None = None,
-    writable_anon: bool = False,
+    public_write: bool = False,
     public_read: bool = True,
     metadata: dict[str, Any] | None = None,
 ) -> Collection:
@@ -54,7 +54,7 @@ async def create(
         catalog_id=catalog_id,
         slug=slug,
         title=title,
-        writable_anon=writable_anon,
+        public_write=public_write,
         public_read=public_read,
         meta=metadata or {},
     )

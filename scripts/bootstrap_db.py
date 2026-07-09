@@ -233,8 +233,8 @@ def _preflight_settings(cfg: BootstrapConfig):
     except ValidationError as exc:
         raise ConfigError(
             f"settings pre-flight failed:\n{exc}\n"
-            "  Hint: GEOID_ENVIRONMENT != development requires a real GEOID_ADMIN_TOKEN "
-            "in the environment before bootstrapping."
+            "  Hint: GEOID_ENVIRONMENT != development requires GEOID_OIDC_ISSUER and "
+            "GEOID_OIDC_JWKS_URL in the environment before bootstrapping."
         ) from exc
 
 

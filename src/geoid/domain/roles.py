@@ -2,8 +2,8 @@
 
 Three ranked grants — ``viewer`` < ``editor`` < ``owner`` — held in the GeoID DB
 (``collection_grant``), distinct from the global ``sysadmin`` tier (Keycloak's
-``geoid.sysadmin`` or the static admin token) which bypasses all per-collection
-checks. ``role_at_least`` is the single comparison the authz service uses.
+``geoid.sysadmin`` role) which bypasses all per-collection checks.
+``role_at_least`` is the single comparison the authz service uses.
 """
 
 from __future__ import annotations

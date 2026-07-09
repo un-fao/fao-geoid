@@ -9,7 +9,7 @@ no row and never aborts the transaction, while an external_id or geoid clash on
 the ``place`` leg still raises 23505 (mapped to 409 by constraint name) and rolls
 the whole statement — including the registry row — back. When the place row is
 not written the geoid is still derived in-statement from the geometry (race-free);
-only the incumbent's collection facts (slug/id/public_read/creator) are read back
+only the incumbent's collection facts (slug/id/creator) are read back
 from ``geoid_registry`` (via the same ``geoid_geom_hash_default`` wrapper, with a
 bounded retry for the rare concurrent pre-commit window), so the service can
 decide 409 disclosure and raise ``GeometryConflictError``.
@@ -44,7 +44,6 @@ class InsertResult:
     # is the service's call, the repo only reports.
     collection_slug: str | None = None
     collection_id: uuid.UUID | None = None
-    collection_public_read: bool | None = None
     created_by: str | None = None  # the incumbent place's provenance->>'created_by'
 
 
@@ -73,19 +72,19 @@ async def geometry_invalid_reason(session: AsyncSession, geojson: str) -> str:
 
 async def _resolve_incumbent(
     session: AsyncSession, geojson: str
-) -> tuple[uuid.UUID, str, bool, str | None] | None:
+) -> tuple[uuid.UUID, str, str | None] | None:
     """Re-read the incumbent's facts until the winner's row is visible.
 
     Paid ONLY on the rare concurrent pre-commit miss, where the in-statement LEFT
     JOIN couldn't yet see the winner's not-yet-committed registry row. Each execute
     starts a fresh statement snapshot under READ COMMITTED, so a bounded retry
     catches the winner's commit; the geoid is already derived in-statement and never
-    depends on this. Returns the whole ``(collection_id, slug, public_read,
-    created_by)`` tuple — disclosure must never be decided on partial data — or
+    depends on this. Returns the whole ``(collection_id, slug, created_by)``
+    tuple — disclosure must never be decided on partial data — or
     None if the row never appears (genuine recipe drift).
     """
     stmt = text(
-        "SELECT c.id, c.slug, c.public_read, ip.provenance->>'created_by' AS created_by "
+        "SELECT c.id, c.slug, ip.provenance->>'created_by' AS created_by "
         "FROM geoid_registry r JOIN collection c ON c.id = r.collection_id "
         "LEFT JOIN place ip ON ip.id = r.place_id "
         f"WHERE r.geom_hash = geoid_geom_hash_default({_GEOM_EXPR})"
@@ -93,7 +92,7 @@ async def _resolve_incumbent(
     for _ in range(_INCUMBENT_SLUG_RETRIES):
         row = (await session.execute(stmt, {"geojson": geojson})).first()
         if row is not None:
-            return (row[0], row[1], row[2], row[3])
+            return (row[0], row[1], row[2])
         await asyncio.sleep(_INCUMBENT_SLUG_BACKOFF_S)
     return None
 
@@ -178,7 +177,6 @@ async def insert_place(
             EXISTS (SELECT 1 FROM ins) AS created,
             c.slug AS incumbent_slug,
             c.id AS incumbent_collection_id,
-            c.public_read AS incumbent_public_read,
             ip.provenance->>'created_by' AS incumbent_created_by
         FROM ids i
         LEFT JOIN geoid_registry r ON r.geom_hash = i.h
@@ -204,18 +202,17 @@ async def insert_place(
     # winner committed — so re-read them with a bounded retry. If they still never
     # appear (genuine recipe drift) report the fact with collection_slug=None; the
     # service decides the HTTP outcome (RegistryConsistencyError → structured 500).
-    incumbent = (row[3], row[2], row[4], row[5]) if row[2] is not None else None
+    incumbent = (row[3], row[2], row[4]) if row[2] is not None else None
     if incumbent is None:
         incumbent = await _resolve_incumbent(session, geojson)
     if incumbent is None:
         return InsertResult(geoid=geoid, created=False)
-    collection_id, slug, public_read, created_by = incumbent
+    collection_id, slug, created_by = incumbent
     return InsertResult(
         geoid=geoid,
         created=False,
         collection_slug=slug,
         collection_id=collection_id,
-        collection_public_read=public_read,
         created_by=created_by,
     )
 
@@ -225,6 +222,7 @@ async def insert_place(
 _READ_COLUMNS = """
     p.id AS geoid,
     c.slug AS collection_slug,
+    c.id AS collection_id,
     ST_AsGeoJSON(p.geom) AS geometry,
     p.external_id,
     p.provenance,

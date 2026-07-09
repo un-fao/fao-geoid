@@ -62,7 +62,16 @@ def _transport(payload: bytes, status_code: int = 200):
     return httpx.MockTransport(lambda request: httpx.Response(status_code, content=payload))
 
 
-async def _make_job(session, *, ref=_URL, is_prefix=False, created_by="importer-1", email=None, admin=False, collection="public"):
+async def _make_job(
+    session,
+    *,
+    ref=_URL,
+    is_prefix=False,
+    created_by="importer-1",
+    email=None,
+    admin=False,
+    collection="public",
+):
     collection_id = (
         await session.execute(select(Collection.id).where(Collection.slug == collection))
     ).scalar_one()
@@ -130,7 +139,11 @@ async def test_mixed_outcomes_produce_a_successful_job_with_a_sync_shaped_report
     payload = _fc(
         _square(0, 0),
         _square(5, 5),
-        {"type": "Feature", "geometry": {"type": "LineString", "coordinates": [[0, 0], [1, 1]]}, "properties": {}},
+        {
+            "type": "Feature",
+            "geometry": {"type": "LineString", "coordinates": [[0, 0], [1, 1]]},
+            "properties": {},
+        },
         _square(0, 0),  # in-batch duplicate of the first
     )
     job_id = await _make_job(session)
@@ -220,12 +233,10 @@ async def test_rerun_converges_via_dedup_with_disclosed_incumbents(session):
 # --- Disclosure parity with the sync path ------------------------------------
 
 
-async def test_conflict_disclosure_matches_may_disclose_incumbent(
-    session, client, admin_headers
-):
+async def test_conflict_disclosure_matches_may_disclose_incumbent(session, client, admin_headers):
     created = await client.post(
         "/manage/collections",
-        json={"id": "vault", "title": "Vault", "writable_anon": False, "public_read": False},
+        json={"id": "vault", "title": "Vault", "public_write": False, "public_read": False},
         headers=admin_headers,
     )
     assert created.status_code == 201

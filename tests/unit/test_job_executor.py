@@ -45,9 +45,7 @@ async def test_cloud_run_executor_builds_the_exact_run_job_request(monkeypatch):
     class _FakeClient:
         def run_job(self, request):
             recorded["request"] = request
-            return SimpleNamespace(
-                metadata=SimpleNamespace(name=f"{_JOB_NAME}/executions/exec-1")
-            )
+            return SimpleNamespace(metadata=SimpleNamespace(name=f"{_JOB_NAME}/executions/exec-1"))
 
     monkeypatch.setattr(job_executor, "_jobs_client", _FakeClient())
     settings = _settings(job_executor="cloud_run_job", import_job_name=_JOB_NAME)

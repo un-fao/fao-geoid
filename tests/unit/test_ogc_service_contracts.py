@@ -29,7 +29,7 @@ def _item_row() -> dict:
 def _isolate_env(monkeypatch):
     # Integration fixtures export GEOID_* into os.environ; clear what these
     # assertions depend on so unit tests are order-independent.
-    for key in ("GEOID_ENVIRONMENT", "GEOID_ADMIN_TOKEN", "GEOID_BASE_URL"):
+    for key in ("GEOID_ENVIRONMENT", "GEOID_BASE_URL"):
         monkeypatch.delenv(key, raising=False)
 
 
@@ -69,6 +69,55 @@ def test_feature_to_wkt_returns_valid_wkt():
 def test_feature_to_wkt_handles_null_geometry():
     feature = ogc_service.build_feature(_settings(), {**_item_row(), "geometry": None})
     assert ogc_service.feature_to_wkt(feature) == ""
+
+
+# --- the masked (non-member) feature body: bare minimum, nothing else ----------
+
+
+def _rich_row() -> dict:
+    return {
+        **_item_row(),
+        "external_id": "ext-9",
+        "provenance": {"created_by": "kc-1", "submitted_properties": {"crop": "cocoa"}},
+        "predecessor_id": uuid.UUID("019e0000-0000-7000-8000-000000000009"),
+        "originating_instance": "test-instance",
+        "collection_id": uuid.UUID("019e0000-0000-7000-8000-00000000000c"),
+    }
+
+
+def test_masked_feature_properties_are_exactly_geoid_and_uri():
+    feature = ogc_service.build_feature(_settings(), _rich_row(), full=False)
+    assert set(feature.properties) == {"geoid", "uri"}
+    assert feature.properties["geoid"] == "019e0000-0000-7000-8000-000000000001"
+    assert feature.properties["uri"].endswith("/019e0000-0000-7000-8000-000000000001")
+
+
+def test_masked_feature_links_are_exactly_self_and_wkt_alternate():
+    feature = ogc_service.build_feature(_settings(), _rich_row(), full=False)
+    assert [link.rel for link in feature.links] == ["self", "alternate"]
+    assert _wkt_alternate(feature.links) is not None
+
+
+def test_masked_feature_drops_predecessor_link_even_when_set():
+    feature = ogc_service.build_feature(_settings(), _rich_row(), full=False)
+    assert all(link.rel != "predecessor-version" for link in feature.links)
+    assert "predecessor_geoid" not in feature.properties
+
+
+def test_masked_feature_keeps_the_bare_geometry():
+    feature = ogc_service.build_feature(_settings(), _rich_row(), full=False)
+    assert feature.geometry is not None
+    assert ogc_service.feature_to_wkt(feature).startswith("POLYGON")
+
+
+def test_full_feature_is_byte_identical_to_the_default():
+    settings = _settings()
+    default = ogc_service.build_feature(settings, _rich_row())
+    explicit = ogc_service.build_feature(settings, _rich_row(), full=True)
+    assert default == explicit
+    assert default.properties["external_id"] == "ext-9"
+    assert default.properties["_geoid_provenance"]["created_by"] == "kc-1"
+    assert default.properties["crop"] == "cocoa"
 
 
 def test_conformance_keeps_core_drops_filter_and_cql2():

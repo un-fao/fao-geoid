@@ -73,7 +73,7 @@ async def test_submit_is_authenticated_only_but_inline_bulk_stays_anonymous(
     resp = await client.post(_IMPORT, json=_HREF)
     assert resp.status_code == 401
     assert launch_recorder == []
-    # Regression pin: the anonymous sync bulk path into writable_anon is untouched.
+    # Regression pin: the anonymous sync bulk path into public_write is untouched.
     fc = {
         "type": "FeatureCollection",
         "features": [
@@ -106,7 +106,7 @@ async def test_non_writer_gets_403(oidc_client, admin_headers, make_token, beare
     monkeypatch.setattr(job_executor, "launch", _record)
     created = await oidc_client.post(
         "/manage/collections",
-        json={"id": "restricted", "title": "R", "writable_anon": False},
+        json={"id": "restricted", "title": "R", "public_write": False},
         headers=admin_headers,
     )
     assert created.status_code == 201
@@ -281,9 +281,7 @@ async def test_on_read_reaper_flips_never_started_jobs(client, admin_headers, la
     sessionmaker = get_sessionmaker()
     async with sessionmaker() as session:
         await session.execute(
-            text(
-                "UPDATE import_job SET created_at = now() - interval '30 minutes' WHERE id=:id"
-            ),
+            text("UPDATE import_job SET created_at = now() - interval '30 minutes' WHERE id=:id"),
             {"id": job_id},
         )
         await session.commit()

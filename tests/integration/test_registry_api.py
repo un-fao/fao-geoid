@@ -22,7 +22,7 @@ async def test_post_polygon_mints_geoid_uri(client, unit_square_ccw):
     assert resp.headers["Location"] == body["uri"]
 
 
-async def test_anonymous_post_captures_whisp_client_provenance(client):
+async def test_anonymous_post_captures_whisp_client_provenance(client, admin_headers):
     feature = {
         "type": "Feature",
         "id": "whisp-plot",
@@ -33,7 +33,9 @@ async def test_anonymous_post_captures_whisp_client_provenance(client):
     assert resp.status_code == 201
     geoid = resp.json()["geoid"]
 
-    feat = (await client.get(f"/{geoid}")).json()
+    # Read as sysadmin: full metadata is member-only (an anonymous GET gets the
+    # masked geometry-only body — pinned in test_private_collections).
+    feat = (await client.get(f"/{geoid}", headers=admin_headers)).json()
     # client-submitted attributes round-trip; provenance records the whisp client.
     assert feat["properties"]["area_ha"] == 1.0
     prov = feat["properties"]["_geoid_provenance"]
@@ -44,7 +46,7 @@ async def test_anonymous_post_captures_whisp_client_provenance(client):
 
 
 async def test_identical_geometry_returns_409_with_incumbent_geoid(
-    client, unit_square_ccw, unit_square_reversed
+    client, admin_headers, unit_square_ccw, unit_square_reversed
 ):
     first = await client.post("/collections/public/items", json=unit_square_ccw)
     assert first.status_code == 201
@@ -52,7 +54,11 @@ async def test_identical_geometry_returns_409_with_incumbent_geoid(
 
     # Same square, reversed winding + rotated ring start -> identical canonical
     # geometry -> the insert FAILS (409) and the body carries the incumbent.
-    second = await client.post("/collections/public/items", json=unit_square_reversed)
+    # Sysadmin caller: disclosure is membership-based (a non-member's 409 is
+    # masked even for a public incumbent — pinned in test_authz_scenarios).
+    second = await client.post(
+        "/collections/public/items", headers=admin_headers, json=unit_square_reversed
+    )
     assert second.status_code == 409
     body = second.json()
     assert body["geoid"] == original_geoid
@@ -200,25 +206,34 @@ async def test_post_wkt_string_mints_geoid(client):
     assert feat["geometry"]["type"] == "Polygon"
 
 
-async def test_wkt_then_equivalent_geojson_is_409_same_incumbent(client, unit_square_ccw):
+async def test_wkt_then_equivalent_geojson_is_409_same_incumbent(
+    client, admin_headers, unit_square_ccw
+):
     # Parity: a WKT polygon and the equivalent GeoJSON polygon are the SAME geometry
-    # -> one geoid. The second POST 409s with the first's geoid as incumbent.
+    # -> one geoid. The second POST (sysadmin, so the 409 discloses) carries the
+    # first's geoid as incumbent.
     first = await client.post("/collections/public/items", json=_wkt_feature(_WKT_SQUARE))
     assert first.status_code == 201
     incumbent = first.json()["geoid"]
 
-    second = await client.post("/collections/public/items", json=unit_square_ccw)
+    second = await client.post(
+        "/collections/public/items", headers=admin_headers, json=unit_square_ccw
+    )
     assert second.status_code == 409
     assert second.json()["geoid"] == incumbent
 
 
-async def test_geojson_then_equivalent_wkt_is_409_same_incumbent(client, unit_square_ccw):
+async def test_geojson_then_equivalent_wkt_is_409_same_incumbent(
+    client, admin_headers, unit_square_ccw
+):
     # Reverse order: GeoJSON first, then the equivalent WKT — same parity, same geoid.
     first = await client.post("/collections/public/items", json=unit_square_ccw)
     assert first.status_code == 201
     incumbent = first.json()["geoid"]
 
-    second = await client.post("/collections/public/items", json=_wkt_feature(_WKT_SQUARE))
+    second = await client.post(
+        "/collections/public/items", headers=admin_headers, json=_wkt_feature(_WKT_SQUARE)
+    )
     assert second.status_code == 409
     assert second.json()["geoid"] == incumbent
 
@@ -248,7 +263,7 @@ async def test_anonymous_write_to_managed_collection_forbidden(
     await client.post(
         "/manage/collections",
         headers=admin_headers,
-        json={"id": "managed", "writable_anon": False},
+        json={"id": "managed", "public_write": False},
     )
     # anonymous (no auth header) -> 403
     anon = await client.post("/collections/managed/items", json=unit_square_ccw)

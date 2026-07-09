@@ -75,7 +75,12 @@ async def upsert_grant(
         )
         .returning(CollectionGrant)
     )
-    grant = (await session.execute(stmt)).scalar_one()
+    # populate_existing: without it the RETURNING row is served from the identity
+    # map, so a role change upserted after get_grant() loaded the old row (the
+    # last-owner check does) would return the STALE role in the response body.
+    grant = (
+        await session.execute(stmt, execution_options={"populate_existing": True})
+    ).scalar_one()
     # If the caller passed a subject and the row had none, fold it in (the upsert's
     # set_ leaves subject untouched on conflict to avoid clobbering a known sub).
     if subject and grant.principal_subject is None:

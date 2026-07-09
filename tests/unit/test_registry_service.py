@@ -54,7 +54,7 @@ async def test_create_place_raises_registry_consistency_when_incumbent_missing(m
     monkeypatch.setattr(place_repo, "insert_place", _drift)
 
     feature = PlaceCreate.model_validate(_SQUARE)
-    collection = Collection(id=uuid.uuid4(), catalog_id=uuid.uuid4(), slug="x", writable_anon=True)
+    collection = Collection(id=uuid.uuid4(), catalog_id=uuid.uuid4(), slug="x", public_write=True)
 
     with pytest.raises(RegistryConsistencyError) as exc_info:
         await registry_service.create_place(
@@ -98,7 +98,7 @@ class _FakeSession:
 
 
 def _collection() -> Collection:
-    return Collection(id=uuid.uuid4(), catalog_id=uuid.uuid4(), slug="x", writable_anon=True)
+    return Collection(id=uuid.uuid4(), catalog_id=uuid.uuid4(), slug="x", public_write=True)
 
 
 def _raise_dbapi(sqlstate: str):
@@ -198,7 +198,6 @@ def _incumbent_loser() -> InsertResult:
         created=False,
         collection_slug="public",
         collection_id=uuid.uuid4(),
-        collection_public_read=True,
     )
 
 
@@ -282,6 +281,100 @@ async def test_bulk_second_race_loss_falls_back_to_geoid_conflict_reject(monkeyp
 
     assert calls["n"] == 2
     assert report.rejected[0].reason == "geoid_conflict"
+
+
+# --- _may_disclose_incumbent truth table -----------------------------------------
+# Disclosure is MEMBERSHIP-based: sysadmin / the incumbent's creator / any grant.
+# Deliberately NO public_read leg — a non-member's 409 is masked even when the
+# incumbent's collection is public (client ruling 2026-07-09).
+
+
+def _loser(
+    *, created_by: str | None = None, collection_id: uuid.UUID | None = None
+) -> InsertResult:
+    return InsertResult(
+        geoid=uuid.uuid4(),
+        created=False,
+        collection_slug="somewhere",
+        collection_id=collection_id or uuid.uuid4(),
+        created_by=created_by,
+    )
+
+
+def _no_grant_query(monkeypatch):
+    async def _boom(*args, **kwargs):
+        raise AssertionError("load_caller_grant must not be queried on this path")
+
+    monkeypatch.setattr(registry_service.authz_service, "load_caller_grant", _boom)
+
+
+async def test_disclosure_sysadmin_true_without_grant_query(monkeypatch):
+    _no_grant_query(monkeypatch)
+    assert (
+        await registry_service._may_disclose_incumbent(None, Principal.admin(), _loser(), {})
+        is True
+    )
+
+
+async def test_disclosure_anonymous_false_even_for_public_incumbent(monkeypatch):
+    # The R1 pin: there is no public_read leg — anonymity masks unconditionally
+    # (InsertResult no longer even carries the incumbent's public_read flag).
+    _no_grant_query(monkeypatch)
+    assert (
+        await registry_service._may_disclose_incumbent(None, Principal.anonymous(), _loser(), {})
+        is False
+    )
+
+
+async def test_disclosure_anonymous_incumbent_never_matches_anonymous_caller(monkeypatch):
+    # created_by None == subject None must NOT read as "own mint".
+    _no_grant_query(monkeypatch)
+    assert (
+        await registry_service._may_disclose_incumbent(
+            None, Principal.anonymous(), _loser(created_by=None), {}
+        )
+        is False
+    )
+
+
+async def test_disclosure_creator_true_without_grant_query(monkeypatch):
+    _no_grant_query(monkeypatch)
+    caller = Principal(subject="kc-me", email="me@x.org", email_verified=True)
+    assert (
+        await registry_service._may_disclose_incumbent(None, caller, _loser(created_by="kc-me"), {})
+        is True
+    )
+
+
+@pytest.mark.parametrize("granted", [True, False])
+async def test_disclosure_follows_the_caller_grant(monkeypatch, granted):
+    async def _grant(*args, **kwargs):
+        return object() if granted else None
+
+    monkeypatch.setattr(registry_service.authz_service, "load_caller_grant", _grant)
+    caller = Principal(subject="kc-other", email="o@x.org", email_verified=True)
+    assert await registry_service._may_disclose_incumbent(None, caller, _loser(), {}) is granted
+
+
+async def test_disclosure_memoizes_the_grant_lookup_per_collection(monkeypatch):
+    calls = {"n": 0}
+
+    async def _grant(*args, **kwargs):
+        calls["n"] += 1
+        return object()
+
+    monkeypatch.setattr(registry_service.authz_service, "load_caller_grant", _grant)
+    caller = Principal(subject="kc-other", email="o@x.org", email_verified=True)
+    collection_id = uuid.uuid4()
+    cache: dict[uuid.UUID, bool] = {}
+    for _ in range(3):
+        assert (
+            await registry_service._may_disclose_incumbent(
+                None, caller, _loser(collection_id=collection_id), cache
+            )
+            is True
+        )
+    assert calls["n"] == 1
 
 
 async def test_classify_integrity_unknown_constraint_is_internal_error(monkeypatch):

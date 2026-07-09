@@ -1,7 +1,7 @@
 """The registry service — the product: mint + dedup + provenance.
 
 Anonymous and managed contributions share this ONE code path; the only branch is
-the data-layer policy check (``writable_anon``). The geoid/dedup/external-id rules
+the data-layer policy check (``public_write``). The geoid/dedup/external-id rules
 are identical for both — anonymity is not a special case.
 """
 
@@ -83,7 +83,7 @@ async def _authorize_write(
     session: AsyncSession, principal: Principal, collection: Collection
 ) -> None:
     """Gate a write on the per-collection authz ladder (sysadmin > editor/owner >
-    writable_anon). Anonymous denial keeps its own 401-paired error; an authenticated
+    public_write). Anonymous denial keeps its own 401-paired error; an authenticated
     non-grantee facing a non-writable collection gets the 403 write error.
     """
     grant = await authz_service.load_caller_grant(
@@ -104,19 +104,19 @@ async def _may_disclose_incumbent(
 ) -> bool:
     """May this caller see the incumbent's geoid/uri/collection in the dedup 409?
 
-    Cheap checks first (no query): sysadmin, ``public_read``, own mint (non-null
-    subject guard — an anonymous caller must never match an anonymous incumbent).
-    Then ANY grant on the incumbent's collection (viewer suffices — disclosure is
-    a read); the ``InsertResult`` already carries the incumbent's collection facts,
-    so this is one grant query per distinct private collection, memoized in ``cache``.
+    Disclosure is MEMBERSHIP-based: sysadmin, own mint (non-null subject guard —
+    an anonymous caller must never match an anonymous incumbent), or ANY grant on
+    the incumbent's collection (viewer suffices — disclosure is a read).
+    Deliberately NO ``public_read`` leg: a non-member's 409 is masked even when
+    the incumbent's collection is public (client ruling 2026-07-09). The cheap
+    checks run first (no query); the grant lookup is one query per distinct
+    collection, memoized in ``cache``.
 
     The mask protects only the incumbent's collection + uri: the geoid value is
     recomputable offline from the geometry (content-addressed, public recipe) and
     409-vs-201 inherently reveals existence.
     """
     if principal.is_admin:
-        return True
-    if result.collection_public_read:
         return True
     if principal.subject is not None and result.created_by == principal.subject:
         return True

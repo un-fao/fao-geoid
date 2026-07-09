@@ -12,11 +12,19 @@ import pytest
 
 pytestmark = pytest.mark.integration
 
-ADMIN = {"Authorization": "Bearer test-admin-token"}
+# Module helpers close over ADMIN; the autouse fixture repopulates it per test
+# with a fresh sysadmin JWT (there is no static credential to inline anymore).
+ADMIN: dict[str, str] = {}
+
+
+@pytest.fixture(autouse=True)
+def _admin_credential(admin_headers):
+    ADMIN.clear()
+    ADMIN.update(admin_headers)
 
 
 async def _create(client, slug: str, **over) -> None:
-    body = {"id": slug, "writable_anon": False, **over}
+    body = {"id": slug, "public_write": False, **over}
     resp = await client.post("/manage/collections", headers=ADMIN, json=body)
     assert resp.status_code == 201, resp.text
 
@@ -247,6 +255,66 @@ async def test_cannot_demote_the_last_owner_via_upsert(oidc_client):
             "/collections/lo2/grants", headers=ADMIN, json={"email": "solo@x.org", "role": "editor"}
         )
     ).status_code == 201
+
+
+# --- R6: only sysadmin may grant the owner role ----------------------------------
+
+
+async def test_owner_cannot_grant_the_owner_role(oidc_client, make_token, bearer):
+    await _create(oidc_client, "og")
+    await _grant(oidc_client, "og", "boss@x.org", "owner")
+    boss = bearer(make_token(sub="kc-boss", email="boss@x.org"))
+    resp = await oidc_client.post(
+        "/collections/og/grants", headers=boss, json={"email": "peer@x.org", "role": "owner"}
+    )
+    assert resp.status_code == 403
+    assert resp.json()["collection"] == "og"
+
+
+async def test_sysadmin_grants_the_owner_role(oidc_client):
+    await _create(oidc_client, "og-adm")
+    resp = await oidc_client.post(
+        "/collections/og-adm/grants", headers=ADMIN, json={"email": "peer@x.org", "role": "owner"}
+    )
+    assert resp.status_code == 201
+    assert resp.json()["role"] == "owner"
+
+
+async def test_owner_still_grants_editor_and_viewer(oidc_client, make_token, bearer):
+    await _create(oidc_client, "og-ev")
+    await _grant(oidc_client, "og-ev", "boss@x.org", "owner")
+    boss = bearer(make_token(sub="kc-boss", email="boss@x.org"))
+    for role in ("editor", "viewer"):
+        resp = await oidc_client.post(
+            "/collections/og-ev/grants",
+            headers=boss,
+            json={"email": f"{role}@x.org", "role": role},
+        )
+        assert resp.status_code == 201, resp.text
+
+
+async def test_owner_can_demote_another_owner_to_editor(oidc_client, make_token, bearer):
+    # The gate covers GRANTING owner, not managing an existing one: a demotion's
+    # target role is editor, so an owner may still apply it (spec is silent; pinned).
+    await _create(oidc_client, "og-dem")
+    await _grant(oidc_client, "og-dem", "boss@x.org", "owner")
+    await _grant(oidc_client, "og-dem", "other@x.org", "owner")
+    boss = bearer(make_token(sub="kc-boss", email="boss@x.org"))
+    resp = await oidc_client.post(
+        "/collections/og-dem/grants", headers=boss, json={"email": "other@x.org", "role": "editor"}
+    )
+    assert resp.status_code == 201
+    assert resp.json()["role"] == "editor"
+
+
+async def test_owner_can_revoke_another_owner(oidc_client, make_token, bearer):
+    await _create(oidc_client, "og-rev")
+    await _grant(oidc_client, "og-rev", "boss@x.org", "owner")
+    await _grant(oidc_client, "og-rev", "other@x.org", "owner")
+    boss = bearer(make_token(sub="kc-boss", email="boss@x.org"))
+    assert (
+        await oidc_client.delete("/collections/og-rev/grants/other@x.org", headers=boss)
+    ).status_code == 204
 
 
 # --- L8: anonymous on grants routes → 401 (matching require_admin's split) ------

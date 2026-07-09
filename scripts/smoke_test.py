@@ -4,8 +4,11 @@
 Read-only by default, so it is safe against production (places are append-only;
 nothing is minted unless asked). ``--mint`` adds a write probe that mints ONE
 fixed sentinel feature; global exact-match dedup makes it idempotent — first
-run 201, every later run 409 with ``constraint == "uq_geoid_registry_geom_hash"`` and
-the incumbent geoid in the body — at most one permanent row per catalog, ever.
+run 201, every later run 409 with ``constraint == "uq_geoid_registry_geom_hash"``.
+The 409's incumbent fields are disclosed only to members of the incumbent's
+collection (sysadmin / creator / any grant); an unauthenticated re-run gets a
+MASKED 409 (null geoid) — reported as such, with the resolve probes skipped.
+At most one permanent row per catalog, ever.
 
     uv run python scripts/smoke_test.py            # read-only checks
     uv run python scripts/smoke_test.py --mint     # + idempotent write probe
@@ -15,9 +18,11 @@ Env:
                        every returned link/uri must carry its host (catches the
                        BASE_URL misconfiguration, the #1 launch risk)
     GEOID_COLLECTION   default public
-    GEOID_ADMIN_TOKEN  enables the admin-gated collection read checks (GET /collections,
-                       GET /collections/{id}); also required to mint into a managed
-                       (non-anon) collection. Without it those read checks are skipped.
+    GEOID_BEARER_TOKEN a valid Keycloak access token (JWT). One carrying the
+                       sysadmin role enables the admin-gated collection read checks
+                       (GET /collections, GET /collections/{id}) and minting into a
+                       managed (non-anon) collection. Without it those read checks
+                       are skipped.
 
 Exit codes: 0 all checks passed · 1 one or more failed (CI / Cloud Run job friendly)
 """
@@ -34,7 +39,7 @@ from _timing import print_timings, record
 
 BASE = os.environ.get("GEOID_BASE_URL", "http://localhost:8000").rstrip("/")
 COLLECTION = os.environ.get("GEOID_COLLECTION", "public")
-ADMIN_TOKEN = os.environ.get("GEOID_ADMIN_TOKEN")
+BEARER_TOKEN = os.environ.get("GEOID_BEARER_TOKEN")
 
 SENTINEL_EXTERNAL_ID = "geoid-smoke-sentinel"
 # Fixed tiny (~11 m) square in the Gulf of Guinea. Constant on purpose: the
@@ -64,7 +69,7 @@ def _ensure(condition: bool, message: str) -> None:
 
 
 def _headers() -> dict[str, str]:
-    return {"Authorization": f"Bearer {ADMIN_TOKEN}"} if ADMIN_TOKEN else {}
+    return {"Authorization": f"Bearer {BEARER_TOKEN}"} if BEARER_TOKEN else {}
 
 
 def _expected_netloc() -> str:
@@ -112,7 +117,7 @@ def check_conformance(client: httpx.Client) -> str:
 
 
 def check_collections(client: httpx.Client) -> str:
-    # /collections is admin-gated — send the admin token.
+    # /collections is admin-gated — send the bearer token.
     ids = [
         c.get("id")
         for c in _get_json(client, "/collections", headers=_headers()).get("collections", [])
@@ -133,7 +138,7 @@ READ_CHECKS: tuple[tuple[str, Callable[[httpx.Client], str]], ...] = (
     ("conformance", check_conformance),
 )
 
-# Admin-gated read checks — only run when GEOID_ADMIN_TOKEN is set.
+# Admin-gated read checks — only run when GEOID_BEARER_TOKEN is set.
 ADMIN_READ_CHECKS: tuple[tuple[str, Callable[[httpx.Client], str]], ...] = (
     ("collections list", check_collections),
     ("collection describe", check_collection_desc),
@@ -157,8 +162,11 @@ def run_mint_probe(client: httpx.Client) -> list[bool]:
             body = resp.json()
             if body.get("constraint") == "uq_geoid_registry_geom_hash":
                 # Expected on every run after the first: global dedup rejects the
-                # duplicate and hands back the incumbent — continue with it.
+                # duplicate. The incumbent is disclosed only to members of its
+                # collection — a masked body (null geoid) is still a healthy dedup.
                 minted.update(body)
+                if body.get("geoid") is None:
+                    return "[409] duplicate geometry → incumbent masked (caller is not a member)"
                 return f"[409] duplicate geometry → incumbent geoid={body['geoid']}"
             raise CheckFailed(
                 "409 external_id conflict — the sentinel external_id exists with a "
@@ -182,8 +190,10 @@ def run_mint_probe(client: httpx.Client) -> list[bool]:
 
     def probe_resolve_external() -> str:
         # The incumbent's collection (from the 201/409 body) — with global dedup
-        # it may differ from the collection this run targeted.
-        collection = minted.get("collection", COLLECTION)
+        # it may differ from the collection this run targeted. A masked 409 body
+        # carries the key with value None (present, so .get's default won't fire),
+        # hence `or`.
+        collection = minted.get("collection") or COLLECTION
         props = (
             _get_json(client, f"/collections/{collection}/external/{SENTINEL_EXTERNAL_ID}").get(
                 "properties"
@@ -199,6 +209,11 @@ def run_mint_probe(client: httpx.Client) -> list[bool]:
     results = [_run_check("mint sentinel", probe_mint)]
     if not results[0]:
         print("  – resolve checks skipped (mint failed)")
+        return results
+    if minted.get("geoid") is None:
+        # Masked 409: dedup verified, but there is no geoid to resolve. Run with
+        # a member/sysadmin GEOID_BEARER_TOKEN for the full probe.
+        print("  – resolve checks skipped (incumbent masked for this caller)")
         return results
     return results + [
         _run_check("resolve by geoid", probe_resolve_geoid),
@@ -244,12 +259,14 @@ def main() -> int:
             print(f"✗ cannot reach GeoID at {BASE} ({exc})")
             return 1
         results = [_run_check(name, lambda fn=fn: fn(client)) for name, fn in READ_CHECKS]
-        if ADMIN_TOKEN:
+        if BEARER_TOKEN:
             results += [
                 _run_check(name, lambda fn=fn: fn(client)) for name, fn in ADMIN_READ_CHECKS
             ]
         else:
-            print("  – collection read checks skipped (no GEOID_ADMIN_TOKEN; they are admin-gated)")
+            print(
+                "  – collection read checks skipped (no GEOID_BEARER_TOKEN; they are admin-gated)"
+            )
         if args.mint:
             results += run_mint_probe(client)
 

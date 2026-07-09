@@ -181,9 +181,5 @@ async def reap(
 
 async def count_active(session: AsyncSession) -> int:
     """Jobs currently accepted/running (the submit-time concurrency valve)."""
-    stmt = (
-        select(func.count())
-        .select_from(ImportJob)
-        .where(ImportJob.status.in_(_ACTIVE_STATUSES))
-    )
+    stmt = select(func.count()).select_from(ImportJob).where(ImportJob.status.in_(_ACTIVE_STATUSES))
     return (await session.execute(stmt)).scalar_one()
