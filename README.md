@@ -169,10 +169,14 @@ ALTER TABLE geoid_registry ENABLE TRIGGER USER;
 ALTER TABLE change_log     ENABLE TRIGGER USER;  -- keeps catalog/collection seed + schema
 ```
 
+## Contributing
+
+See [`CONTRIBUTING.md`](CONTRIBUTING.md) for the development workflow: branch model, running
+locally, tests & pre-commit, migrations, and the release process.
+
 ## Licensing
 
 - **Code:** Apache-2.0 (`LICENSE`)
-- **Base data:** ODbL (`DATA-LICENSE`) — share-alike keeps the federation open
 
 ## Status
 
