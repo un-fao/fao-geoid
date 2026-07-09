@@ -131,27 +131,6 @@ async def create_items_bulk(
     )
 
 
-async def _can_read_collection(
-    session: AsyncSession,
-    principal: Principal,
-    *,
-    collection_id: uuid.UUID,
-    collection_slug: str,
-    public_read: bool,
-) -> bool:
-    """Grant lookup + the pure ``can_read`` predicate.
-
-    Takes the collection facts as scalars — both resolvers already hold them (on
-    the read row / the Collection), so no refetch. NOTE: ``load_caller_grant``
-    backfills the Keycloak ``sub`` on first authorized access, so this read path
-    can issue one idempotent UPDATE.
-    """
-    grant = await authz_service.load_caller_grant(
-        session, principal, collection_id, collection_slug
-    )
-    return authz_service.can_read(principal, public_read, grant)
-
-
 @router.get(
     "/me/geoids",
     response_model=list[PlaceRecord],
@@ -190,16 +169,27 @@ async def list_my_geoids(
 async def resolve_geoid(
     geoid: uuid.UUID,
     fmt: GeometryFormat = Depends(output_format),
+    principal: Principal = Depends(require_principal),
     session: AsyncSession = Depends(get_session),
     settings: Settings = Depends(get_settings),
 ) -> FeatureModel | WKTResponse:
-    # Deliberately ungated (2026-07-03): the geoid is the capability —
-    # public_read hides discovery (external-id lookup, dedup-409 incumbent),
-    # never exact-geoid resolution.
+    # Existence stays un-gated for any geoid holder (the geoid is the capability;
+    # no 404 mask), but the BODY is caller-aware since 2026-07-09: full metadata
+    # only for sysadmin / creator / members, the geometry-only masked body for
+    # everyone else. Taking a principal also makes a present-but-malformed
+    # bearer 401 (it used to be ignored).
     row = await place_repo.get_by_geoid(session, geoid)
     if row is None:
         raise PlaceNotFoundError(str(geoid))
-    feature = ogc_service.build_feature(settings, row)
+    created_by = (row.get("provenance") or {}).get("created_by")
+    # Query-avoiding order: sysadmin/creator need no grant; anonymous can hold none.
+    full = authz_service.can_see_metadata(principal, created_by, None)
+    if not full and not principal.is_anonymous:
+        grant = await authz_service.load_caller_grant(
+            session, principal, row["collection_id"], row["collection_slug"]
+        )
+        full = authz_service.can_see_metadata(principal, created_by, grant)
+    feature = ogc_service.build_feature(settings, row, full=full)
     return feature_response(feature, fmt)
 
 
@@ -221,22 +211,20 @@ async def resolve_by_external_id(
     collection = await collection_repo.get_by_slug(session, collection_id)
     if collection is None:
         raise CollectionNotFoundError(collection_id)
-    # Feature-level mask (same 404 as an unknown external_id), checked before the
-    # place fetch. Public collections skip the grant lookup entirely.
-    if (
-        not collection.public_read
-        and not principal.is_admin
-        and not await _can_read_collection(
-            session,
-            principal,
-            collection_id=collection.id,
-            collection_slug=collection.slug,
-            public_read=collection.public_read,
-        )
-    ):
+    # ONE grant load serves both gates: existence (the unchanged 404 mask on
+    # non-public collections — same body as an unknown external_id) and metadata
+    # visibility. Deliberate cost: public collections now pay this grant SELECT
+    # for authenticated non-admin callers, and load_caller_grant's idempotent
+    # sub-backfill UPDATE can fire on a public read.
+    grant = await authz_service.load_caller_grant(
+        session, principal, collection.id, collection.slug
+    )
+    if not authz_service.can_read(principal, collection.public_read, grant):
         raise PlaceNotFoundError(f"{collection_id}/{external_id}")
     row = await place_repo.get_by_external_id(session, collection.id, external_id)
     if row is None:
         raise PlaceNotFoundError(f"{collection_id}/{external_id}")
-    feature = ogc_service.build_feature(settings, row)
+    created_by = (row.get("provenance") or {}).get("created_by")
+    full = authz_service.can_see_metadata(principal, created_by, grant)
+    feature = ogc_service.build_feature(settings, row, full=full)
     return feature_response(feature, fmt)

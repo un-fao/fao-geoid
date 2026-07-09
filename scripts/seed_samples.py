@@ -104,11 +104,18 @@ def main() -> int:
 
         if first_geoid:
             # Resolver lives at the app root (BASE already includes any /geoid root_path).
+            # Full metadata is member-only; an anonymous seeder gets the masked
+            # geometry-only body ({geoid, uri} properties), so print defensively.
             props = record("GET resolve", client.get(f"{BASE}/{first_geoid}")).json()["properties"]
             print(f"\n== Resolve {first_geoid} ==")
             print(f"  uri:         {props['uri']}")
-            print(f"  external_id: {props['external_id']}   commodity: {props.get('commodity')}")
-            print(f"  provenance:  {props['_geoid_provenance']['client']}")
+            if "external_id" in props:
+                print(
+                    f"  external_id: {props['external_id']}   commodity: {props.get('commodity')}"
+                )
+                print(f"  provenance:  {props['_geoid_provenance']['client']}")
+            else:
+                print("  (metadata masked — full features are member/sysadmin-only)")
 
         print_timings()
         if errors:

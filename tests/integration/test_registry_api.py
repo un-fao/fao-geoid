@@ -22,7 +22,7 @@ async def test_post_polygon_mints_geoid_uri(client, unit_square_ccw):
     assert resp.headers["Location"] == body["uri"]
 
 
-async def test_anonymous_post_captures_whisp_client_provenance(client):
+async def test_anonymous_post_captures_whisp_client_provenance(client, admin_headers):
     feature = {
         "type": "Feature",
         "id": "whisp-plot",
@@ -33,7 +33,9 @@ async def test_anonymous_post_captures_whisp_client_provenance(client):
     assert resp.status_code == 201
     geoid = resp.json()["geoid"]
 
-    feat = (await client.get(f"/{geoid}")).json()
+    # Read as sysadmin: full metadata is member-only (an anonymous GET gets the
+    # masked geometry-only body — pinned in test_private_collections).
+    feat = (await client.get(f"/{geoid}", headers=admin_headers)).json()
     # client-submitted attributes round-trip; provenance records the whisp client.
     assert feat["properties"]["area_ha"] == 1.0
     prov = feat["properties"]["_geoid_provenance"]

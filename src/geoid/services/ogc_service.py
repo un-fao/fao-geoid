@@ -52,6 +52,7 @@ class ItemRow(TypedDict, total=False):
     predecessor_id: uuid.UUID | None
     originating_instance: str | None
     collection_slug: str
+    collection_id: uuid.UUID
 
 
 def landing_page(settings: Settings) -> LandingPage:
@@ -119,17 +120,26 @@ def collection_desc(
     )
 
 
+def _resolver_links(settings: Settings, geoid: uuid.UUID) -> list[Link]:
+    """The caller-independent links every feature body carries (masked included).
+
+    The durable resolver is the only resolution path, so it IS the feature's self
+    link (the collection-scoped /items/{geoid} route was removed); WKT is a
+    vendor-extension encoding, advertised per OGC alternate links.
+    """
+    resolver_url = f"{settings.base_url_clean}/{geoid}"
+    return [
+        Link(href=resolver_url, rel="self", type=_GEOJSON),
+        Link(href=f"{resolver_url}?f=wkt", rel="alternate", type=WKT_MEDIA_TYPE, title="WKT"),
+    ]
+
+
 def _feature_links(
     settings: Settings, *, geoid: uuid.UUID, collection: str, predecessor_id: uuid.UUID | None
 ) -> list[Link]:
     base = settings.base_url_clean
-    # The durable resolver is the only resolution path, so it IS the feature's self
-    # link (the collection-scoped /items/{geoid} route was removed).
-    resolver_url = f"{base}/{geoid}"
     links = [
-        Link(href=resolver_url, rel="self", type=_GEOJSON),
-        # WKT is a vendor-extension encoding, advertised per OGC alternate links.
-        Link(href=f"{resolver_url}?f=wkt", rel="alternate", type=WKT_MEDIA_TYPE, title="WKT"),
+        *_resolver_links(settings, geoid),
         Link(href=f"{base}/collections/{collection}", rel="collection", type=_JSON),
     ]
     if predecessor_id is not None:
@@ -144,10 +154,26 @@ def _feature_links(
     return links
 
 
-def build_feature(settings: Settings, row: ItemRow) -> FeatureModel:
-    """Assemble an OGC feature from a place read row."""
+def build_feature(settings: Settings, row: ItemRow, *, full: bool = True) -> FeatureModel:
+    """Assemble an OGC feature from a place read row.
+
+    ``full=False`` is the masked, non-member body (metadata visibility is
+    membership-based — sysadmin / creator / any grant; client ruling 2026-07-09):
+    the bare geometry with properties exactly ``{geoid, uri}`` and links exactly
+    self + the WKT alternate. No submitted properties, provenance, external_id,
+    created_at, collection link, or predecessor link. The full branch is
+    byte-identical to what this function always produced.
+    """
     geoid: uuid.UUID = row["geoid"]
     geometry = json.loads(row["geometry"]) if row.get("geometry") else None
+
+    if not full:
+        return FeatureModel(
+            id=str(geoid),
+            geometry=geometry,
+            properties={"geoid": str(geoid), "uri": uri_for(geoid, settings.base_url_clean)},
+            links=_resolver_links(settings, geoid),
+        )
 
     provenance = dict(row.get("provenance") or {})
     submitted = dict(provenance.pop("submitted_properties", {}) or {})

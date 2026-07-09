@@ -97,6 +97,43 @@ def test_authenticated_non_grantee_reads_public_collection():
     assert authz_service.can_read(USER, PUBLIC_READ, None) is True
 
 
+# --- can_see_metadata -----------------------------------------------------------
+# Full-feature visibility is MEMBERSHIP-based and public_read-independent:
+# sysadmin OR the feature's creator (non-null sub) OR any grant. Everyone else
+# gets the geometry-only masked body.
+
+
+def test_sysadmin_sees_metadata():
+    assert authz_service.can_see_metadata(ADMIN, None, None) is True
+
+
+def test_creator_sees_metadata():
+    assert authz_service.can_see_metadata(USER, "kc-1", None) is True
+
+
+def test_non_creator_without_grant_sees_nothing():
+    assert authz_service.can_see_metadata(USER, "kc-someone-else", None) is False
+
+
+def test_any_grant_sees_metadata():
+    for role in ("viewer", "editor", "owner"):
+        assert authz_service.can_see_metadata(USER, None, _grant(role)) is True
+
+
+def test_anonymous_never_sees_metadata():
+    assert authz_service.can_see_metadata(ANON, "kc-1", None) is False
+
+
+def test_anonymous_creator_never_matches_anonymous_caller():
+    # created_by None == subject None must NOT read as "creator" — the non-null
+    # subject guard is load-bearing (anonymous mints record created_by=None).
+    assert authz_service.can_see_metadata(ANON, None, None) is False
+
+
+def test_authenticated_non_grantee_masked_when_creator_unknown():
+    assert authz_service.can_see_metadata(USER, None, None) is False
+
+
 # --- can_manage ---------------------------------------------------------------
 
 

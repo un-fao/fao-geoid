@@ -97,6 +97,24 @@ def can_read(principal: Principal, public_read: bool, grant: CollectionGrant | N
     )
 
 
+def can_see_metadata(
+    principal: Principal, created_by: str | None, grant: CollectionGrant | None
+) -> bool:
+    """sysadmin OR the feature's creator OR any grant (viewer+) → full metadata.
+
+    Metadata visibility is membership-based and ``public_read``-independent
+    (client ruling 2026-07-09): everyone else gets the geometry-only masked body
+    on both resolvers. The non-null subject guard is load-bearing — anonymous
+    mints record ``created_by=None``, and an anonymous caller (``subject=None``)
+    must never match them.
+    """
+    return (
+        principal.is_admin
+        or (principal.subject is not None and created_by == principal.subject)
+        or grant is not None
+    )
+
+
 def can_manage(principal: Principal, collection: Collection, grant: CollectionGrant | None) -> bool:
     """sysadmin OR an owner grant → may change grants."""
     return principal.is_admin or (grant is not None and grant.role == Role.OWNER.value)

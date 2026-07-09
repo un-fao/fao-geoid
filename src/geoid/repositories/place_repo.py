@@ -222,6 +222,7 @@ async def insert_place(
 _READ_COLUMNS = """
     p.id AS geoid,
     c.slug AS collection_slug,
+    c.id AS collection_id,
     ST_AsGeoJSON(p.geom) AS geometry,
     p.external_id,
     p.provenance,

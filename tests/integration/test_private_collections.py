@@ -115,11 +115,14 @@ async def test_public_collection_still_resolves_anonymously(client, unit_square_
     assert (await client.get(f"/{minted['geoid']}")).status_code == 200
 
 
-async def test_geoid_resolver_ignores_malformed_bearer(client, unit_square_ccw):
-    # No principal on this route: a garbage credential is ignored, not 401'd.
+async def test_geoid_resolver_rejects_malformed_bearer(client, unit_square_ccw):
+    # The resolver now takes a principal (it decides body masking): a
+    # PRESENT-but-invalid credential is 401, never silently anonymous —
+    # mirroring the external-id twin below. No header stays anonymous (200).
     minted = await _mint(client, "public", unit_square_ccw)
     resp = await client.get(f"/{minted['geoid']}", headers={"Authorization": "Bearer nope"})
-    assert resp.status_code == 200
+    assert resp.status_code == 401
+    assert (await client.get(f"/{minted['geoid']}")).status_code == 200
 
 
 async def test_external_id_resolver_rejects_malformed_bearer(client):
@@ -130,6 +133,65 @@ async def test_external_id_resolver_rejects_malformed_bearer(client):
         "/collections/public/external/mb-1", headers={"Authorization": "Bearer nope"}
     )
     assert resp.status_code == 401
+
+
+# --- read-path metadata masking (R3/R4: membership-based, public_read-independent) -
+
+
+async def test_geoid_resolver_masks_metadata_for_non_members(oidc_client, make_token, bearer):
+    # Full feature only for sysadmin / creator / members — in a PUBLIC collection:
+    # metadata visibility is independent of public_read.
+    creator = bearer(make_token(sub="kc-cr", email="cr@x.org"))
+    minted = await _mint(
+        oidc_client, "public", _square(85, 40, external_id="mask-1"), headers=creator
+    )
+    geoid = minted["geoid"]
+
+    stranger = bearer(make_token(sub="kc-st", email="stranger@x.org"))
+    for headers in (None, stranger):
+        resp = await oidc_client.get(f"/{geoid}", headers=headers)
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["id"] == geoid
+        assert body["geometry"]["type"] == "Polygon"
+        assert set(body["properties"]) == {"geoid", "uri"}
+        assert {link["rel"] for link in body["links"]} == {"self", "alternate"}
+
+    for headers in (creator, ADMIN):
+        body = (await oidc_client.get(f"/{geoid}", headers=headers)).json()
+        assert body["properties"]["external_id"] == "mask-1"
+        assert "_geoid_provenance" in body["properties"]
+        assert "collection" in {link["rel"] for link in body["links"]}
+
+
+async def test_external_id_resolver_masks_metadata_on_public_collection(
+    oidc_client, make_token, bearer
+):
+    # Existence stays public (public_read=true) but the body is masked for
+    # non-members, exactly like the geoid resolver.
+    await _mint(oidc_client, "public", _square(95, 40, external_id="mask-2"))
+    resp = await oidc_client.get("/collections/public/external/mask-2")
+    assert resp.status_code == 200
+    assert set(resp.json()["properties"]) == {"geoid", "uri"}
+
+    admin_body = (
+        await oidc_client.get("/collections/public/external/mask-2", headers=ADMIN)
+    ).json()
+    assert admin_body["properties"]["external_id"] == "mask-2"
+
+
+async def test_viewer_grant_unlocks_full_metadata(oidc_client, make_token, bearer):
+    await _create(oidc_client, "priv-m", public_read=False)
+    await _grant(oidc_client, "priv-m", "viewer@x.org", "viewer")
+    minted = await _mint(oidc_client, "priv-m", _square(105, 40, external_id="mask-3"))
+
+    viewer = bearer(make_token(sub="kc-vw", email="viewer@x.org"))
+    body = (await oidc_client.get(f"/{minted['geoid']}", headers=viewer)).json()
+    assert body["properties"]["external_id"] == "mask-3"
+
+    stranger = bearer(make_token(sub="kc-st", email="stranger@x.org"))
+    masked = (await oidc_client.get(f"/{minted['geoid']}", headers=stranger)).json()
+    assert set(masked["properties"]) == {"geoid", "uri"}
 
 
 # --- caller-aware dedup-409 disclosure --------------------------------------------
