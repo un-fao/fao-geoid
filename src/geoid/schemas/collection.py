@@ -65,7 +65,9 @@ class GrantCreate(BaseModel):
 
     ``viewer`` is the read tier: on a non-public collection it unlocks the
     resolvers (no more 404 mask) and the dedup-409 incumbent disclosure; it does
-    NOT authorize writes (``editor``+) or grant management (``owner``).
+    NOT authorize writes (``editor``+) or grant management (``owner``). The
+    ``owner`` role itself is sysadmin-only to grant — a collection owner may
+    grant ``editor``/``viewer`` only.
     """
 
     email: str = Field(min_length=3, max_length=320, examples=["alice@example.org"])

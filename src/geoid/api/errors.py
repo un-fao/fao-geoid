@@ -43,6 +43,7 @@ from geoid.services.exceptions import (
     GeometryInvalidError,
     GrantNotFoundError,
     LastOwnerGuardError,
+    OwnerGrantForbiddenError,
     PlaceNotFoundError,
     RegistryConsistencyError,
     WriteNotAuthorizedError,
@@ -89,6 +90,10 @@ def register_exception_handlers(app: FastAPI) -> None:
 
     @app.exception_handler(CollectionForbiddenError)
     async def _collection_forbidden(_: Request, exc: CollectionForbiddenError) -> JSONResponse:
+        return _error(status.HTTP_403_FORBIDDEN, str(exc), collection=exc.slug)
+
+    @app.exception_handler(OwnerGrantForbiddenError)
+    async def _owner_grant_forbidden(_: Request, exc: OwnerGrantForbiddenError) -> JSONResponse:
         return _error(status.HTTP_403_FORBIDDEN, str(exc), collection=exc.slug)
 
     @app.exception_handler(GrantNotFoundError)

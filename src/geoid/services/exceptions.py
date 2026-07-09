@@ -50,6 +50,20 @@ class CollectionForbiddenError(GeoidServiceError):
         super().__init__(f"managing collection {slug!r} requires the owner or sysadmin role")
 
 
+class OwnerGrantForbiddenError(GeoidServiceError):
+    """Granting the ``owner`` role is sysadmin-only (403).
+
+    A collection owner may staff editors and viewers but never mint peer owners;
+    demoting or revoking an existing owner stays an owner-level operation.
+    """
+
+    def __init__(self, slug: str) -> None:
+        self.slug = slug
+        super().__init__(
+            f"granting the owner role on collection {slug!r} requires the sysadmin role"
+        )
+
+
 class LastOwnerGuardError(GeoidServiceError):
     """Revoking/demoting the LAST owner grant of a collection is blocked (409).
 
