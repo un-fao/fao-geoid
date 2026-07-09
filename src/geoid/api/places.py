@@ -38,6 +38,11 @@ from geoid.services.exceptions import (
 router = APIRouter(tags=["registry"])
 
 
+def _created_by(row: dict) -> str | None:
+    """The mint-time creator ``sub`` recorded in provenance (None for anonymous mints)."""
+    return (row.get("provenance") or {}).get("created_by")
+
+
 @router.post(
     "/collections/{collection_id}/items",
     response_model=MintResponse,
@@ -181,7 +186,7 @@ async def resolve_geoid(
     row = await place_repo.get_by_geoid(session, geoid)
     if row is None:
         raise PlaceNotFoundError(str(geoid))
-    created_by = (row.get("provenance") or {}).get("created_by")
+    created_by = _created_by(row)
     # Query-avoiding order: sysadmin/creator need no grant; anonymous can hold none.
     full = authz_service.can_see_metadata(principal, created_by, None)
     if not full and not principal.is_anonymous:
@@ -224,7 +229,6 @@ async def resolve_by_external_id(
     row = await place_repo.get_by_external_id(session, collection.id, external_id)
     if row is None:
         raise PlaceNotFoundError(f"{collection_id}/{external_id}")
-    created_by = (row.get("provenance") or {}).get("created_by")
-    full = authz_service.can_see_metadata(principal, created_by, grant)
+    full = authz_service.can_see_metadata(principal, _created_by(row), grant)
     feature = ogc_service.build_feature(settings, row, full=full)
     return feature_response(feature, fmt)
