@@ -176,6 +176,11 @@ ALTER TABLE change_log     ENABLE TRIGGER USER;  -- keeps catalog/collection see
 ## Status
 
 **Authenticated access is live and Keycloak-only**: OIDC (RS256 JWTs) with per-collection
-owner/editor/viewer grants — see [`local-scripts/docs/auth.html`](local-scripts/docs/auth.html).
+owner/editor/viewer grants (the owner role itself is sysadmin-granted). Authorization is
+membership-based end to end: full feature bodies and the dedup-409 incumbent are visible only to
+sysadmin, the feature's creator, or grant holders — everyone else gets a geometry-only body and a
+masked 409; per-collection `public_read`/`public_write` flags govern external-id lookups and open
+minting. The matrix is pinned in `tests/integration/test_authz_scenarios.py`; see
+[`local-scripts/docs/auth.html`](local-scripts/docs/auth.html).
 **Synchronous bulk write is live**: `POST /collections/{id}/items/bulk`. Planned next: an
 open-source release, and standalone country instances with federation.
