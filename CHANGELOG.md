@@ -4,6 +4,41 @@ All notable changes to GeoID are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.0] - 2026-07-09
+
+### Changed — BREAKING
+- **Full feature bodies are now member-only on both resolvers.** `GET /{geoid}`
+  and `GET /collections/{id}/external/{external_id}` return the complete feature
+  (attributes, provenance, external id, timestamps, collection link) only to
+  sysadmin, the feature's original submitter, or holders of any grant (`viewer`
+  and up) on its collection. Every other caller — anonymous included — receives a
+  masked, geometry-only body: properties reduced to `geoid` and `uri`, links
+  reduced to self and the WKT alternate. This is independent of `public_read`.
+- **External-id lookup no longer hides existence — it now behaves exactly like
+  geoid lookup.** An existing `(collection, external_id)` answers 200 to every
+  caller (full or masked body per the rule above); 404 now always means the id
+  genuinely does not exist. This supersedes v0.4.0's behavior, where a
+  `public_read: false` collection answered the same 404 as an unknown id.
+  `public_read`'s single remaining function is naming the incumbent in the
+  duplicate-geometry 409 — that disclosure rule itself is unchanged: the 409
+  carries the incumbent geoid/uri/collection when the incumbent's collection is
+  publicly readable or the caller is a member of it, and null fields otherwise.
+- **`writable_anon` is renamed `public_write`** in the collection management API
+  (create request and responses). The flag's meaning is unchanged: anyone,
+  anonymous included, may mint into the collection.
+- `GET /{geoid}` now validates a presented bearer token: a malformed or invalid
+  `Authorization: Bearer` header answers 401 instead of being silently ignored.
+  Requests with no credentials at all are still anonymous and still resolve.
+
+### Changed
+- Granting the `owner` role now requires sysadmin (403 otherwise); a collection
+  owner grants `editor`/`viewer` only. Demoting or revoking another owner remains
+  an owner-level operation, still subject to the last-owner guard.
+
+### Fixed
+- Re-granting an existing grantee with a different role now returns the updated
+  role in the response (a stale cached row was previously echoed).
+
 ## [0.4.0] - 2026-07-08
 
 ### Changed — BREAKING
