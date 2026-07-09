@@ -63,7 +63,9 @@ def personas(make_token, bearer):
         "owner": ("kc-ow", "owner@x.org"),
         "creator": ("kc-cr", "creator@x.org"),
     }
-    headers = {name: bearer(make_token(sub=sub, email=email)) for name, (sub, email) in named.items()}
+    headers = {
+        name: bearer(make_token(sub=sub, email=email)) for name, (sub, email) in named.items()
+    }
     headers["anonymous"] = None
     headers["sysadmin"] = ADMIN
     return headers
@@ -162,9 +164,7 @@ async def test_bulk_matrix(oidc_client, personas, config):
     for index, (persona, headers) in enumerate(personas.items()):
         allowed = persona in WRITERS_ALWAYS or cfg["public_write"]
         fc = {"type": "FeatureCollection", "features": [_square(10 * (index + 1), 20)]}
-        resp = await oidc_client.post(
-            f"/collections/{slug}/items/bulk", headers=headers, json=fc
-        )
+        resp = await oidc_client.post(f"/collections/{slug}/items/bulk", headers=headers, json=fc)
         expected = 200 if allowed else 403
         assert resp.status_code == expected, f"{persona} on {config}: {resp.text}"
 
@@ -233,9 +233,7 @@ async def test_external_id_matrix(oidc_client, personas, config):
         resp = await oidc_client.get(url, headers=headers)
         # can_read is membership/public_read only — deliberately NO creator leg:
         # the creator holds no grant, so a private collection 404s them too.
-        visible = (
-            persona == "sysadmin" or persona in GRANTEES or cfg["public_read"]
-        )
+        visible = persona == "sysadmin" or persona in GRANTEES or cfg["public_read"]
         if not visible:
             assert resp.status_code == 404, f"{persona} on {config}: {resp.text}"
             continue
@@ -251,9 +249,7 @@ async def test_external_id_matrix(oidc_client, personas, config):
 
 
 async def test_me_geoids_is_authenticated_and_own_only(oidc_client, personas):
-    seed = await _setup_collection(
-        oidc_client, "mine", CONFIGS["publicish"], personas
-    )
+    seed = await _setup_collection(oidc_client, "mine", CONFIGS["publicish"], personas)
 
     assert (await oidc_client.get("/me/geoids")).status_code == 401
 
@@ -287,9 +283,7 @@ async def test_admin_surfaces_are_sysadmin_only(oidc_client, personas):
     create = {"id": "adm2", "public_write": False}
     assert (await oidc_client.post("/manage/collections", json=create)).status_code == 401
     for persona in ("stranger", "owner"):
-        resp = await oidc_client.post(
-            "/manage/collections", headers=personas[persona], json=create
-        )
+        resp = await oidc_client.post("/manage/collections", headers=personas[persona], json=create)
         assert resp.status_code == 403, persona
     assert (
         await oidc_client.post("/manage/collections", headers=ADMIN, json=create)
