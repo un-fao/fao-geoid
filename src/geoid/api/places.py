@@ -60,10 +60,10 @@ router = APIRouter(tags=["registry"])
             "description": (
                 "An identical geometry already exists in the catalog (geometry "
                 "dedup is global). The body carries the incumbent "
-                "geoid/uri/collection when the caller may read the incumbent's "
-                "collection (sysadmin / public_read / own mint / any grant); "
-                "otherwise those fields are null. An external_id duplicate also "
-                "answers 409 — discriminate on ``constraint``."
+                "geoid/uri/collection only for members of the incumbent's "
+                "collection (sysadmin / own mint / any grant — public_read does "
+                "NOT disclose); otherwise those fields are null. An external_id "
+                "duplicate also answers 409 — discriminate on ``constraint``."
             ),
         },
     },

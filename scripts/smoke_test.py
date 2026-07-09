@@ -4,8 +4,11 @@
 Read-only by default, so it is safe against production (places are append-only;
 nothing is minted unless asked). ``--mint`` adds a write probe that mints ONE
 fixed sentinel feature; global exact-match dedup makes it idempotent — first
-run 201, every later run 409 with ``constraint == "uq_geoid_registry_geom_hash"`` and
-the incumbent geoid in the body — at most one permanent row per catalog, ever.
+run 201, every later run 409 with ``constraint == "uq_geoid_registry_geom_hash"``.
+The 409's incumbent fields are disclosed only to members of the incumbent's
+collection (sysadmin / creator / any grant); an unauthenticated re-run gets a
+MASKED 409 (null geoid) — reported as such, with the resolve probes skipped.
+At most one permanent row per catalog, ever.
 
     uv run python scripts/smoke_test.py            # read-only checks
     uv run python scripts/smoke_test.py --mint     # + idempotent write probe
@@ -159,8 +162,11 @@ def run_mint_probe(client: httpx.Client) -> list[bool]:
             body = resp.json()
             if body.get("constraint") == "uq_geoid_registry_geom_hash":
                 # Expected on every run after the first: global dedup rejects the
-                # duplicate and hands back the incumbent — continue with it.
+                # duplicate. The incumbent is disclosed only to members of its
+                # collection — a masked body (null geoid) is still a healthy dedup.
                 minted.update(body)
+                if body.get("geoid") is None:
+                    return "[409] duplicate geometry → incumbent masked (caller is not a member)"
                 return f"[409] duplicate geometry → incumbent geoid={body['geoid']}"
             raise CheckFailed(
                 "409 external_id conflict — the sentinel external_id exists with a "
@@ -184,8 +190,10 @@ def run_mint_probe(client: httpx.Client) -> list[bool]:
 
     def probe_resolve_external() -> str:
         # The incumbent's collection (from the 201/409 body) — with global dedup
-        # it may differ from the collection this run targeted.
-        collection = minted.get("collection", COLLECTION)
+        # it may differ from the collection this run targeted. A masked 409 body
+        # carries the key with value None (present, so .get's default won't fire),
+        # hence `or`.
+        collection = minted.get("collection") or COLLECTION
         props = (
             _get_json(client, f"/collections/{collection}/external/{SENTINEL_EXTERNAL_ID}").get(
                 "properties"
@@ -201,6 +209,11 @@ def run_mint_probe(client: httpx.Client) -> list[bool]:
     results = [_run_check("mint sentinel", probe_mint)]
     if not results[0]:
         print("  – resolve checks skipped (mint failed)")
+        return results
+    if minted.get("geoid") is None:
+        # Masked 409: dedup verified, but there is no geoid to resolve. Run with
+        # a member/sysadmin GEOID_BEARER_TOKEN for the full probe.
+        print("  – resolve checks skipped (incumbent masked for this caller)")
         return results
     return results + [
         _run_check("resolve by geoid", probe_resolve_geoid),

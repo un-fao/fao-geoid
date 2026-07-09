@@ -30,9 +30,10 @@ class CollectionCreate(BaseModel):
     writable_anon: bool = Field(default=False, examples=[False])
     public_read: bool = Field(
         default=True,
-        description="When false, features are 404-masked on the resolvers and the "
-        "dedup 409 withholds the incumbent's identifiers unless the caller holds a "
-        "grant on this collection (viewer or above) or is sysadmin.",
+        description="When false, features are 404-masked on the external-id "
+        "resolver unless the caller holds a grant on this collection (viewer or "
+        "above) or is sysadmin. Does not affect the dedup-409 incumbent, which is "
+        "always masked for non-members.",
         examples=[True],
     )
     metadata: dict[str, Any] = Field(default_factory=dict, examples=[{}])

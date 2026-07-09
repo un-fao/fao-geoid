@@ -39,14 +39,17 @@ def _square(dx: float) -> dict:
     }
 
 
-async def test_within_cell_conflicts_across_cell_mints(client):
+async def test_within_cell_conflicts_across_cell_mints(client, admin_headers):
     base_resp = await client.post("/collections/public/items", json=_square(0.0))
     assert base_resp.status_code == 201
     base = base_resp.json()
 
     # +1e-8 deg (~1mm): every vertex snaps back to the base cell -> identical
-    # canonical geometry -> 409 carrying the incumbent geoid.
-    same_cell = await client.post("/collections/public/items", json=_square(1e-8))
+    # canonical geometry -> 409 carrying the incumbent geoid (sysadmin caller,
+    # so the body discloses it).
+    same_cell = await client.post(
+        "/collections/public/items", headers=admin_headers, json=_square(1e-8)
+    )
     assert same_cell.status_code == 409
     body = same_cell.json()
     assert body["geoid"] == base["geoid"]

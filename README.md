@@ -52,8 +52,9 @@ corrections mint a *new* geoid linked via `predecessor_id`, and the original res
 Identity and deduplication now share **one fingerprint**: the geoid is derived from the same **global**
 canonical `geom_hash` (see below) that enforces uniqueness, so the two can never disagree and the same
 geometry yields the same geoid on every deployment. One geometry → one geoid across the whole catalog —
-POSTing an identical geometry fails with **409** and the body carries the **incumbent geoid** (plus its
-uri and collection).
+POSTing an identical geometry fails with **409**; the body names the **incumbent geoid** (plus its
+uri and collection) only when the caller is a member of the incumbent's collection (sysadmin, the
+incumbent's creator, or any grant) — for everyone else those fields are null.
 
 ## The identity recipe (load-bearing correctness)
 
@@ -117,9 +118,9 @@ mint → dedup → validation → resolve in one command:
 uv run python scripts/seed_samples.py
 ```
 
-Expected: 5 plots minted, a reversed-winding duplicate rejected with 409 + the incumbent geoid, a
-self-intersecting polygon rejected (422), and the first plot resolved by its geoid.
-See `samples/README.md` for details.
+Expected: 5 plots minted, a reversed-winding duplicate rejected with 409 (the incumbent geoid is
+masked for the anonymous seeder — membership-based disclosure), a self-intersecting polygon
+rejected (422), and the first plot resolved by its geoid. See `samples/README.md` for details.
 
 ## Tests
 
