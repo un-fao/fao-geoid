@@ -4,6 +4,24 @@ All notable changes to GeoID are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.1] - 2026-07-10
+
+### Fixed
+- **Single sign-on no longer re-prompts users who already have a live session.**
+  The API docs' "Single Sign-On" login now requests the standard
+  `openid profile email` scopes on its authorization redirect, so an existing
+  realm session is honored and the browser returns already authorized instead of
+  showing the login page again. The scopes are a fixed default — the Authorize
+  dialog presents no scope checkboxes.
+
+### Added
+- `CONTRIBUTING.md` — how to set up a development environment, run the test
+  suite, and submit changes.
+
+### Removed
+- The provisional data-license placeholder; the repository is licensed
+  Apache-2.0 only.
+
 ## [0.5.0] - 2026-07-09
 
 ### Changed — BREAKING
