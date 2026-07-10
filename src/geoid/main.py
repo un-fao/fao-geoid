@@ -81,6 +81,9 @@ def _swagger_oauth2(settings: Settings) -> tuple[list, dict | None]:
     init_oauth = {
         "clientId": settings.swagger_oauth2_client_id,
         "usePkceWithAuthorizationCodeGrant": True,
+        # Deliberately absent from the scheme above: Swagger UI seeds its scope set from
+        # initOAuth alone, so these ride every login without rendering scope checkboxes.
+        "scopes": "openid profile email",
     }
     return [Depends(oauth2_scheme)], init_oauth
 
