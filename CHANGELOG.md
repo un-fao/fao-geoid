@@ -4,6 +4,17 @@ All notable changes to GeoID are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.2] - 2026-07-11
+
+### Changed
+- **Production now keeps one warm instance** (`min-instances 1`, 4 GiB memory),
+  so requests arriving after an idle period skip the multi-second cold start.
+  The review environment is unchanged (scale-to-zero, 1 GiB).
+
+### Added
+- **JWKS signing keys are prefetched at startup**, so the first authenticated
+  request after a cold start no longer pays the 200–340 ms key fetch.
+
 ## [0.5.1] - 2026-07-10
 
 ### Fixed
