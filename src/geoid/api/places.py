@@ -9,11 +9,11 @@ from __future__ import annotations
 
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from geoid.api.format_param import output_format
-from geoid.api.responses import GeoJSONResponse, WKTResponse, feature_response
+from geoid.api.responses import GeoJSONResponse, WKTResponse, feature_response, resolver_cache
 from geoid.config import Settings, get_settings
 from geoid.db import get_session
 from geoid.deps import Principal, require_principal
@@ -174,11 +174,13 @@ async def list_my_geoids(
 )
 async def resolve_geoid(
     geoid: uuid.UUID,
+    response: Response,
     fmt: GeometryFormat = Depends(output_format),
+    if_none_match: str | None = Header(default=None, include_in_schema=False),
     principal: Principal = Depends(require_principal),
     session: AsyncSession = Depends(get_session),
     settings: Settings = Depends(get_settings),
-) -> FeatureModel | WKTResponse:
+) -> FeatureModel | WKTResponse | Response:
     # Existence stays un-gated for any geoid holder (the geoid is the capability;
     # no 404 mask), but the BODY is caller-aware since 2026-07-09: full metadata
     # only for sysadmin / creator / members, the geometry-only masked body for
@@ -187,6 +189,11 @@ async def resolve_geoid(
     row = await place_repo.get_by_geoid(session, geoid)
     if row is None:
         raise PlaceNotFoundError(str(geoid))
+    cache = resolver_cache(
+        settings=settings, principal=principal, geoid=geoid, fmt=fmt, if_none_match=if_none_match
+    )
+    if isinstance(cache, Response):
+        return cache
     created_by = _created_by(row)
     # Query-avoiding order: sysadmin/creator need no grant; anonymous can hold none.
     full = authz_service.can_see_metadata(principal, created_by, None)
@@ -196,7 +203,11 @@ async def resolve_geoid(
         )
         full = authz_service.can_see_metadata(principal, created_by, grant)
     feature = ogc_service.build_feature(settings, row, full=full)
-    return feature_response(feature, fmt)
+    # BOTH header merges are required: FastAPI copies the injected response's
+    # headers only on the model-return (GeoJSON) path, never onto the returned
+    # WKTResponse — that one gets them via feature_response(headers=...).
+    response.headers.update(cache)
+    return feature_response(feature, fmt, headers=cache)
 
 
 @router.get(
@@ -215,17 +226,28 @@ async def resolve_geoid(
 async def resolve_by_external_id(
     collection_id: str,
     external_id: str,
+    response: Response,
     fmt: GeometryFormat = Depends(output_format),
+    if_none_match: str | None = Header(default=None, include_in_schema=False),
     principal: Principal = Depends(require_principal),
     session: AsyncSession = Depends(get_session),
     settings: Settings = Depends(get_settings),
-) -> FeatureModel | WKTResponse:
+) -> FeatureModel | WKTResponse | Response:
     collection = await collection_repo.get_by_slug(session, collection_id)
     if collection is None:
         raise CollectionNotFoundError(collection_id)
     row = await place_repo.get_by_external_id(session, collection.id, external_id)
     if row is None:
         raise PlaceNotFoundError(f"{collection_id}/{external_id}")
+    cache = resolver_cache(
+        settings=settings,
+        principal=principal,
+        geoid=row["geoid"],
+        fmt=fmt,
+        if_none_match=if_none_match,
+    )
+    if isinstance(cache, Response):
+        return cache
     # Existence is never masked (client ruling 2026-07-09 round 2 — consistent
     # with the geoid resolver); only the BODY is caller-aware, on the same
     # query-avoiding order as resolve_geoid.
@@ -237,4 +259,7 @@ async def resolve_by_external_id(
         )
         full = authz_service.can_see_metadata(principal, created_by, grant)
     feature = ogc_service.build_feature(settings, row, full=full)
-    return feature_response(feature, fmt)
+    # Same dual merge as resolve_geoid (injected-response headers reach only the
+    # GeoJSON model path; the WKT Response takes them via feature_response).
+    response.headers.update(cache)
+    return feature_response(feature, fmt, headers=cache)

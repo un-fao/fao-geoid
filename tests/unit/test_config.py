@@ -115,6 +115,11 @@ def test_bulk_max_features_default_is_1000():
     assert _settings().bulk_max_features == 1_000
 
 
+def test_resolver_cache_max_age_defaults_to_off():
+    # 0 = the resolver HTTP-cache trial is fully off (responses byte-identical).
+    assert _settings().resolver_cache_max_age == 0
+
+
 @pytest.mark.parametrize("environment", ["review", "production"])
 def test_missing_oidc_outside_development_is_rejected(environment):
     # A deployed environment must never boot with zero authentication paths.
@@ -167,7 +172,13 @@ def test_database_settings_reads_database_url_from_env(monkeypatch):
 
 def test_database_settings_excludes_app_level_fields():
     # Structural pin: app-layer config must not creep onto the DB-layer surface.
-    for field in ("oidc_issuer", "environment", "base_url", "bulk_max_features"):
+    for field in (
+        "oidc_issuer",
+        "environment",
+        "base_url",
+        "bulk_max_features",
+        "resolver_cache_max_age",
+    ):
         assert field not in DatabaseSettings.model_fields
 
 

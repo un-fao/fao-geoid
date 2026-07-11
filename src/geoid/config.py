@@ -107,6 +107,20 @@ class Settings(DatabaseSettings):
         ),
     )
 
+    # --- Resolver HTTP-cache trial ------------------------------------------
+    resolver_cache_max_age: int = Field(
+        default=0,
+        ge=0,
+        description=(
+            "HTTP-caching trial on the two public resolvers (env: "
+            "GEOID_RESOLVER_CACHE_MAX_AGE), in seconds. 0 (default) = fully off — "
+            "responses stay byte-identical. > 0: anonymous 200s carry a strong "
+            "per-representation ETag + Cache-Control: public, max-age=<n> + Vary "
+            "and answer a matching If-None-Match with 304; authenticated "
+            "responses are marked private, no-store (no ETag, never a 304)."
+        ),
+    )
+
     # --- OIDC resource-server auth (Keycloak) — the ONLY authentication path.
     #     oidc_enabled gates on issuer + jwks_url. Unset (development only) the
     #     service is anonymous-only: every bearer credential is rejected with 401.

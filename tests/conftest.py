@@ -240,6 +240,33 @@ async def oidc_client(db_clean, oidc_keypair):
         yield http_client
 
 
+@pytest.fixture
+async def cache_client(db_clean, oidc_keypair):
+    """An ``oidc_client`` twin with the resolver HTTP-cache trial on (3600s).
+
+    Same settings-override / fake-JWKS wiring, so it serves BOTH anonymous and
+    bearer requests; only ``resolver_cache_max_age`` differs from the default 0.
+    """
+    from httpx import ASGITransport, AsyncClient
+
+    from geoid.config import Settings, get_settings
+    from geoid.deps import get_jwks_client
+    from geoid.main import create_app
+
+    settings = Settings(
+        _env_file=None,
+        oidc_issuer=_OIDC_ISSUER,
+        oidc_jwks_url="https://idp.test/jwks",
+        resolver_cache_max_age=3600,
+    )
+    app = create_app()
+    app.dependency_overrides[get_settings] = lambda: settings
+    app.dependency_overrides[get_jwks_client] = lambda: _fake_jwks(oidc_keypair)
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://testserver") as http_client:
+        yield http_client
+
+
 # --- Shared geometry fixtures (GeoJSON Features) ----------------------------
 
 
