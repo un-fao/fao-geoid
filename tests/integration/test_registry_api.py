@@ -296,3 +296,37 @@ async def test_root_resolver_does_not_shadow_literal_routes(client):
     assert (await client.get("/019e0000-0000-7000-8000-000000000000")).status_code == 404
     # A non-UUID single segment can't bind the `uuid.UUID` path param -> 422.
     assert (await client.get("/not-a-uuid")).status_code == 422
+
+
+# --- NUL bytes in input answer 422 (SQLSTATE 22021), never an unhandled 500 --
+
+
+async def test_external_resolver_nul_path_param_returns_422(client):
+    # The live repro: httpx passes %00 through, the decoded NUL reaches Postgres.
+    resp = await client.get("/collections/public/external/%00")
+    assert resp.status_code == 422
+    assert resp.json()["message"] == "invalid characters in input (NUL)"
+
+
+async def test_post_external_id_with_nul_byte_returns_422(client, unit_square_ccw):
+    resp = await client.post(
+        "/collections/public/items", json={**unit_square_ccw, "id": "a" + chr(0) + "b"}
+    )
+    assert resp.status_code == 422
+    assert resp.json()["message"] == "invalid characters in input (NUL)"
+
+
+async def test_bulk_nul_byte_aborts_batch_and_persists_nothing(
+    client, unit_square_ccw, other_square
+):
+    # Batch-abort-as-422 is the accepted design: the transaction rolls back whole,
+    # the client gets an honest error, and a resubmit converges via dedup.
+    nul_feature = {**other_square, "id": "a" + chr(0) + "b"}
+    fc = {"type": "FeatureCollection", "features": [unit_square_ccw, nul_feature]}
+    resp = await client.post("/collections/public/items/bulk", json=fc)
+    assert resp.status_code == 422
+    assert resp.json()["message"] == "invalid characters in input (NUL)"
+
+    # The aborted batch persisted nothing — the good feature re-mints solo (201, not 409).
+    solo = await client.post("/collections/public/items", json=unit_square_ccw)
+    assert solo.status_code == 201

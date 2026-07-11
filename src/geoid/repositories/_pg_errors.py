@@ -13,6 +13,7 @@ from sqlalchemy.exc import DBAPIError, IntegrityError
 # PostgreSQL SQLSTATEs the write path discriminates on.
 SQLSTATE_CHECK_VIOLATION = "23514"  # invalid / unsupported-type / empty geometry (DB CHECK)
 SQLSTATE_RESTRICT_VIOLATION = "23001"  # raised by the immutability trigger
+SQLSTATE_CHARACTER_NOT_IN_REPERTOIRE = "22021"  # NUL byte in an input string (path or body)
 
 # Custom SQLSTATE raised by the v2 identity recipe (migration 0008) when a VALID
 # geometry degenerates on the 1e-7 lattice (ring < 3 distinct vertices, or exact-

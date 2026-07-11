@@ -10,6 +10,7 @@ Constraint→HTTP mapping (DB is the source of truth; switch on constraint_name)
                                               branch is only a backstop
     invalid / unsupported-type / empty geom -> 422 with ST_IsValidReason
     immutability (restrict_violation)       -> 409
+    NUL byte in an input string (22021)     -> 422 "invalid characters in input (NUL)"
 """
 
 from __future__ import annotations
@@ -18,7 +19,7 @@ import logging
 
 from fastapi import FastAPI, Request, status
 from fastapi.responses import JSONResponse
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import DBAPIError, IntegrityError
 
 from geoid.config import get_settings
 from geoid.domain.identifiers import derive_identifiers
@@ -30,9 +31,11 @@ from geoid.models import (
     UQ_PLACE_EXTERNAL_ID,
 )
 from geoid.repositories._pg_errors import (
+    SQLSTATE_CHARACTER_NOT_IN_REPERTOIRE,
     SQLSTATE_CHECK_VIOLATION,
     SQLSTATE_RESTRICT_VIOLATION,
     pg_fields,
+    sqlstate_of,
 )
 from geoid.services.exceptions import (
     AnonymousWriteForbiddenError,
@@ -197,3 +200,20 @@ def register_exception_handlers(app: FastAPI) -> None:
             exc_info=exc,
         )
         return _error(status.HTTP_500_INTERNAL_SERVER_ERROR, "internal error")
+
+    @app.exception_handler(DBAPIError)
+    async def _dbapi(_: Request, exc: DBAPIError) -> JSONResponse:
+        # Registered on the BASE class so the mapping is dialect-independent
+        # (asyncpg wraps 22021 as its own DataError flavour); an IntegrityError
+        # still lands on its more-specific handler above via Starlette's
+        # exception-class MRO walk. A NUL byte in any request string (a %00
+        # path param, an escaped NUL in a body member) dies in Postgres with
+        # 22021 — client input, not a server fault.
+        if sqlstate_of(exc) == SQLSTATE_CHARACTER_NOT_IN_REPERTOIRE:
+            return _error(
+                status.HTTP_422_UNPROCESSABLE_CONTENT,
+                "invalid characters in input (NUL)",
+            )
+        # Anything else keeps the loud-500 posture: re-raise so
+        # ServerErrorMiddleware logs the traceback.
+        raise exc
