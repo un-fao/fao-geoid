@@ -238,17 +238,20 @@ jobs:
             --port 8000 \
             --allow-unauthenticated \
             --execution-environment gen2 \
-            --min-instances 0 \
+            --min-instances ${{ github.event_name == 'release' && '1' || '0' }} \
             --max-instances 4 \
-            --memory 1Gi \
+            --memory ${{ github.event_name == 'release' && '4Gi' || '1Gi' }} \
             --timeout 600 \
             --concurrency 16 \
             --cpu-boost
           # Connection/memory budget (kept coherent on purpose): pool 5 + overflow 15
           # = 20 conns/instance x 4 max instances = 80, leaving headroom under a small
           # Cloud SQL tier's ~100 max_connections for the migrate/canary jobs and ops.
-          # --concurrency 16 bounds how many (up to 2500-feature) bulk bodies one
-          # 1 GiB instance parses at once — the Cloud Run default of 80 was an OOM risk.
+          # Per-environment shape: production runs warm (min-instances 1, 4 GiB —
+          # perf finding F1 / decision D1, 2026-07-11) while review stays
+          # scale-to-zero (min 0, 1 GiB). --concurrency 16 bounds how many (up to
+          # 2500-feature) bulk bodies one instance parses at once — sized against the
+          # SMALLER review instance (1 GiB); the Cloud Run default of 80 was an OOM risk.
 
       - name: Install uv (for the smoke script)
         uses: astral-sh/setup-uv@v8.2.0

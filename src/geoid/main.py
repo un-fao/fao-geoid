@@ -37,6 +37,33 @@ _TAGS_METADATA = [
 ]
 
 
+# uvicorn binds the listener socket only after lifespan startup completes, so an
+# unresponsive IdP must never stall readiness (PyJWKClient's default urllib timeout
+# is 30 s — far past any acceptable cold-start budget).
+_JWKS_PREFETCH_TIMEOUT_S = 5.0
+
+
+async def _prefetch_jwks() -> None:
+    """Warm the JWKS key-set cache so the first authenticated request after a
+    cold start skips the ~200-340 ms blocking key fetch (perf F3, 2026-07-10)."""
+    try:
+        from geoid.deps import get_jwks_client
+
+        jwks_client = get_jwks_client()
+        if jwks_client is None:  # OIDC disabled (bare development config)
+            return
+        import anyio  # lazy, mirroring deps._resolve_oidc
+
+        with anyio.fail_after(_JWKS_PREFETCH_TIMEOUT_S):
+            # abandon_on_cancel: on timeout the fetch thread finishes in the
+            # background (it may still populate the cache); startup moves on.
+            await anyio.to_thread.run_sync(jwks_client.get_jwk_set, abandon_on_cancel=True)
+        logger.info("JWKS prefetch: signing keys warmed")
+    except Exception as exc:
+        # Startup must never fail on a warm-up; the request path self-heals.
+        logger.warning("JWKS prefetch skipped: %s", exc)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     settings = get_settings()
@@ -49,6 +76,7 @@ async def lifespan(app: FastAPI):
     except (OperationalError, InterfaceError, OSError) as exc:
         # Tolerate only a not-ready DB; let programming errors propagate.
         logger.warning("bootstrap skipped (DB not ready?): %s", exc)
+    await _prefetch_jwks()
     yield
     await dispose_engine()
 
