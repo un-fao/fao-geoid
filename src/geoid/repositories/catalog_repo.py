@@ -1,14 +1,12 @@
 """Catalog data access.
 
-The catalog is a single, internal create-once row (the anchor that maps to a
-CKAN/STAC workspace and will carry super-admin permissions). It is **not** part of
-the API surface — collections are the flat entry point. Bootstrap guarantees the
-one default catalog via :func:`get_or_create_default`.
+The catalog is a single, internal create-once row — the anchor that scopes
+collections (and the seam for a future multi-catalog/federated deployment). It is
+**not** part of the API surface — collections are the flat entry point. Bootstrap
+guarantees the one default catalog via :func:`get_or_create_default`.
 """
 
 from __future__ import annotations
-
-from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -24,14 +22,8 @@ async def get_by_slug(session: AsyncSession, slug: str) -> Catalog | None:
     return (await session.execute(stmt)).scalar_one_or_none()
 
 
-async def create(
-    session: AsyncSession,
-    *,
-    slug: str,
-    title: str | None = None,
-    metadata: dict[str, Any] | None = None,
-) -> Catalog:
-    catalog = Catalog(id=uuid7(), slug=slug, title=title, meta=metadata or {})
+async def create(session: AsyncSession, *, slug: str, title: str | None = None) -> Catalog:
+    catalog = Catalog(id=uuid7(), slug=slug, title=title, meta={})
     session.add(catalog)
     await session.flush()
     return catalog

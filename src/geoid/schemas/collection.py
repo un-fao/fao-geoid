@@ -37,7 +37,12 @@ class CollectionCreate(BaseModel):
         "bodies.",
         examples=[True],
     )
-    metadata: dict[str, Any] = Field(default_factory=dict, examples=[{}])
+    metadata: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Intentionally free-form (stored and echoed as-is). The one "
+        "reserved key is dedup_grid, which is rejected — geometry dedup is global.",
+        examples=[{}],
+    )
 
     @field_validator("metadata")
     @classmethod
@@ -88,6 +93,10 @@ class GrantCreate(BaseModel):
 
 
 class GrantOut(BaseModel):
+    """Wire shape of a grant. ``email``/``subject`` flatten the DB's
+    ``principal_email``/``principal_subject``; ``created_at`` is *first granted
+    at* — a re-grant updates the role but never refreshes it."""
+
     email: str
     role: str
     subject: str | None = None

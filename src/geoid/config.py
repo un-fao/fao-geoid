@@ -71,8 +71,13 @@ class Settings(DatabaseSettings):
     )
 
     # --- Data-layer anonymous / federation knobs ---------------------------
+    # Same format rule as CollectionCreate.id — bootstrap inserts this slug
+    # without passing through the API validator, so the guard lives here too.
     public_collection: str = Field(
         default="public",
+        min_length=1,
+        max_length=128,
+        pattern=r"^[a-z0-9][a-z0-9_-]*$",
         description="Reserved collection slug that accepts anonymous writes.",
     )
     instance_id: str = Field(

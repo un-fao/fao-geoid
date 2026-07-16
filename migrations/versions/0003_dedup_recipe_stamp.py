@@ -5,7 +5,14 @@ SUPERSEDED IN PART BY 0004 (2026-06-18): the paragraph below describing drift as
 from migration 0004 the geoid is DERIVED from ``geom_hash`` (deterministic UUIDv8), so
 the recipe is identity-load-bearing and frozen, and ``local-scripts/rehash_geom_hashes.py``
 must NOT be run against live identity data (it would re-mint geoids). See ADR-004 and
-0004's docstring. (This note is the only edit to an applied migration — comment only.)
+0004's docstring. (Comment-only note; same precedent as the 0008 note below.)
+
+FURTHER SUPERSEDED BY 0008 (2026-07-02, recipe v2 — ADR-007): the hash is no longer
+GEOS-bound at all — v2 is the engine-independent integer-lattice recipe, so engine
+drift CANNOT occur, the re-hash path is DEAD (the script's pg_proc probe fails fast
+post-0008), and the engine columns below are forensics-only history. 0008 appended
+the 'v2' stamp row; 'stamped_by: rehash-script' rows can no longer be produced.
+(Comment-only edit to an applied migration.)
 
 ``geoid_geom_hash`` is GEOS-bound (``ST_ReducePrecision`` + ``ST_Normalize``), so
 its output can drift across PostGIS/GEOS builds. Drift is survivable — the hash is

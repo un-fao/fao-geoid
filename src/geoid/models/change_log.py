@@ -4,7 +4,8 @@ A monotonic ``seq`` cursor over every mint. Audit value now; later central pulls
 ``GET /changes?since=<seq>`` (ndjson) and does idempotent
 ``UPSERT ON CONFLICT (geoid) DO NOTHING`` + provenance append. Global geoid
 uniqueness + immutable geoid-keyed records make the merge a conflict-free union.
-Populated by the same ``AFTER INSERT`` trigger that fills the registry.
+Populated by the ``place`` ``AFTER INSERT`` trigger (the registry, by contrast,
+is written by the app's arbiter CTE before the place insert).
 """
 
 from __future__ import annotations

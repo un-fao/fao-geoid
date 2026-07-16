@@ -1,8 +1,13 @@
 """Stubbed tables (HINGE seams, not yet implemented).
 
-``authority_assertion`` — a claim of authority *over* a place, append-only, never a
-mutable column *on* the place. This is the architectural answer to "anonymous yet
-authority-tracked". ``api_key`` — the future API-key / usage-tracking surface.
+``authority_assertion`` — a claim of authority *over* a place, append-only by
+design (not yet trigger-enforced), never a mutable column *on* the place. This is
+the architectural answer to "anonymous yet authority-tracked"; the seam is still
+load-bearing in the provenance design.
+
+``api_key`` — reserved for a machine-to-machine key surface. Its original
+rationale expired when auth went Keycloak-only (2026-07-08); it stays pending an
+explicit keep-or-drop decision (dropping it is a migration).
 
 Both tables exist (so links and queries are forward-compatible) but carry no
 behaviour yet.

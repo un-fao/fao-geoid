@@ -5,9 +5,10 @@ Provenance is an append-only JSON object stored on the place. It records *who*
 minted it (``originating_instance``; the federation seam) — nothing else.
 Submitted GeoJSON ``properties`` are accepted (RFC 7946) but never persisted.
 
-Authority is deliberately NOT here: a claim of authority *over* a place lives in
-the append-only ``authority_assertion`` side table, never as a mutable column.
-This is what answers "anonymous yet authority-tracked" architecturally.
+Authority is deliberately NOT here: a claim of authority *over* a place belongs
+in the ``authority_assertion`` side table (append-only by design, not yet
+trigger-enforced — a schema stub today, no behaviour yet), never as a mutable
+column. This is what answers "anonymous yet authority-tracked" architecturally.
 """
 
 from __future__ import annotations

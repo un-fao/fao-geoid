@@ -54,18 +54,19 @@ async def upsert_grant(
     email: str,
     role: str,
     granted_by: str | None = None,
-    subject: str | None = None,
 ) -> CollectionGrant:
-    """Create or update a user grant (ON CONFLICT → update role/subject/granted_by)."""
-    norm = _norm(email)
+    """Create or update a user grant (ON CONFLICT → update role/granted_by).
+
+    ``principal_subject`` is never written here — it starts null and is recorded
+    by :func:`backfill_subject` on the grantee's first authorized access.
+    """
     stmt = (
         pg_insert(CollectionGrant)
         .values(
             id=uuid7(),
             collection_id=collection_id,
             principal_type=_USER,
-            principal_email=norm,
-            principal_subject=subject,
+            principal_email=_norm(email),
             role=role,
             granted_by=granted_by,
         )
@@ -78,15 +79,7 @@ async def upsert_grant(
     # populate_existing: without it the RETURNING row is served from the identity
     # map, so a role change upserted after get_grant() loaded the old row (the
     # last-owner check does) would return the STALE role in the response body.
-    grant = (
-        await session.execute(stmt, execution_options={"populate_existing": True})
-    ).scalar_one()
-    # If the caller passed a subject and the row had none, fold it in (the upsert's
-    # set_ leaves subject untouched on conflict to avoid clobbering a known sub).
-    if subject and grant.principal_subject is None:
-        await backfill_subject(session, collection_id, norm, subject)
-        grant = await get_grant(session, collection_id, norm)
-    return grant  # type: ignore[return-value]
+    return (await session.execute(stmt, execution_options={"populate_existing": True})).scalar_one()
 
 
 async def count_owners(session: AsyncSession, collection_id: uuid.UUID) -> int:

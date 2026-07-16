@@ -1,10 +1,13 @@
-"""SQLAlchemy ORM models — used for the read path and metadata access.
+"""SQLAlchemy ORM models.
 
 The schema is owned by Alembic migrations (they carry triggers and functions that
-autogenerate cannot express); these models mirror that schema for reads. The write
-hot path (place insert + dedup) goes through hand-written SQL in the registry
-service so the trigger-computed ``geom_hash`` and ``ON CONFLICT`` semantics are
-exercised directly.
+autogenerate cannot express); these models mirror it with two distinct roles:
+``Catalog``/``Collection``/``CollectionGrant`` are the live runtime ORM surface
+(collection + grant reads, authz, bootstrap), while ``Place``/``GeoidRegistry``/
+``ChangeLog`` are schema mirrors with no runtime query path — production reads go
+through raw SQL in ``place_repo``, and the write hot path (place insert + dedup)
+is the hand-written arbiter CTE, which computes ``geom_hash`` in-statement (no
+trigger computes it) and exercises ``ON CONFLICT`` directly.
 
 Constraint names here MUST match the migration — ``api/errors.py`` switches on
 them to map SQLSTATE 23505 to the right HTTP status.

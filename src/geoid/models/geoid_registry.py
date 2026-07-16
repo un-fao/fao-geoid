@@ -27,7 +27,12 @@ class GeoidRegistry(Base):
     __table_args__ = (UniqueConstraint("geom_hash", name="uq_geoid_registry_geom_hash"),)
 
     geoid: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
+    # Invariant: place_id == geoid (place.id IS the geoid; the arbiter CTE writes
+    # the same derived value into both). Kept as its own column because the
+    # registry is the sharding hinge and must stand alone as a reference table.
     place_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    # Deliberately denormalized from place.collection_id: the dedup-409 incumbent
+    # lookup reads THIS copy, so it keeps working when place is sharded away.
     collection_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
     # The global geometry-dedup hash (canonical recipe @ the one global grid).
     # Written by the arbiter CTE; the UNIQUE above is the enforced dedup invariant.

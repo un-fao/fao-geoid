@@ -3,8 +3,10 @@
 MUTABLE (unlike ``place`` / ``geoid_registry`` / ``change_log``): grants are
 upserted and revoked, so there are no append-only triggers. Keyed by a normalised
 (lower-cased) ``principal_email``; ``principal_subject`` (the Keycloak ``sub``) is
-backfilled on first authorized access. Constraint names mirror migration 0006 and
-are exported from ``models/__init__.py``.
+backfilled on first authorized access. Constraint names mirror migrations 0006 +
+0007 and are exported from ``models/__init__.py``. The grants API flattens the
+wire names: ``principal_email``/``principal_subject`` surface as ``email``/
+``subject`` (deliberate, stable — don't rename either side).
 """
 
 from __future__ import annotations
@@ -12,8 +14,8 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-from sqlalchemy import CheckConstraint, ForeignKey, String, UniqueConstraint, text
-from sqlalchemy.dialects.postgresql import TIMESTAMP, UUID
+from sqlalchemy import CheckConstraint, DateTime, ForeignKey, String, UniqueConstraint, text
+from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from geoid.db import Base
@@ -32,6 +34,10 @@ class CollectionGrant(Base):
         CheckConstraint(
             "principal_type IN ('user', 'group')", name="ck_collection_grant_principal_type"
         ),
+        CheckConstraint(
+            "principal_email = lower(btrim(principal_email))",
+            name="ck_collection_grant_email_normalized",
+        ),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
@@ -47,6 +53,7 @@ class CollectionGrant(Base):
     principal_subject: Mapped[str | None] = mapped_column(String, nullable=True)
     role: Mapped[str] = mapped_column(String, nullable=False)
     granted_by: Mapped[str | None] = mapped_column(String, nullable=True)
+    # First granted at — the upsert deliberately does not refresh it on re-grant.
     created_at: Mapped[datetime] = mapped_column(
-        TIMESTAMP(timezone=True), nullable=False, server_default=text("now()")
+        DateTime(timezone=True), nullable=False, server_default=text("now()")
     )

@@ -30,10 +30,6 @@ async def get_by_slug(
     return (await session.execute(stmt)).scalar_one_or_none()
 
 
-async def get_by_id(session: AsyncSession, collection_id: uuid.UUID) -> Collection | None:
-    return await session.get(Collection, collection_id)
-
-
 async def list_all(session: AsyncSession) -> list[Collection]:
     stmt = select(Collection).order_by(Collection.slug.asc())
     return list((await session.execute(stmt)).scalars().all())

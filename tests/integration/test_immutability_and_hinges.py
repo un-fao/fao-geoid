@@ -89,6 +89,9 @@ async def test_change_log_hinge_records_create(client, session, unit_square_ccw)
     ).first()
     assert row is not None
     assert row[0] == "create"
+    # The payload shape is the future federation pull-feed contract (0001 trigger);
+    # pin the exact key set so a trigger change can't silently drift it.
+    assert set(row[1]) == {"external_id", "originating_instance"}
 
 
 async def test_duplicate_geometry_409_leaves_hinges_untouched(
