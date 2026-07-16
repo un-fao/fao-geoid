@@ -33,6 +33,7 @@ from geoid.services.exceptions import (
     BulkLimitExceededError,
     CollectionNotFoundError,
     PlaceNotFoundError,
+    PublicExternalIdLookupError,
 )
 
 router = APIRouter(tags=["registry"])
@@ -219,7 +220,10 @@ async def resolve_geoid(
         "Behaves exactly like `GET /{geoid}`: an existing (collection, "
         "external_id) answers 200 to every caller — the full feature for "
         "sysadmin / the creator / grant holders, the geometry-only masked body "
-        "for everyone else. 404 only for an unknown collection or external_id."
+        "for everyone else. 404 only for an unknown collection or external_id. "
+        "Not available in the reserved public collection (its external_id "
+        "values are stored but neither unique nor resolvable) — answers 400 "
+        "with an explicit message there."
     ),
     responses={200: {"content": {"text/plain": {}}}},
 )
@@ -236,6 +240,12 @@ async def resolve_by_external_id(
     collection = await collection_repo.get_by_slug(session, collection_id)
     if collection is None:
         raise CollectionNotFoundError(collection_id)
+    # The reserved public collection stores external_id without uniqueness
+    # (migration 0012 excludes it from the unique index), so a lookup there
+    # could match many rows — an explicit 400 (user ruling 2026-07-16), never
+    # a masking 404: this API reserves 404 for a genuinely unknown id.
+    if collection.slug == settings.public_collection:
+        raise PublicExternalIdLookupError(collection.slug)
     row = await place_repo.get_by_external_id(session, collection.id, external_id)
     if row is None:
         raise PlaceNotFoundError(f"{collection_id}/{external_id}")

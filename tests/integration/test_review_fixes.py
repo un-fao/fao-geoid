@@ -16,37 +16,40 @@ pytestmark = pytest.mark.integration
 # the geom_hash UNIQUE); the place row — and so its external_id index — is only
 # touched if the registry arbiter won. So a submission duplicating BOTH geometry
 # and external_id yields the GEOMETRY conflict (409 carrying the incumbent geoid),
-# never the external_id 409.
+# never the external_id 409. Minted into a managed collection: only there can the
+# external_id leg still conflict (the public one is index-excluded since 0012),
+# so the precedence pin stays meaningful.
 
 
 async def test_dual_geometry_and_external_id_duplicate_yields_geometry_409(
-    client, admin_headers, unit_square_ccw
+    client, admin_headers, ext_collection, unit_square_ccw
 ):
     feature = dict(unit_square_ccw, id="dup-ext")
-    base = await client.post("/collections/public/items", json=feature)
+    base = await client.post(f"/collections/{ext_collection}/items", json=feature)
     assert base.status_code == 201
 
     # Sysadmin resubmit: the 409 discloses the incumbent (only a private
     # incumbent is masked for non-members).
-    resub = await client.post("/collections/public/items", headers=admin_headers, json=feature)
+    resub = await client.post(
+        f"/collections/{ext_collection}/items", headers=admin_headers, json=feature
+    )
     assert resub.status_code == 409
     assert resub.json()["constraint"] == "uq_geoid_registry_geom_hash"
     assert resub.json()["geoid"] == base.json()["geoid"]
 
 
 async def test_geometry_dup_with_another_rows_external_id_yields_geometry_409(
-    client, admin_headers, unit_square_ccw, other_square
+    client, admin_headers, ext_collection, unit_square_ccw, other_square
 ):
-    a = await client.post("/collections/public/items", json=dict(unit_square_ccw, id="ext-a"))
-    b = await client.post("/collections/public/items", json=dict(other_square, id="ext-b"))
+    items = f"/collections/{ext_collection}/items"
+    a = await client.post(items, json=dict(unit_square_ccw, id="ext-a"))
+    b = await client.post(items, json=dict(other_square, id="ext-b"))
     assert a.status_code == 201 and b.status_code == 201
 
     # A's geometry + B's external_id: the geometry arbiter prechecks first, so
     # the 409 carries A's geoid; the conflicting external_id is never reached.
     # (Sysadmin caller so the incumbent is disclosed.)
-    resub = await client.post(
-        "/collections/public/items", headers=admin_headers, json=dict(unit_square_ccw, id="ext-b")
-    )
+    resub = await client.post(items, headers=admin_headers, json=dict(unit_square_ccw, id="ext-b"))
     assert resub.status_code == 409
     assert resub.json()["constraint"] == "uq_geoid_registry_geom_hash"
     assert resub.json()["geoid"] == a.json()["geoid"]

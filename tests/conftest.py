@@ -111,7 +111,20 @@ async def db_clean(_migrated):
         await session.execute(text("SET session_replication_role = replica"))
         await session.execute(text(_TRUNCATE))
         await session.execute(text("SET session_replication_role = origin"))
-        await ensure_public_collection(session, get_settings())
+        public = await ensure_public_collection(session, get_settings())
+        # Migration 0012's partial-index predicate pins the public collection
+        # UUID minted at migrate time; the TRUNCATE above re-minted the row, so
+        # re-aim the predicate at the fresh UUID (the same recovery SQL an
+        # operator runs after a teardown — the documented stale-predicate
+        # ceiling in 0012).
+        await session.execute(text("DROP INDEX IF EXISTS uq_place_collection_external_id"))
+        await session.execute(
+            text(
+                "CREATE UNIQUE INDEX uq_place_collection_external_id "
+                "ON place (collection_id, external_id) "
+                f"WHERE collection_id <> '{public.id}'"
+            )
+        )
         await session.commit()
     yield
     await dispose_engine()
@@ -152,6 +165,24 @@ def admin_headers(make_token) -> dict[str, str]:
     """A sysadmin credential: a synthetic Keycloak JWT carrying ``geoid.sysadmin``."""
     token = make_token(sub="kc-sysadmin", email="sysadmin@fao.org", roles=("geoid.sysadmin",))
     return {"Authorization": f"Bearer {token}"}
+
+
+@pytest.fixture
+async def ext_collection(client, admin_headers) -> str:
+    """An open-write managed collection where external_id uniqueness applies.
+
+    The reserved ``public`` collection is excluded from the unique index
+    (migration 0012) and its external-id lookup answers 400 — tests pinning
+    the 409/resolver behavior mint here instead. ``public_write=True`` keeps
+    the anonymous-mint test pattern working.
+    """
+    resp = await client.post(
+        "/manage/collections",
+        headers=admin_headers,
+        json={"id": "extcol", "public_write": True},
+    )
+    assert resp.status_code == 201, resp.text
+    return "extcol"
 
 
 # --- OIDC / Keycloak test infra (synthetic RS256 tokens, fake JWKS, no network) -

@@ -34,6 +34,8 @@ __all__ = [
 
 # Constraint names referenced by error mapping (single source of truth).
 UQ_COLLECTION_CATALOG_SLUG = "uq_collection_catalog_slug"
+# Since 0012 a partial UNIQUE INDEX (public collection excluded), not a table
+# constraint — Postgres still reports its violations under this name.
 UQ_PLACE_EXTERNAL_ID = "uq_place_collection_external_id"
 # The global geometry-dedup UNIQUE lives on geoid_registry (sharding-ready), not place.
 UQ_GEOID_REGISTRY_GEOM_HASH = "uq_geoid_registry_geom_hash"

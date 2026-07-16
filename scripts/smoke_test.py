@@ -41,6 +41,10 @@ from _timing import print_timings, record
 
 BASE = os.environ.get("GEOID_BASE_URL", "http://localhost:8000").rstrip("/")
 COLLECTION = os.environ.get("GEOID_COLLECTION", "public")
+# The server's reserved public collection: its external_id values are stored
+# but neither unique nor resolvable (migration 0012), so the resolve probe
+# expects the explicit 400 there.
+PUBLIC_COLLECTION = os.environ.get("GEOID_PUBLIC_COLLECTION", "public")
 BEARER_TOKEN = os.environ.get("GEOID_BEARER_TOKEN")
 
 SENTINEL_EXTERNAL_ID = "geoid-smoke-sentinel"
@@ -197,12 +201,12 @@ def run_mint_probe(client: httpx.Client) -> list[bool]:
         # carries the key with value None (present, so .get's default won't fire),
         # hence `or`.
         collection = minted.get("collection") or COLLECTION
-        props = (
-            _get_json(client, f"/collections/{collection}/external/{SENTINEL_EXTERNAL_ID}").get(
-                "properties"
-            )
-            or {}
-        )
+        path = f"/collections/{collection}/external/{SENTINEL_EXTERNAL_ID}"
+        if collection == PUBLIC_COLLECTION:
+            resp = record(f"GET {path}", client.get(f"{BASE}{path}"))
+            _ensure(resp.status_code == 400, f"expected 400, got {resp.status_code}")
+            return "public collection: external_id lookup disabled → 400 (expected)"
+        props = _get_json(client, path).get("properties") or {}
         _ensure(
             props.get("geoid") == minted["geoid"],
             f"external-id resolve returned {props.get('geoid')!r}, expected {minted['geoid']!r}",

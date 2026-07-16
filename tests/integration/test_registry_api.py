@@ -111,26 +111,30 @@ async def test_3d_point_rejected_422(client):
     assert resp.status_code == 422
 
 
-async def test_resolve_by_external_id(client):
+async def test_resolve_by_external_id(client, ext_collection):
+    # A managed collection — the reserved public one no longer resolves by
+    # external_id (tests/integration/test_public_external_id.py pins that).
     feature = {
         "type": "Feature",
         "id": "plot-xyz",
         "geometry": {"type": "Polygon", "coordinates": [[[3, 3], [4, 3], [4, 4], [3, 4], [3, 3]]]},
         "properties": {},
     }
-    minted = await client.post("/collections/public/items", json=feature)
+    minted = await client.post(f"/collections/{ext_collection}/items", json=feature)
     geoid = minted.json()["geoid"]
 
-    resp = await client.get("/collections/public/external/plot-xyz")
+    resp = await client.get(f"/collections/{ext_collection}/external/plot-xyz")
     assert resp.status_code == 200
     assert resp.json()["id"] == geoid
 
 
 async def test_external_id_conflict_returns_409_with_constraint(
-    client, unit_square_ccw, other_square
+    client, ext_collection, unit_square_ccw, other_square
 ):
-    await client.post("/collections/public/items", json={**unit_square_ccw, "id": "dup"})
-    clash = await client.post("/collections/public/items", json={**other_square, "id": "dup"})
+    await client.post(f"/collections/{ext_collection}/items", json={**unit_square_ccw, "id": "dup"})
+    clash = await client.post(
+        f"/collections/{ext_collection}/items", json={**other_square, "id": "dup"}
+    )
     assert clash.status_code == 409
     assert clash.json()["constraint"] == "uq_place_collection_external_id"
 
@@ -323,9 +327,11 @@ async def test_root_resolver_does_not_shadow_literal_routes(client):
 # --- NUL bytes in input answer 422 (SQLSTATE 22021), never an unhandled 500 --
 
 
-async def test_external_resolver_nul_path_param_returns_422(client):
+async def test_external_resolver_nul_path_param_returns_422(client, ext_collection):
     # The live repro: httpx passes %00 through, the decoded NUL reaches Postgres.
-    resp = await client.get("/collections/public/external/%00")
+    # (A managed collection — on the public one the 0012 lookup guard answers
+    # 400 before the NUL ever reaches a query.)
+    resp = await client.get(f"/collections/{ext_collection}/external/%00")
     assert resp.status_code == 422
     assert resp.json()["message"] == "invalid characters in input (NUL)"
 

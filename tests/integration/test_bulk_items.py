@@ -128,9 +128,12 @@ async def test_bulk_geometry_conflict_against_existing_place(
     assert body["rejected"][0]["geoid"] == minted
 
 
-async def test_bulk_external_id_conflict_in_batch(client):
+async def test_bulk_external_id_conflict_in_batch(client, ext_collection):
+    # external_id uniqueness applies only outside the reserved public
+    # collection (0012) — these conflict tests mint into a managed one.
     resp = await client.post(
-        _BULK, json=_fc(_square(0, 0, external_id="dup"), _square(10, 10, external_id="dup"))
+        f"/collections/{ext_collection}/items/bulk",
+        json=_fc(_square(0, 0, external_id="dup"), _square(10, 10, external_id="dup")),
     )
     assert resp.status_code == 200
     body = resp.json()
@@ -141,11 +144,15 @@ async def test_bulk_external_id_conflict_in_batch(client):
     assert rejected["external_id"] == "dup"
 
 
-async def test_bulk_external_id_conflict_against_existing(client):
-    first = await client.post("/collections/public/items", json=_square(0, 0, external_id="ext1"))
+async def test_bulk_external_id_conflict_against_existing(client, ext_collection):
+    first = await client.post(
+        f"/collections/{ext_collection}/items", json=_square(0, 0, external_id="ext1")
+    )
     assert first.status_code == 201
     # Different geometry, same external_id already taken in the collection -> reject.
-    resp = await client.post(_BULK, json=_fc(_square(10, 10, external_id="ext1")))
+    resp = await client.post(
+        f"/collections/{ext_collection}/items/bulk", json=_fc(_square(10, 10, external_id="ext1"))
+    )
     body = resp.json()
     assert body["summary"] == {"received": 1, "accepted": 0, "rejected": 1}
     assert body["rejected"][0]["reason"] == "external_id_conflict"
@@ -228,12 +235,12 @@ async def test_bulk_accepts_wkt_string_geometry(client):
     assert (await client.get(f"/{wkt_geoid}")).status_code == 200
 
 
-async def test_bulk_external_id_conflict_mid_batch_recovers(client):
+async def test_bulk_external_id_conflict_mid_batch_recovers(client, ext_collection):
     # [ext-X, ext-X dup, fresh]: the middle abort rolls back only its SAVEPOINT, so
     # the batch RECOVERS and the LATER feature still mints — pins abort-then-recover
     # ordering (the other external_id tests put the failing feature last).
     resp = await client.post(
-        _BULK,
+        f"/collections/{ext_collection}/items/bulk",
         json=_fc(
             _square(0, 0, external_id="ext-X"),
             _square(10, 10, external_id="ext-X"),

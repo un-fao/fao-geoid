@@ -48,6 +48,7 @@ from geoid.services.exceptions import (
     LastOwnerGuardError,
     OwnerGrantForbiddenError,
     PlaceNotFoundError,
+    PublicExternalIdLookupError,
     RegistryConsistencyError,
     WriteNotAuthorizedError,
 )
@@ -70,6 +71,12 @@ def register_exception_handlers(app: FastAPI) -> None:
     @app.exception_handler(PlaceNotFoundError)
     async def _place_not_found(_: Request, exc: PlaceNotFoundError) -> JSONResponse:
         return _error(status.HTTP_404_NOT_FOUND, str(exc))
+
+    @app.exception_handler(PublicExternalIdLookupError)
+    async def _public_external_id_lookup(
+        _: Request, exc: PublicExternalIdLookupError
+    ) -> JSONResponse:
+        return _error(status.HTTP_400_BAD_REQUEST, str(exc))
 
     @app.exception_handler(BulkLimitExceededError)
     async def _bulk_limit_exceeded(_: Request, exc: BulkLimitExceededError) -> JSONResponse:

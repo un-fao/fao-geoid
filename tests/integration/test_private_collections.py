@@ -135,12 +135,13 @@ async def test_geoid_resolver_rejects_malformed_bearer(client, unit_square_ccw):
     assert (await client.get(f"/{minted['geoid']}")).status_code == 200
 
 
-async def test_external_id_resolver_rejects_malformed_bearer(client):
+async def test_external_id_resolver_rejects_malformed_bearer(client, ext_collection):
     # The external-id resolver keeps require_principal: a PRESENT-but-invalid
-    # credential is 401, never silently anonymous.
-    await _mint(client, "public", _square(15, 15, external_id="mb-1"))
+    # credential is 401, never silently anonymous. (A managed collection — the
+    # public one no longer resolves by external_id at all.)
+    await _mint(client, ext_collection, _square(15, 15, external_id="mb-1"))
     resp = await client.get(
-        "/collections/public/external/mb-1", headers={"Authorization": "Bearer nope"}
+        f"/collections/{ext_collection}/external/mb-1", headers={"Authorization": "Bearer nope"}
     )
     assert resp.status_code == 401
 
@@ -172,22 +173,6 @@ async def test_geoid_resolver_masks_metadata_for_non_members(oidc_client, make_t
         assert body["properties"]["external_id"] == "mask-1"
         assert "_geoid_provenance" in body["properties"]
         assert "collection" in {link["rel"] for link in body["links"]}
-
-
-async def test_external_id_resolver_masks_metadata_on_public_collection(
-    oidc_client, make_token, bearer
-):
-    # Existence stays public (public_read=true) but the body is masked for
-    # non-members, exactly like the geoid resolver.
-    await _mint(oidc_client, "public", _square(95, 40, external_id="mask-2"))
-    resp = await oidc_client.get("/collections/public/external/mask-2")
-    assert resp.status_code == 200
-    assert set(resp.json()["properties"]) == {"geoid", "uri"}
-
-    admin_body = (
-        await oidc_client.get("/collections/public/external/mask-2", headers=ADMIN)
-    ).json()
-    assert admin_body["properties"]["external_id"] == "mask-2"
 
 
 async def test_viewer_grant_unlocks_full_metadata(oidc_client, make_token, bearer):

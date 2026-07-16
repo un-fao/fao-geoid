@@ -18,7 +18,6 @@ from sqlalchemy import (
     DateTime,
     ForeignKey,
     String,
-    UniqueConstraint,
     text,
 )
 from sqlalchemy.dialects.postgresql import JSONB, UUID
@@ -30,7 +29,9 @@ from geoid.db import Base
 class Place(Base):
     __tablename__ = "place"
     __table_args__ = (
-        UniqueConstraint("collection_id", "external_id", name="uq_place_collection_external_id"),
+        # external_id uniqueness is a partial UNIQUE INDEX of the same name
+        # (uq_place_collection_external_id) excluding the public collection's
+        # runtime UUID — inexpressible here, DB-only since migration 0012.
         CheckConstraint(
             "GeometryType(geom) IN ('POINT', 'MULTIPOINT', 'POLYGON', 'MULTIPOLYGON')",
             name="ck_place_geom_is_supported",

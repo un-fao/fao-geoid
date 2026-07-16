@@ -113,19 +113,20 @@ async def test_unknown_format_param_returns_400(client, unit_square_ccw):
     assert (await client.get(f"/{geoid}?format=xml")).status_code == 400
 
 
-async def test_external_id_resolver_negotiates_wkt(client, unit_square_ccw):
+async def test_external_id_resolver_negotiates_wkt(client, ext_collection, unit_square_ccw):
     # The (external_id, collection) resolver shares the same output_format
     # dependency as the root resolver — pin that WKT negotiation works there too.
+    # (A managed collection: the public one no longer resolves by external_id.)
     feature = dict(unit_square_ccw, id="ext-wkt")
-    minted = await client.post("/collections/public/items", json=feature)
+    minted = await client.post(f"/collections/{ext_collection}/items", json=feature)
     assert minted.status_code == 201
 
-    resp = await client.get("/collections/public/external/ext-wkt?format=wkt")
+    resp = await client.get(f"/collections/{ext_collection}/external/ext-wkt?format=wkt")
     assert resp.status_code == 200
     assert resp.headers["content-type"].startswith("text/plain")
     assert resp.text.startswith("POLYGON")
     # And the default stays GeoJSON.
-    default = await client.get("/collections/public/external/ext-wkt")
+    default = await client.get(f"/collections/{ext_collection}/external/ext-wkt")
     assert default.headers["content-type"].startswith("application/geo+json")
 
 

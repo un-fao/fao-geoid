@@ -95,6 +95,18 @@ class PlaceNotFoundError(GeoidServiceError):
         super().__init__(f"place not found: {identifier}")
 
 
+class PublicExternalIdLookupError(GeoidServiceError):
+    """external_id lookup is unsupported in the reserved public collection (400).
+
+    Public external_id values are stored but not unique (migration 0012), so a
+    lookup could match many rows — an explicit 400, never a masking 404.
+    """
+
+    def __init__(self, slug: str) -> None:
+        self.slug = slug
+        super().__init__(f"external_id lookup is not available in the public collection {slug!r}")
+
+
 class BulkLimitExceededError(GeoidServiceError):
     """A bulk POST FeatureCollection exceeds ``GEOID_BULK_MAX_FEATURES`` (413).
 

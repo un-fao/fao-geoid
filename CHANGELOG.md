@@ -4,6 +4,23 @@ All notable changes to GeoID are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed — BREAKING
+- **The public default collection no longer resolves features by
+  `external_id`.** `GET /collections/public/external/{external_id}` now
+  answers 400 with an explicit message ("external_id lookup is not available
+  in the public collection") — deliberately not a 404, which stays reserved
+  for genuinely unknown ids. Resolution by geoid (`GET /{geoid}`) is
+  unaffected. Private/managed collections keep the external-id resolver
+  unchanged.
+- **Duplicate `external_id` values are now accepted in the public default
+  collection.** Submitted values are still stored and echoed on member reads,
+  but they are no longer unique there — re-submitting an `external_id` with a
+  different geometry mints normally instead of failing with 409. Private/
+  managed collections keep exact per-collection uniqueness and the 409
+  conflict answer.
+
 ## [0.6.0] - 2026-07-16
 
 ### Changed — BREAKING
