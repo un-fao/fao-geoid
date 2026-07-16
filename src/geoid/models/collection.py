@@ -23,11 +23,8 @@ class Collection(Base):
     slug: Mapped[str] = mapped_column(String, nullable=False)
     title: Mapped[str | None] = mapped_column(String, nullable=True)
     # When true anyone may write (anonymous included — the reserved `public`).
-    # Mapped onto the legacy `writable_anon` DB column: the 2026-07-09 rename is
-    # API/ORM-only, deliberately without a migration. Use `public_write` in
-    # Python, `writable_anon` in SQL.
     public_write: Mapped[bool] = mapped_column(
-        "writable_anon", Boolean, nullable=False, server_default=text("false")
+        Boolean, nullable=False, server_default=text("false")
     )
     # Governs only dedup-409 incumbent disclosure to non-members (see
     # registry_service._may_disclose_incumbent); feature reads are never
