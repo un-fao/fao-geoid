@@ -160,9 +160,10 @@ def build_feature(settings: Settings, row: ItemRow, *, full: bool = True) -> Fea
     ``full=False`` is the masked, non-member body (metadata visibility is
     membership-based — sysadmin / creator / any grant; client ruling 2026-07-09):
     the bare geometry with properties exactly ``{geoid, uri}`` and links exactly
-    self + the WKT alternate. No submitted properties, provenance, external_id,
-    created_at, collection link, or predecessor link. The full branch is
-    byte-identical to what this function always produced.
+    self + the WKT alternate. No provenance, external_id, created_at, collection
+    link, or predecessor link. The full branch carries server metadata only —
+    submitted properties are never persisted (geoid-prov/0.2), so nothing is
+    echoed back.
     """
     geoid: uuid.UUID = row["geoid"]
     geometry = json.loads(row["geometry"]) if row.get("geometry") else None
@@ -176,13 +177,11 @@ def build_feature(settings: Settings, row: ItemRow, *, full: bool = True) -> Fea
         )
 
     provenance = dict(row.get("provenance") or {})
-    submitted = dict(provenance.pop("submitted_properties", {}) or {})
 
     created_at = row.get("created_at")
     created_iso = created_at.isoformat() if isinstance(created_at, datetime) else created_at
 
     properties: dict[str, Any] = {
-        **submitted,
         "geoid": str(geoid),
         "uri": uri_for(geoid, settings.base_url_clean),
         "external_id": row.get("external_id"),

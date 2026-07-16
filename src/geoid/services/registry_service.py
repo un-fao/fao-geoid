@@ -19,7 +19,7 @@ from geoid.config import Settings
 from geoid.deps import Principal
 from geoid.domain.geometry_identity import DEGENERATE_MESSAGE
 from geoid.domain.identifiers import derive_identifiers
-from geoid.domain.provenance import build_provenance, extract_client
+from geoid.domain.provenance import build_provenance
 from geoid.models import (
     PK_GEOID_REGISTRY,
     PK_PLACE,
@@ -73,8 +73,6 @@ def _build_write_inputs(
     provenance = build_provenance(
         created_by=principal.subject,
         originating_instance=settings.instance_id,
-        client=extract_client(feature.properties),
-        extra={"submitted_properties": feature.properties or {}},
     )
     return geometry_to_geojson(feature), feature.external_id, provenance
 

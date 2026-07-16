@@ -5,6 +5,7 @@ from __future__ import annotations
 import uuid
 
 import pytest
+from sqlalchemy import text
 
 pytestmark = pytest.mark.integration
 
@@ -22,27 +23,48 @@ async def test_post_polygon_mints_geoid_uri(client, unit_square_ccw):
     assert resp.headers["Location"] == body["uri"]
 
 
-async def test_anonymous_post_captures_whisp_client_provenance(client, admin_headers):
+async def test_submitted_properties_are_accepted_but_never_persisted(
+    client, session, admin_headers
+):
+    # RFC 7946: properties (incl. the _whisp block) and unknown foreign top-level
+    # members must be accepted — but geoid-prov/0.2 persists none of it.
     feature = {
         "type": "Feature",
         "id": "whisp-plot",
         "geometry": {"type": "Polygon", "coordinates": [[[1, 1], [2, 1], [2, 2], [1, 2], [1, 1]]]},
-        "properties": {"_whisp": {"version": "2.1.0"}, "area_ha": 1.0},
+        "properties": {"_whisp": {"version": "2.1.0"}, "area_ha": 1.0, "crop": "cocoa"},
+        "custom_member": "ignored",
     }
     resp = await client.post("/collections/public/items", json=feature)
     assert resp.status_code == 201
     geoid = resp.json()["geoid"]
 
-    # Read as sysadmin: full metadata is member-only (an anonymous GET gets the
-    # masked geometry-only body — pinned in test_private_collections).
+    # Read as sysadmin (full body is member-only): properties are exactly the
+    # server-collected metadata — nothing submitted is echoed back.
     feat = (await client.get(f"/{geoid}", headers=admin_headers)).json()
-    # client-submitted attributes round-trip; provenance records the whisp client.
-    assert feat["properties"]["area_ha"] == 1.0
-    prov = feat["properties"]["_geoid_provenance"]
-    assert prov["created_by"] is None  # anonymous
-    assert prov["client"]["name"] == "whisp"
-    assert prov["client"]["version"] == "2.1.0"
-    assert prov["originating_instance"] == "test-instance"
+    assert set(feat["properties"]) == {
+        "geoid",
+        "uri",
+        "external_id",
+        "created_at",
+        "originating_instance",
+        "_geoid_provenance",
+    }
+    assert feat["properties"]["_geoid_provenance"] == {
+        "schema": "geoid-prov/0.2",
+        "created_by": None,
+        "originating_instance": "test-instance",
+    }
+
+    # Pin STORAGE, not just presentation: the provenance jsonb is the 3-key contract.
+    stored = (
+        await session.execute(text("SELECT provenance FROM place WHERE id = :id"), {"id": geoid})
+    ).scalar_one()
+    assert stored == {
+        "schema": "geoid-prov/0.2",
+        "created_by": None,
+        "originating_instance": "test-instance",
+    }
 
 
 async def test_identical_geometry_returns_409_with_incumbent_geoid(

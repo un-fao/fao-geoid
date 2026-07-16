@@ -57,8 +57,8 @@ class PlaceCreate(Feature[SupportedGeometry, dict[str, Any] | None]):
     MultiPolygon in EPSG:4326 (lines and GeometryCollection are rejected),
     supplied either as a GeoJSON geometry object **or** as a WKT string
     (a vendor extension; both single create and per-feature bulk). ``properties`` is
-    accepted verbatim into provenance/jsonb; the recognised ``_whisp`` block is
-    mirrored as client provenance.
+    accepted (RFC 7946) but never persisted — provenance records only
+    schema/created_by/originating_instance.
     """
 
     @model_validator(mode="before")

@@ -10,7 +10,7 @@ unknown collection, 403 anonymous-into-non-writable, and a 422 envelope error).
 from __future__ import annotations
 
 import pytest
-from sqlalchemy import func, select
+from sqlalchemy import func, select, text
 
 from geoid.models import Collection, Place
 
@@ -49,6 +49,28 @@ async def test_bulk_mints_distinct_resolvable_geoids(client):
         resolved = await client.get(f"/{geoid}")
         assert resolved.status_code == 200
         assert resolved.json()["properties"]["geoid"] == geoid
+
+
+async def test_bulk_submitted_properties_are_accepted_but_never_persisted(client, session):
+    # _mint_one parity with the single route: rich properties are accepted but the
+    # stored provenance is exactly the geoid-prov/0.2 3-key contract.
+    rich = {**_square(0, 0), "properties": {"_whisp": {"version": "2.1.0"}, "crop": "cocoa"}}
+    resp = await client.post(_BULK, json=_fc(rich, _square(5, 5)))
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["summary"] == {"received": 2, "accepted": 2, "rejected": 0}
+
+    for accepted in body["accepted"]:
+        stored = (
+            await session.execute(
+                text("SELECT provenance FROM place WHERE id = :id"), {"id": accepted["geoid"]}
+            )
+        ).scalar_one()
+        assert stored == {
+            "schema": "geoid-prov/0.2",
+            "created_by": None,
+            "originating_instance": "test-instance",
+        }
 
 
 async def test_bulk_geoid_matches_single_route_hash(client, admin_headers, unit_square_ccw):

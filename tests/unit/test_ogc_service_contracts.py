@@ -78,7 +78,11 @@ def _rich_row() -> dict:
     return {
         **_item_row(),
         "external_id": "ext-9",
-        "provenance": {"created_by": "kc-1", "submitted_properties": {"crop": "cocoa"}},
+        "provenance": {
+            "schema": "geoid-prov/0.2",
+            "created_by": "kc-1",
+            "originating_instance": "test-instance",
+        },
         "predecessor_id": uuid.UUID("019e0000-0000-7000-8000-000000000009"),
         "originating_instance": "test-instance",
         "collection_id": uuid.UUID("019e0000-0000-7000-8000-00000000000c"),
@@ -117,7 +121,24 @@ def test_full_feature_is_byte_identical_to_the_default():
     assert default == explicit
     assert default.properties["external_id"] == "ext-9"
     assert default.properties["_geoid_provenance"]["created_by"] == "kc-1"
-    assert default.properties["crop"] == "cocoa"
+
+
+def test_full_feature_properties_are_only_server_metadata():
+    feature = ogc_service.build_feature(_settings(), _rich_row())
+    assert set(feature.properties) == {
+        "geoid",
+        "uri",
+        "external_id",
+        "created_at",
+        "originating_instance",
+        "_geoid_provenance",
+        "predecessor_geoid",
+    }
+    assert feature.properties["_geoid_provenance"] == {
+        "schema": "geoid-prov/0.2",
+        "created_by": "kc-1",
+        "originating_instance": "test-instance",
+    }
 
 
 def test_conformance_keeps_core_drops_filter_and_cql2():

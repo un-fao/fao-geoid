@@ -39,4 +39,5 @@ Port a handful of Asset Registry 1.0 / Whisp features into `public` and confirm:
 1. identical geometries collapse to one geoid (dedup),
 2. a real **QGIS / ogr** client loads the collection
    (`ogrinfo "OAPIF:http://localhost:8000" public`),
-3. a Whisp-style feature round-trips (its `_whisp` block lands in provenance).
+3. a Whisp-style feature is accepted as-is (its `properties`, incl. the `_whisp`
+   block, are accepted but not stored).

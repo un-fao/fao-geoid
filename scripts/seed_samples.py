@@ -111,10 +111,9 @@ def main() -> int:
             print(f"\n== Resolve {first_geoid} ==")
             print(f"  uri:         {props['uri']}")
             if "external_id" in props:
-                print(
-                    f"  external_id: {props['external_id']}   commodity: {props.get('commodity')}"
-                )
-                print(f"  provenance:  {props['_geoid_provenance']['client']}")
+                prov = props["_geoid_provenance"]
+                print(f"  external_id: {props['external_id']}")
+                print(f"  provenance:  {prov['schema']} @ {prov['originating_instance']}")
             else:
                 print("  (metadata masked — full features are member/sysadmin-only)")
 
