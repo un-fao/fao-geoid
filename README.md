@@ -47,7 +47,7 @@ geometry** (the same `geom_hash` used for dedup), stored bare as the item id. On
 
 `POST` returns the geoid and its URI, and a 201 `Location` header pointing at that resolver URI. The
 geoid is **immutable**: `place` is INSERT-only (enforced by a DB trigger);
-corrections mint a *new* geoid linked via `predecessor_id`, and the original resolves forever.
+corrections mint a *new* geoid, and the original resolves forever.
 
 Identity and deduplication now share **one fingerprint**: the geoid is derived from the same **global**
 canonical `geom_hash` (see below) that enforces uniqueness, so the two can never disagree and the same

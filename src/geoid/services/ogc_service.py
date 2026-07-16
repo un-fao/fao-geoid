@@ -49,7 +49,6 @@ class ItemRow(TypedDict, total=False):
     external_id: str | None
     provenance: dict[str, Any]
     created_at: datetime
-    predecessor_id: uuid.UUID | None
     originating_instance: str | None
     collection_slug: str
     collection_id: uuid.UUID
@@ -134,34 +133,14 @@ def _resolver_links(settings: Settings, geoid: uuid.UUID) -> list[Link]:
     ]
 
 
-def _feature_links(
-    settings: Settings, *, geoid: uuid.UUID, collection: str, predecessor_id: uuid.UUID | None
-) -> list[Link]:
-    base = settings.base_url_clean
-    links = [
-        *_resolver_links(settings, geoid),
-        Link(href=f"{base}/collections/{collection}", rel="collection", type=_JSON),
-    ]
-    if predecessor_id is not None:
-        links.append(
-            Link(
-                href=f"{base}/{predecessor_id}",
-                rel="predecessor-version",
-                type=_GEOJSON,
-                title="Superseded geoid (STAC version extension)",
-            )
-        )
-    return links
-
-
 def build_feature(settings: Settings, row: ItemRow, *, full: bool = True) -> FeatureModel:
     """Assemble an OGC feature from a place read row.
 
     ``full=False`` is the masked, non-member body (metadata visibility is
     membership-based — sysadmin / creator / any grant; client ruling 2026-07-09):
     the bare geometry with properties exactly ``{geoid, uri}`` and links exactly
-    self + the WKT alternate. No provenance, external_id, created_at, collection
-    link, or predecessor link. The full branch carries server metadata only —
+    self + the WKT alternate. No provenance, external_id, created_at, or
+    collection link. The full branch carries server metadata only —
     submitted properties are never persisted (geoid-prov/0.2), so nothing is
     echoed back.
     """
@@ -189,15 +168,15 @@ def build_feature(settings: Settings, row: ItemRow, *, full: bool = True) -> Fea
         "originating_instance": row.get("originating_instance"),
         "_geoid_provenance": provenance,
     }
-    if row.get("predecessor_id") is not None:
-        properties["predecessor_geoid"] = str(row["predecessor_id"])
 
-    links = _feature_links(
-        settings,
-        geoid=geoid,
-        collection=row["collection_slug"],
-        predecessor_id=row.get("predecessor_id"),
-    )
+    links = [
+        *_resolver_links(settings, geoid),
+        Link(
+            href=f"{settings.base_url_clean}/collections/{row['collection_slug']}",
+            rel="collection",
+            type=_JSON,
+        ),
+    ]
 
     return FeatureModel(id=str(geoid), geometry=geometry, properties=properties, links=links)
 

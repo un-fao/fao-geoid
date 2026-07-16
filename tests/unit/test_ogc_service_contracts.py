@@ -83,7 +83,6 @@ def _rich_row() -> dict:
             "created_by": "kc-1",
             "originating_instance": "test-instance",
         },
-        "predecessor_id": uuid.UUID("019e0000-0000-7000-8000-000000000009"),
         "originating_instance": "test-instance",
         "collection_id": uuid.UUID("019e0000-0000-7000-8000-00000000000c"),
     }
@@ -100,12 +99,6 @@ def test_masked_feature_links_are_exactly_self_and_wkt_alternate():
     feature = ogc_service.build_feature(_settings(), _rich_row(), full=False)
     assert [link.rel for link in feature.links] == ["self", "alternate"]
     assert _wkt_alternate(feature.links) is not None
-
-
-def test_masked_feature_drops_predecessor_link_even_when_set():
-    feature = ogc_service.build_feature(_settings(), _rich_row(), full=False)
-    assert all(link.rel != "predecessor-version" for link in feature.links)
-    assert "predecessor_geoid" not in feature.properties
 
 
 def test_masked_feature_keeps_the_bare_geometry():
@@ -132,7 +125,6 @@ def test_full_feature_properties_are_only_server_metadata():
         "created_at",
         "originating_instance",
         "_geoid_provenance",
-        "predecessor_geoid",
     }
     assert feature.properties["_geoid_provenance"] == {
         "schema": "geoid-prov/0.2",

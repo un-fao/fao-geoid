@@ -194,7 +194,7 @@ def register_exception_handlers(app: FastAPI) -> None:
         if sqlstate == SQLSTATE_RESTRICT_VIOLATION:
             return _error(
                 status.HTTP_409_CONFLICT,
-                "place is immutable; corrections mint a new geoid via predecessor_id",
+                "place is immutable; corrections mint a new geoid",
             )
         # Unrecognised integrity failure — a NOT NULL violation (23502) is a server
         # bug, and pg_fields degrading to (None, None) on a driver change lands here

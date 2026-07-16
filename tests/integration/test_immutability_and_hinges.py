@@ -31,6 +31,30 @@ async def test_delete_on_place_is_blocked_by_trigger(client, session, unit_squar
         await session.flush()
 
 
+async def test_predecessor_id_is_fully_dropped(client, session, unit_square_ccw):
+    # Migration 0013: the supersession column is gone and the immutability
+    # message no longer references it.
+    column_count = (
+        await session.execute(
+            text(
+                "SELECT count(*) FROM information_schema.columns "
+                "WHERE table_name = 'place' AND column_name = 'predecessor_id'"
+            )
+        )
+    ).scalar_one()
+    assert column_count == 0
+
+    geoid = await _mint(client, unit_square_ccw)
+    with pytest.raises(DBAPIError) as excinfo:
+        await session.execute(
+            text("UPDATE place SET external_id = 'hacked' WHERE id = :id"), {"id": geoid}
+        )
+        await session.flush()
+    message = str(excinfo.value)
+    assert "corrections mint a new geoid" in message
+    assert "predecessor_id" not in message
+
+
 async def test_geoid_registry_hinge_populated_on_mint(client, session, unit_square_ccw):
     geoid = await _mint(client, unit_square_ccw)
     row = (

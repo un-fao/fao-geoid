@@ -230,7 +230,6 @@ _READ_COLUMNS = """
     p.external_id,
     p.provenance,
     p.created_at,
-    p.predecessor_id,
     p.originating_instance
 """
 
