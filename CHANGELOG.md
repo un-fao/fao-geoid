@@ -4,6 +4,20 @@ All notable changes to GeoID are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.0] - 2026-07-16
+
+### Removed
+- **Supersession (`predecessor`) support is removed entirely** — the concept
+  has no basis in OGC API Features (Part 1 or the Part 4 draft). The
+  always-null `predecessor_geoid` feature property and the never-rendered
+  `predecessor-version` link are gone from feature responses, and the unused
+  `place.predecessor_id` column (never writable, never populated) is dropped
+  by migration 0013. Corrections continue to mint a new geoid.
+
+### Changed
+- The immutability error message now reads "place is immutable; corrections
+  mint a new geoid" (it no longer names the removed `predecessor_id` column).
+
 ## [0.7.0] - 2026-07-16
 
 ### Changed — BREAKING
