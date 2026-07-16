@@ -4,7 +4,7 @@ All notable changes to GeoID are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.7.0] - 2026-07-16
 
 ### Changed — BREAKING
 - **The public default collection no longer resolves features by
@@ -20,6 +20,11 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   different geometry mints normally instead of failing with 409. Private/
   managed collections keep exact per-collection uniqueness and the 409
   conflict answer.
+
+### Changed
+- The configured public-collection slug (`GEOID_PUBLIC_COLLECTION`) is now
+  validated at startup; a malformed value fails boot loudly instead of
+  seeding an unreachable collection.
 
 ## [0.6.0] - 2026-07-16
 
