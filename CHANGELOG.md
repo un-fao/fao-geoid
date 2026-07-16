@@ -4,6 +4,36 @@ All notable changes to GeoID are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.0] - 2026-07-16
+
+### Changed — BREAKING
+- **Submitted feature properties are no longer stored or returned.** A GeoJSON
+  Feature's `properties` object (and any unknown top-level member) is still
+  accepted on every write route, per RFC 7946 — but the registry now persists
+  only the geometry and its own ingestion record. Full feature bodies (member
+  read) no longer echo submitted attributes: `properties` carries exactly the
+  server-derived fields (`geoid`, `uri`, `external_id`, `created_at`,
+  `originating_instance`, `_geoid_provenance`, and `predecessor_geoid` when
+  set). The `_geoid_provenance` block is now exactly
+  `{schema: "geoid-prov/0.2", created_by, originating_instance}` — the
+  `client` descriptor and `submitted_properties` are gone. Properties already
+  stored by earlier versions are removed by migration; minted geoids, dedup
+  behavior, and all identifiers are unaffected.
+
+### Fixed
+- Requests carrying NUL bytes (a `%00` path parameter or an escaped `\u0000`
+  in a JSON body) now answer 422 with a clear message instead of 500. A NUL
+  inside a bulk FeatureCollection aborts the whole batch as 422 with nothing
+  persisted; resubmitting the cleaned batch converges via dedup.
+
+### Added
+- **Optional HTTP caching for the public resolvers**, off by default
+  (`GEOID_RESOLVER_CACHE_MAX_AGE=0`). When enabled, anonymous 200s from
+  `GET /{geoid}` and the external-id lookup carry a strong `ETag`,
+  `Cache-Control: public, max-age=<n>` and `Vary`, and answer conditional
+  `If-None-Match` requests with 304; authenticated responses are always
+  `private, no-store` and never cached. Disabled in production.
+
 ## [0.5.2] - 2026-07-11
 
 ### Changed
