@@ -75,7 +75,6 @@ addopts = "-ra"
 markers = [
     "unit: pure unit tests, no external services",
     "integration: requires an ephemeral PostGIS container (Docker)",
-    "load: load/performance tests (k6 / locust)",
 ]
 
 [tool.ruff]

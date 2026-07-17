@@ -259,17 +259,26 @@ jobs:
       - name: Smoke test new revision
         env:
           GEOID_PUBLIC_COLLECTION: ${{ vars.GEOID_PUBLIC_COLLECTION }}
-          # Public base the service mints links under (origin + sub-path). smoke_test.py
-          # asserts returned links carry THIS host, so it must hit the public URL — not
-          # the direct *.run.app URL, where root_path isn't stripped.
+          # Public base the service mints links under (origin + sub-path). Every smoke
+          # run asserts returned links carry THIS host (GEOID_EXPECTED_LINK_BASE), so a
+          # GEOID_BASE_URL misconfiguration fails the deploy even when smoking the
+          # direct *.run.app URL.
           PUBLIC_URL: ${{ vars.GEOID_BASE_URL }}${{ vars.GEOID_ROOT_PATH }}
         run: |
-          # Hard gate: liveness + DB probe on the direct Cloud Run URL (served at root,
-          # needs no proxy). The revision must boot and reach Postgres or the deploy fails.
+          # Hard gate on the direct Cloud Run URL (always exists, served at root, no
+          # LB/DNS dependency): liveness + DB probe, then the full end-to-end smoke.
+          # Review deploys add the idempotent --mint sentinel (first run 201, every
+          # later run a dedup 409) so each review deploy exercises the whole write
+          # path; production smoke stays read-only (no test rows in prod).
           URL=$(gcloud run services describe "$SERVICE" --region "$REGION" --project "$PROJECT" --format='value(status.url)')
           curl --fail --silent --show-error "$URL/health"
-          # End-to-end link/identifier check against the public URL. Best-effort: on a
-          # fresh review env the LB/DNS may not be wired yet, so don't fail the deploy.
+          MINT=()
+          [ "$TARGET_ENV" = "production" ] || MINT=(--mint)
+          GEOID_BASE_URL="$URL" GEOID_EXPECTED_LINK_BASE="$PUBLIC_URL" \
+            GEOID_COLLECTION="$GEOID_PUBLIC_COLLECTION" \
+            uv run --no-project --with httpx python scripts/smoke_test.py "${MINT[@]}"
+          # Best-effort repeat via the public URL: on a fresh review env the LB/DNS may
+          # not be wired yet, so this warns instead of failing the deploy.
           GEOID_BASE_URL="$PUBLIC_URL" GEOID_COLLECTION="$GEOID_PUBLIC_COLLECTION" \
             uv run --no-project --with httpx python scripts/smoke_test.py \
             || echo "::warning::end-to-end smoke against $PUBLIC_URL skipped/failed (LB/DNS not ready?)"

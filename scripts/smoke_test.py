@@ -16,9 +16,12 @@ At most one permanent row per catalog, ever.
     uv run python scripts/smoke_test.py --mint     # + idempotent write probe
 
 Env:
-    GEOID_BASE_URL     default http://localhost:8000 — the public URL under test;
+    GEOID_BASE_URL     default http://localhost:8000 — the URL under test;
                        every returned link/uri must carry its host (catches the
                        BASE_URL misconfiguration, the #1 launch risk)
+    GEOID_EXPECTED_LINK_BASE
+                       optional; the public base links must carry when it differs
+                       from the URL under test (smoking the direct *.run.app URL)
     GEOID_COLLECTION   default public
     GEOID_BEARER_TOKEN a valid Keycloak access token (JWT). One carrying the
                        sysadmin role enables the admin-gated collection read checks
@@ -40,6 +43,9 @@ import httpx
 from _timing import print_timings, record
 
 BASE = os.environ.get("GEOID_BASE_URL", "http://localhost:8000").rstrip("/")
+# Links/uris are minted under the server's configured public base, which can differ
+# from the URL under test (e.g. smoking the direct *.run.app URL behind the LB).
+EXPECTED_LINK_BASE = os.environ.get("GEOID_EXPECTED_LINK_BASE", "").rstrip("/") or BASE
 COLLECTION = os.environ.get("GEOID_COLLECTION", "public")
 # The server's reserved public collection: its external_id values are stored
 # but neither unique nor resolvable (migration 0012), so the resolve probe
@@ -79,7 +85,7 @@ def _headers() -> dict[str, str]:
 
 
 def _expected_netloc() -> str:
-    return urlsplit(BASE).netloc
+    return urlsplit(EXPECTED_LINK_BASE).netloc
 
 
 def _get_json(

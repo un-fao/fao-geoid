@@ -1,43 +1,41 @@
-# Load / QA
+# Load / performance testing
 
-These exercise the three hot paths to demonstrate **correct dedup under load** and a
-**credible scaling story** (single-instance, few-hundred RPS) — not billion-scale.
+Load tests are **on-demand campaign tools, never CI gates** — the deploy pipeline gates
+on the functional suite, the golden-vector identity canary, and the post-deploy smoke
+test; latency/throughput work runs out-of-band against a deployed environment.
 
-| Path | What it measures | Target (demo) |
-|------|------------------|---------------|
-| `mint`  | single-POST (mint + insert) p95 | `< 500 ms` |
-| `dedup` | dedup-lookup p95 (same geometry) | `< 300 ms` |
-| `read`  | OGC items read p95 | `< 300 ms` |
+## The blessed harness
 
-## Prereqs
-
-A running API + PostGIS (e.g. `docker compose up` from the repo root), and the
-reserved `public` collection (auto-created on startup).
-
-## k6 (preferred, no Python dep)
+`scripts/loadtest.py` — dependency-free (httpx via `uv run`), correct on the current API
+contract: a duplicate-geometry POST is a **409 carrying the incumbent geoid** (never a
+200/201), bulk is `POST /collections/{id}/items/bulk` → 200 + `BulkReport`.
 
 ```bash
-brew install k6   # or https://k6.io/docs/get-started/installation/
-GEOID_BASE_URL=http://localhost:8000 k6 run tests/load/k6_smoke.js
+uv run python scripts/loadtest.py --help
 ```
 
-The run fails its thresholds if p95 latencies or the error rate exceed the targets
-above. `geoid_dedup_hits` counts how many `dedup` POSTs returned `200` (the
-incumbent geoid) — proof the dedup path is firing under concurrency.
+The full stress/scalability campaign kit (corpus generator, bulk-ingest runner,
+read/write concurrency ramps, Cloud Monitoring pulls, wipe SQL) lives in the gitignored
+`local-scripts/stress-campaign/`; campaign reports land in `local-scripts/docs/`.
 
-## Locust (alternative)
+Historical note: the k6/locust scripts that used to live here predated the dedup-409
+contract (they scored a dedup 409 as a failure) and were removed 2026-07-17 — don't
+resurrect them; extend `scripts/loadtest.py` or the campaign kit instead.
 
-```bash
-pip install locust          # not a project dependency
-locust -f tests/load/locustfile.py --host http://localhost:8000
-# open http://localhost:8089
-```
+## When to re-run a campaign
+
+No schedule. Re-run on these triggers:
+
+- the bulk-write contract or `GEOID_BULK_MAX_FEATURES` changes
+- Cloud Run instance shape / concurrency or Cloud SQL tier is resized
+- before onboarding the real ~40k-feature client load
+- a DB-tier or scaling decision needs fresh numbers (see `local-scripts/docs/SCALING.md`)
 
 ## QA with real data
 
 Port a handful of Asset Registry 1.0 / Whisp features into `public` and confirm:
-1. identical geometries collapse to one geoid (dedup),
-2. a real **QGIS / ogr** client loads the collection
-   (`ogrinfo "OAPIF:http://localhost:8000" public`),
+1. identical geometries collapse to one geoid (dedup 409 naming the incumbent),
+2. a real **QGIS / ogr** client resolves a geoid
+   (`GET /{geoid}` — there is no public items listing to load as a layer),
 3. a Whisp-style feature is accepted as-is (its `properties`, incl. the `_whisp`
-   block, are accepted but not stored).
+   block, are accepted but not stored — geoid-prov/0.2).
