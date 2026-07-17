@@ -4,6 +4,32 @@ All notable changes to GeoID are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.0] - 2026-07-17
+
+### Added
+- **Executable request-body examples in Swagger** for the single and bulk mint
+  endpoints: obviously-dummy geometries at the identity precision (7 decimals),
+  distinct between the two endpoints so first tries never cross-conflict, with
+  the `collection_id` path field prefilled with `public`. Repeat clicks answer
+  the documented dedup 409 — a live demonstration, not an error.
+- A **Performance** section in the README with measured staging numbers: bulk
+  ingest ~190 features/s, reads linear to ~280 RPS, ~91 single mints/s, and the
+  scaling characteristics behind them.
+
+### Changed
+- **The `properties` member is now optional on write bodies** (deliberate
+  RFC 7946 §3.2 leniency): a Feature may omit it or send `null` instead of an
+  empty object. Submitted properties remain accepted-but-never-persisted, per
+  0.6.0.
+- The post-deploy smoke test is now a **hard release gate** run against the
+  direct service URL on every deploy (review deploys also exercise the full
+  write path via an idempotent sentinel); minted links are still verified
+  against the public base URL.
+
+### Removed
+- The stale k6/locust load-test scripts, which predated the dedup-409 contract;
+  `scripts/loadtest.py` is the maintained load harness.
+
 ## [0.8.0] - 2026-07-16
 
 ### Removed
