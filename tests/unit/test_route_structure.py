@@ -12,10 +12,13 @@ review: it fails until the route is added here (with its authz mechanism named).
 
 from __future__ import annotations
 
+import json
+
 import pytest
 from fastapi.routing import APIRoute
 
 from geoid.main import create_app
+from geoid.schemas.place import BulkFeatureCollection, PlaceCreate
 
 pytestmark = pytest.mark.unit
 
@@ -45,6 +48,55 @@ def test_all_known_literal_single_segment_routes_precede_the_catchall():
     assert {"/", "/conformance", "/collections", "/health", "/docs", "/redoc", "/openapi.json"} <= (
         before
     )
+
+
+@pytest.mark.parametrize(
+    "path",
+    ["/collections/{collection_id}/items", "/collections/{collection_id}/items/bulk"],
+)
+def test_registry_post_prefills_collection_id_with_the_public_collection(path):
+    # Swagger seeds the Try-it-out box from `schema.example` — a FastAPI upgrade that
+    # moved or dropped the key would silently empty the box. The absent `examples` map
+    # is the no-dropdown requirement: it seeds the box too, but via a one-option select.
+    parameters = create_app().openapi()["paths"][path]["post"]["parameters"]
+    collection_id = next(p for p in parameters if p["name"] == "collection_id")
+    assert collection_id["schema"]["example"] == "public"
+    assert "examples" not in collection_id
+
+
+def test_registry_post_body_schemas_carry_executable_examples():
+    # The body examples must stay EXECUTABLE (first click mints) and properties-free
+    # (an omitted properties member is the point of the leniency). Validating them
+    # through the models themselves pins executability without duplicating literals;
+    # distinct geometries pin that single-then-bulk first clicks never cross-409.
+    schemas = create_app().openapi()["components"]["schemas"]
+
+    place = schemas["PlaceCreate"]
+    assert place["required"] == ["type", "geometry"]
+    assert "properties" not in place["example"]
+    PlaceCreate.model_validate(place["example"])
+
+    bulk = schemas["BulkFeatureCollection"]
+    BulkFeatureCollection.model_validate(bulk["example"])
+    for feature in bulk["example"]["features"]:
+        assert "properties" not in feature
+        PlaceCreate.model_validate(feature)
+
+    geometries = [place["example"]["geometry"]] + [
+        f["geometry"] for f in bulk["example"]["features"]
+    ]
+    assert len({json.dumps(g, sort_keys=True) for g in geometries}) == len(geometries)
+
+
+@pytest.mark.parametrize(
+    "path",
+    ["/collections/{collection_id}/items", "/collections/{collection_id}/items/bulk"],
+)
+def test_registry_post_body_has_no_examples_dropdown(path):
+    # Mirror of the path-param pin: the body must seed from `schema.example` only —
+    # an `examples` map would render as a Swagger dropdown.
+    content = create_app().openapi()["paths"][path]["post"]["requestBody"]["content"]
+    assert "examples" not in content["application/json"]
 
 
 def test_every_mutating_route_is_in_the_authorized_inventory():

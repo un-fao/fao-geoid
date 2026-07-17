@@ -59,6 +59,14 @@ def test_external_id_is_none_when_feature_has_no_id():
     assert feature.external_id is None
 
 
+def test_feature_without_properties_is_accepted():
+    # Deliberate RFC 7946 input leniency: an omitted properties member parses as null.
+    feature = PlaceCreate.model_validate(
+        {"type": "Feature", "geometry": _VALID_POLYGON["geometry"]}
+    )
+    assert feature.properties is None
+
+
 def test_accepts_multipolygon():
     feature = PlaceCreate.model_validate(
         {

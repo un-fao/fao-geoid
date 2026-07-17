@@ -73,6 +73,15 @@ async def test_bulk_submitted_properties_are_accepted_but_never_persisted(client
         }
 
 
+async def test_bulk_feature_without_properties_member_is_accepted(client):
+    # The single route's RFC 7946 leniency holds per-feature: no properties member
+    # is accepted, never a schema_invalid reject.
+    bare = {"type": "Feature", "geometry": _square(0, 0)["geometry"]}
+    resp = await client.post(_BULK, json=_fc(bare, _square(5, 5)))
+    assert resp.status_code == 200
+    assert resp.json()["summary"] == {"received": 2, "accepted": 2, "rejected": 0}
+
+
 async def test_bulk_geoid_matches_single_route_hash(client, admin_headers, unit_square_ccw):
     # Hash parity: the same geometry minted via the single route is recognised as a
     # duplicate by the bulk route, and the conflict names the single-route geoid —

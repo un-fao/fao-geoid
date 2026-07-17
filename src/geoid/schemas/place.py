@@ -9,7 +9,7 @@ from typing import Any, Literal
 
 from geojson_pydantic import Feature
 from geojson_pydantic.geometries import MultiPoint, MultiPolygon, Point, Polygon
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from geoid.domain.geometry_format import decode_geometry
 from geoid.domain.geometry_identity import DegenerateGeometryError, canonical_bytes
@@ -49,6 +49,28 @@ def _has_z(coordinates: Any) -> bool:
     return False
 
 
+# Swagger "Try it out" bodies. Coordinates are obviously-dummy sequential-digit runs
+# at the 7-decimal identity precision (1e-7° lattice) — executable, never a real place.
+# The single and bulk polygons are DISTINCT so first-click single-then-bulk both mint
+# instead of cross-409ing (a repeat of either answers 409/geometry_conflict: global dedup).
+_EXAMPLE_FEATURE = {
+    "type": "Feature",
+    "id": "my-plot-001",
+    "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+            [
+                [12.3456789, 45.6789012],
+                [12.456789, 45.6789012],
+                [12.456789, 45.7890123],
+                [12.3456789, 45.7890123],
+                [12.3456789, 45.6789012],
+            ]
+        ],
+    },
+}
+
+
 class PlaceCreate(Feature[SupportedGeometry, dict[str, Any] | None]):
     """Incoming GeoJSON Feature for a place.
 
@@ -56,10 +78,21 @@ class PlaceCreate(Feature[SupportedGeometry, dict[str, Any] | None]):
     (collection-scoped unique). Geometry must be a Point/MultiPoint/Polygon/
     MultiPolygon in EPSG:4326 (lines and GeometryCollection are rejected),
     supplied either as a GeoJSON geometry object **or** as a WKT string
-    (a vendor extension; both single create and per-feature bulk). ``properties`` is
-    accepted (RFC 7946) but never persisted — provenance records only
+    (a vendor extension; both single create and per-feature bulk). ``properties``
+    is optional (a deliberate RFC 7946 input leniency); when provided it is
+    accepted but never persisted — provenance records only
     schema/created_by/originating_instance.
     """
+
+    model_config = ConfigDict(json_schema_extra={"example": _EXAMPLE_FEATURE})
+
+    properties: dict[str, Any] | None = Field(
+        default=None,
+        description=(
+            "Supported per RFC 7946 but never persisted — always omitted if provided "
+            "(provenance records only schema/created_by/originating_instance)."
+        ),
+    )
 
     @model_validator(mode="before")
     @classmethod
@@ -229,6 +262,34 @@ BulkRejectReason = Literal[
 ]
 
 
+_EXAMPLE_FEATURE_COLLECTION = {
+    "type": "FeatureCollection",
+    "features": [
+        {
+            "type": "Feature",
+            "id": "my-point-001",
+            "geometry": {"type": "Point", "coordinates": [12.3456789, 56.7890123]},
+        },
+        {
+            "type": "Feature",
+            "id": "my-plot-002",
+            "geometry": {
+                "type": "Polygon",
+                "coordinates": [
+                    [
+                        [23.456789, 6.7890123],
+                        [23.5678901, 6.7890123],
+                        [23.5678901, 6.8901234],
+                        [23.456789, 6.8901234],
+                        [23.456789, 6.7890123],
+                    ]
+                ],
+            },
+        },
+    ],
+}
+
+
 class BulkFeatureCollection(BaseModel):
     """A GeoJSON FeatureCollection (RFC 7946 §3.3) submitted to the bulk route.
 
@@ -236,6 +297,8 @@ class BulkFeatureCollection(BaseModel):
     its own rather than failing the whole request. An empty ``features`` list or a
     wrong ``type`` is rejected up front with 422.
     """
+
+    model_config = ConfigDict(json_schema_extra={"example": _EXAMPLE_FEATURE_COLLECTION})
 
     type: Literal["FeatureCollection"]
     features: list[dict[str, Any]] = Field(min_length=1)

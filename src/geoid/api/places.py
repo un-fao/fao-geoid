@@ -8,8 +8,9 @@ collections via the shared registry service (no special code path).
 from __future__ import annotations
 
 import uuid
+from typing import Annotated
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Query, Response, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Path, Query, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from geoid.api.format_param import output_format
@@ -37,6 +38,15 @@ from geoid.services.exceptions import (
 )
 
 router = APIRouter(tags=["registry"])
+
+# The reserved public collection always exists (services/bootstrap.py), so it is the one
+# slug guaranteed to work on any deployment — prefills the Swagger Try-it-out box.
+# `schema.example` deliberately, not `openapi_examples`: both seed the box, but the
+# latter renders a one-option Examples dropdown.
+_CollectionId = Annotated[
+    str,
+    Path(json_schema_extra={"example": "public"}),
+]
 
 
 def _created_by(row: dict) -> str | None:
@@ -76,7 +86,7 @@ def _created_by(row: dict) -> str | None:
     },
 )
 async def create_item(
-    collection_id: str,
+    collection_id: _CollectionId,
     feature: PlaceCreate,
     response: Response,
     principal: Principal = Depends(require_principal),
@@ -115,7 +125,7 @@ async def create_item(
     ),
 )
 async def create_items_bulk(
-    collection_id: str,
+    collection_id: _CollectionId,
     body: BulkFeatureCollection,
     principal: Principal = Depends(require_principal),
     session: AsyncSession = Depends(get_session),

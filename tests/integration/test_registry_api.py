@@ -67,6 +67,16 @@ async def test_submitted_properties_are_accepted_but_never_persisted(
     }
 
 
+async def test_feature_without_properties_member_mints(client):
+    # RFC 7946 input leniency: an omitted properties member is treated as null, not 422.
+    feature = {
+        "type": "Feature",
+        "geometry": {"type": "Polygon", "coordinates": [[[3, 1], [4, 1], [4, 2], [3, 2], [3, 1]]]},
+    }
+    resp = await client.post("/collections/public/items", json=feature)
+    assert resp.status_code == 201
+
+
 async def test_identical_geometry_returns_409_with_incumbent_geoid(
     client, admin_headers, unit_square_ccw, unit_square_reversed
 ):
