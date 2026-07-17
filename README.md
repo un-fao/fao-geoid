@@ -131,6 +131,27 @@ uv run pytest -m integration           # ephemeral PostGIS via testcontainers (n
 uv run ruff check .
 ```
 
+## Performance
+
+Measured 2026-07-17 against a staging deployment — Cloud Run (1 vCPU / 1 GiB per instance,
+`--concurrency 16`, max 4 instances, single uvicorn worker) over Cloud SQL PostgreSQL 17 + PostGIS
+(2 vCPU / 4 GB). Load generated from a remote client (~80 ms network RTT); "server" figures are the
+platform-measured request latencies.
+
+| Path | Result |
+|---|---|
+| Bulk ingest — `POST /items/bulk`, 1,000-feature batches, 2 concurrent | **40,000 features in 211 s (~190 features/s)**, zero rejects |
+| Sustained mixed reads — resolve-by-geoid + conformance, 10 min | **101,109 requests @ 168 RPS, zero errors**; client p50 88 ms, server p50 ~6 ms |
+| Read concurrency ramp | linear to **~280 RPS** at 32 client concurrency; server p50 6–10 ms, p95 ≤ 19 ms at every step |
+| Single-mint concurrency ramp | **~91 mints/s** at 32 concurrency, **zero failures**; server p95 ≤ 107 ms |
+
+- The capacity ceiling is the instance slot budget (instances × `--concurrency`). Past it, Cloud Run
+  sheds load with retryable **429s** — the app itself returned no 5xx at any load level tested.
+- The bottleneck is app CPU; the database stayed under 20% CPU in every steady-state window (~40%
+  during bulk ingest). Each additional instance adds roughly **+60–70 RPS reads / +23 mints/s**.
+- A mint costs ~2× a read server-side (hash + dedup arbiter + three-table insert + audit trigger);
+  client-observed latency is dominated by network transport, not the API.
+
 ## Configuration
 
 All configuration is environment-driven (see `.env.example`). The core image imports **no GCP SDK** —
