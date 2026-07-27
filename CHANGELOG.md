@@ -4,6 +4,49 @@ All notable changes to GeoID are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.10.0] - 2026-07-27
+
+### Changed
+- **The three public operations are authentication-invariant until further
+  notice.** `POST /items`, `POST /items/bulk`, and `GET /{geoid}` ignore valid,
+  malformed, expired, and non-Bearer credentials. Public mints record
+  `created_by: null`; the resolver always returns the same geometry +
+  `{geoid, uri}` body and public-cache policy. Managed collection writes and the
+  hidden external-id resolver keep their existing authentication and
+  authorization behavior.
+- **Registering a geometry is now idempotent.** Submitting a shape that is
+  already registered returns **201 with its existing geoid** — the same status
+  code and the same body as a first registration, with no indication that it was
+  a duplicate and no second record written. Re-uploading a file, retrying after a
+  timeout, or sending overlapping batches now simply converge; there is nothing
+  to check first and nothing to reconcile afterwards. **This is a breaking change
+  for anyone who branched on the previous 409.**
+- **The mint response no longer carries a `collection` field.** It reports the
+  geoid and its resolvable URI — not where the record was filed. As a result a
+  repeat submission is byte-for-byte identical to a first one and discloses
+  nothing about collections the caller cannot see.
+- In bulk, an already-registered geometry is reported under **`accepted`** with
+  the geoid it already has, rather than as a rejection. A batch containing two
+  copies of the same shape therefore accepts both, carrying the same geoid.
+
+### Added
+- **`POST /items`** — register one place. The public entry point; no
+  authentication required.
+- **`POST /items/bulk`** — register many places in one request, same terms.
+
+### Removed
+- The duplicate-geometry **409** and its response model, together with the
+  caller-aware incumbent-disclosure rules introduced on 2026-07-09 — with no
+  conflict to report and no collection in the response, they no longer have
+  anything to govern.
+- The `geometry_conflict` per-feature reject reason from bulk reports.
+- **Nine operations from the published API documentation.** The public surface
+  is now exactly three: register a place, register many, and resolve a geoid.
+  Collections, `external_id`, grants, `/manage`, `/me/geoids` and the OGC read
+  surface remain **fully live with unchanged access rules** — they are simply no
+  longer advertised while decisions about their access model are finalised.
+  Hiding them is a documentation change, never a security control.
+
 ## [0.9.0] - 2026-07-17
 
 ### Added
