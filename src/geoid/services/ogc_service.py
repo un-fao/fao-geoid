@@ -128,7 +128,7 @@ def _resolver_links(settings: Settings, geoid: uuid.UUID) -> list[Link]:
     """
     resolver_url = f"{settings.base_url_clean}/{geoid}"
     return [
-        Link(href=resolver_url, rel="self", type=_GEOJSON),
+        Link(href=resolver_url, rel="self", type=_GEOJSON, title="GeoJSON"),
         Link(href=f"{resolver_url}?f=wkt", rel="alternate", type=WKT_MEDIA_TYPE, title="WKT"),
     ]
 

@@ -45,6 +45,7 @@ def test_build_feature_self_link_is_the_resolver():
     self_link = next(link for link in feature.links if link.rel == "self")
     assert self_link.href.endswith("/019e0000-0000-7000-8000-000000000001")
     assert "/items/" not in self_link.href
+    assert self_link.title == "GeoJSON"
 
 
 def _wkt_alternate(links) -> object | None:

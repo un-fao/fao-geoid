@@ -4,6 +4,12 @@ All notable changes to GeoID are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.10.1] - 2026-07-27
+
+### Fixed
+- GeoJSON resolver self links now carry the title `GeoJSON` instead of a null
+  title, matching the existing `WKT` title on alternate links.
+
 ## [0.10.0] - 2026-07-27
 
 ### Changed
