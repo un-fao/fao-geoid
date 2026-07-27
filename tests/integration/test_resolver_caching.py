@@ -2,10 +2,11 @@
 
 ``GEOID_RESOLVER_CACHE_MAX_AGE`` > 0 (the ``cache_client`` fixture pins 3600)
 adds a strong per-representation ETag ``"{geoid}:{format}:{salt}"`` +
-Cache-Control + Vary to ANONYMOUS 200s on the two public resolvers, answering a matching
-If-None-Match with a header-identical empty 304. Authenticated responses are
-``private, no-store`` and never 304. The default 0 (the plain ``client``
-fixture) keeps every response — and /openapi.json — byte-identical to before.
+Cache-Control + Vary to anonymous 200s. The public ``/{geoid}`` resolver ignores
+authentication, so every caller gets the same publicly cacheable representation;
+the hidden external-id resolver remains caller-aware and gives authenticated
+responses ``private, no-store``. Matching public validators answer a header-identical
+empty 304. The default 0 keeps cache headers disabled.
 """
 
 from __future__ import annotations
@@ -97,7 +98,8 @@ async def test_anon_geojson_200_carries_cache_headers_same_etag_on_both_routes(
         assert resp.headers["ETag"].startswith(f'"{geoid}:geojson:')
         assert resp.headers["ETag"].endswith('"')
         assert resp.headers["Cache-Control"] == "public, max-age=3600"
-        assert resp.headers["Vary"] == "Accept, Authorization"
+        expected_vary = "Accept" if path == geoid_path else "Accept, Authorization"
+        assert resp.headers["Vary"] == expected_vary
         etags.append(resp.headers["ETag"])
     assert etags[0] == etags[1]  # one place, one GeoJSON ETag — on either route
 
@@ -113,7 +115,7 @@ async def test_wkt_etag_is_per_representation(cache_client, mint_probe):
         assert resp.headers["ETag"].startswith(f'"{geoid}:wkt:')
         assert resp.headers["ETag"] != geojson_etag
         assert resp.headers["Cache-Control"] == "public, max-age=3600"
-        assert resp.headers["Vary"] == "Accept, Authorization"
+        assert resp.headers["Vary"] == "Accept"
         assert "Link" in resp.headers  # the GeoJSON alternate survives the merge
     assert via_query.headers["ETag"] == via_accept.headers["ETag"]
 
@@ -167,40 +169,47 @@ async def test_non_matching_if_none_match_answers_200(cache_client, mint_probe):
     assert "ETag" in resp.headers
 
 
-# --- Authenticated callers: private, no-store, never 304 ---------------------
+# --- Authentication is inert publicly; hidden resolver stays caller-aware ----
 
 
 @pytest.mark.parametrize("params", [{}, {"f": "wkt"}], ids=["geojson", "wkt"])
-async def test_authed_200_is_private_no_store_without_etag(
+async def test_authed_public_response_matches_anon_while_hidden_resolver_is_private(
     cache_client, mint_probe, make_token, bearer, params
 ):
     _, geoid_path, external_path = await mint_probe(cache_client)
     headers = bearer(make_token(sub="kc-reader"))
-    for path in (geoid_path, external_path):
-        resp = await cache_client.get(path, params=params, headers=headers)
-        assert resp.status_code == 200
-        assert resp.headers["Cache-Control"] == "private, no-store"
-        assert "ETag" not in resp.headers
-        assert "Vary" not in resp.headers
+    anonymous = await cache_client.get(geoid_path, params=params)
+    authenticated = await cache_client.get(geoid_path, params=params, headers=headers)
+    assert authenticated.status_code == anonymous.status_code == 200
+    assert authenticated.content == anonymous.content
+    for header in CACHE_HEADERS:
+        assert authenticated.headers[header] == anonymous.headers[header]
+
+    hidden = await cache_client.get(external_path, params=params, headers=headers)
+    assert hidden.status_code == 200
+    assert hidden.headers["Cache-Control"] == "private, no-store"
+    assert "ETag" not in hidden.headers
+    assert "Vary" not in hidden.headers
 
 
-async def test_member_full_body_is_never_publicly_cacheable(cache_client, make_token, bearer):
-    # The creator sees the FULL body (can_see_metadata) — member-visible data
-    # must never rest in shared caches, whatever future refactors do to the
-    # anonymous/masked branch.
+async def test_public_resolver_masks_creator_and_is_publicly_cacheable(
+    cache_client, make_token, bearer
+):
     headers = bearer(make_token(sub="kc-creator"))
     minted = await cache_client.post("/collections/public/items", json=_square(), headers=headers)
     assert minted.status_code == 201
 
-    full = await cache_client.get(f"/{minted.json()['geoid']}", headers=headers)
-    assert full.status_code == 200
-    assert set(full.json()["properties"]) > {"geoid", "uri"}  # full, not masked
-    assert full.headers["Cache-Control"] == "private, no-store"
-    assert "ETag" not in full.headers
-    assert "Vary" not in full.headers
+    response = await cache_client.get(f"/{minted.json()['geoid']}", headers=headers)
+    assert response.status_code == 200
+    assert set(response.json()["properties"]) == {"geoid", "uri"}
+    assert response.headers["Cache-Control"] == "public, max-age=3600"
+    assert "ETag" in response.headers
+    assert response.headers["Vary"] == "Accept"
 
 
-async def test_authed_replay_of_anon_etag_never_304s(cache_client, mint_probe, make_token, bearer):
+async def test_authed_replay_of_public_etag_returns_304(
+    cache_client, mint_probe, make_token, bearer
+):
     _, geoid_path, _ = await mint_probe(cache_client)
     anon_etag = (await cache_client.get(geoid_path)).headers["ETag"]
 
@@ -208,8 +217,8 @@ async def test_authed_replay_of_anon_etag_never_304s(cache_client, mint_probe, m
         geoid_path,
         headers={**bearer(make_token(sub="kc-reader")), "If-None-Match": anon_etag},
     )
-    assert resp.status_code == 200
-    assert resp.headers["Cache-Control"] == "private, no-store"
+    assert resp.status_code == 304
+    assert resp.headers["Cache-Control"] == "public, max-age=3600"
 
 
 # --- Error paths stay untouched ----------------------------------------------

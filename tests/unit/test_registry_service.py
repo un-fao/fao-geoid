@@ -25,7 +25,6 @@ from geoid.repositories.place_repo import InsertResult
 from geoid.schemas.place import PlaceCreate
 from geoid.services import registry_service
 from geoid.services.exceptions import (
-    GeometryConflictError,
     GeometryInvalidError,
     RegistryConsistencyError,
 )
@@ -45,7 +44,8 @@ _SQUARE = {
 async def test_create_place_raises_registry_consistency_when_incumbent_missing(monkeypatch):
     # Force the drift: insert_place reports a dedup loser (created=False) whose
     # incumbent collection slug never resolved (None). create_place must raise the
-    # structured RegistryConsistencyError carrying the geoid — not crash on a None slug.
+    # structured RegistryConsistencyError carrying the geoid rather than return a
+    # 201 whose geoid does not resolve.
     drift_geoid = uuid.uuid4()
 
     async def _drift(*args, **kwargs):
@@ -164,10 +164,10 @@ async def test_bulk_geojson_parse_sqlstate_rejects_the_row(monkeypatch):
     assert report.rejected[0].reason == "invalid_geometry"
 
 
-# --- registry unique-index race: one retry converges on the normal dedup 409 ----
+# --- registry unique-index race: one retry converges on the idempotent result ----
 # The arbiter CTE names only the geom_hash UNIQUE; an identical-geometry loser can
 # trip the registry PK instead. The 23505 fires only after the winner commits, so
-# a single retry must recover the incumbent-carrying conflict.
+# a single retry must recover the incumbent geoid.
 
 
 def _unique_violation(constraint: str) -> IntegrityError:
@@ -193,13 +193,7 @@ def _raise_once_then_loser(constraint: str, incumbent: InsertResult):
 
 
 def _incumbent_loser() -> InsertResult:
-    return InsertResult(
-        geoid=uuid.uuid4(),
-        created=False,
-        collection_slug="public",
-        collection_id=uuid.uuid4(),
-        collection_public_read=True,
-    )
+    return InsertResult(geoid=uuid.uuid4(), created=False, collection_slug="public")
 
 
 @pytest.mark.parametrize("constraint", [PK_GEOID_REGISTRY, UQ_GEOID_REGISTRY_GEOM_HASH])
@@ -209,19 +203,17 @@ async def test_create_place_retries_once_after_losing_registry_race(monkeypatch,
     monkeypatch.setattr(place_repo, "insert_place", insert)
     session = _FakeSession()
 
-    with pytest.raises(GeometryConflictError) as exc_info:
-        await registry_service.create_place(
-            session,
-            settings=Settings(),
-            principal=Principal.admin(),
-            collection=_collection(),
-            feature=PlaceCreate.model_validate(_SQUARE),
-        )
+    result = await registry_service.create_place(
+        session,
+        settings=Settings(),
+        principal=Principal.admin(),
+        collection=_collection(),
+        feature=PlaceCreate.model_validate(_SQUARE),
+    )
 
     assert calls["n"] == 2
     assert session.rolled_back is True
-    assert exc_info.value.geoid == incumbent.geoid
-    assert exc_info.value.collection == "public"
+    assert result.geoid == str(incumbent.geoid)
 
 
 async def test_create_place_does_not_retry_external_id_conflict(monkeypatch):
@@ -240,7 +232,7 @@ async def test_create_place_does_not_retry_external_id_conflict(monkeypatch):
 
 
 @pytest.mark.parametrize("constraint", [PK_GEOID_REGISTRY, UQ_GEOID_REGISTRY_GEOM_HASH])
-async def test_bulk_retries_registry_race_and_reports_geometry_conflict(monkeypatch, constraint):
+async def test_bulk_retries_registry_race_and_accepts_the_incumbent(monkeypatch, constraint):
     incumbent = _incumbent_loser()
     insert, calls = _raise_once_then_loser(constraint, incumbent)
     monkeypatch.setattr(place_repo, "insert_place", insert)
@@ -254,11 +246,9 @@ async def test_bulk_retries_registry_race_and_reports_geometry_conflict(monkeypa
     )
 
     assert calls["n"] == 2
-    assert report.summary.rejected == 1
-    row = report.rejected[0]
-    assert row.reason == "geometry_conflict"
-    assert str(incumbent.geoid) in (row.geoid or "")
-    assert row.collection == "public"
+    assert report.summary.accepted == 1
+    assert report.summary.rejected == 0
+    assert report.accepted[0].geoid == str(incumbent.geoid)
 
 
 async def test_bulk_second_race_loss_falls_back_to_geoid_conflict_reject(monkeypatch):
@@ -284,114 +274,71 @@ async def test_bulk_second_race_loss_falls_back_to_geoid_conflict_reject(monkeyp
     assert report.rejected[0].reason == "geoid_conflict"
 
 
-# --- _may_disclose_incumbent truth table -----------------------------------------
-# Disclosure = membership OR a public incumbent: sysadmin / the incumbent's
-# collection being public_read / the incumbent's creator / any grant. Only a
-# PRIVATE incumbent is masked for non-members (client ruling 2026-07-09 round 2,
-# restoring the public_read leg).
+# --- idempotent mint: a dedup loser answers exactly like a winner ----------------
+# The client rule: a repeat upload returns the already-minted geoid with no signal
+# that it was a duplicate. The incumbent's collection never reaches the response.
 
 
-def _loser(
-    *,
-    created_by: str | None = None,
-    collection_id: uuid.UUID | None = None,
-    public_read: bool = False,
-) -> InsertResult:
-    return InsertResult(
-        geoid=uuid.uuid4(),
-        created=False,
-        collection_slug="somewhere",
-        collection_id=collection_id or uuid.uuid4(),
-        collection_public_read=public_read,
-        created_by=created_by,
+async def test_dedup_loser_returns_the_incumbent_geoid_like_a_first_mint(monkeypatch):
+    incumbent = InsertResult(geoid=uuid.uuid4(), created=False, collection_slug="somewhere-private")
+
+    async def _loser(*args, **kwargs):
+        return incumbent
+
+    monkeypatch.setattr(place_repo, "insert_place", _loser)
+
+    result = await registry_service.create_place(
+        _FakeSession(),
+        settings=Settings(),
+        principal=Principal.anonymous(),
+        collection=_collection(),
+        feature=PlaceCreate.model_validate(_SQUARE),
     )
 
+    assert result.geoid == str(incumbent.geoid)
+    assert result.uri.endswith(str(incumbent.geoid))
+    # The incumbent's collection is not in the body — that is what dissolves the
+    # probe oracle: a repeat POST is byte-shape-identical to a first mint.
+    assert "collection" not in result.model_dump()
 
-def _no_grant_query(monkeypatch):
-    async def _boom(*args, **kwargs):
-        raise AssertionError("load_caller_grant must not be queried on this path")
 
-    monkeypatch.setattr(registry_service.authz_service, "load_caller_grant", _boom)
+async def test_bulk_dedup_loser_is_accepted_not_rejected(monkeypatch):
+    incumbent = InsertResult(geoid=uuid.uuid4(), created=False, collection_slug="somewhere-private")
 
+    async def _loser(*args, **kwargs):
+        return incumbent
 
-async def test_disclosure_sysadmin_true_without_grant_query(monkeypatch):
-    _no_grant_query(monkeypatch)
-    assert (
-        await registry_service._may_disclose_incumbent(None, Principal.admin(), _loser(), {})
-        is True
+    monkeypatch.setattr(place_repo, "insert_place", _loser)
+
+    report = await registry_service.create_places_bulk(
+        _FakeSession(),
+        settings=Settings(),
+        principal=Principal.anonymous(),
+        collection=_collection(),
+        features=[_SQUARE, _SQUARE],
     )
 
+    assert report.summary.accepted == 2
+    assert report.summary.rejected == 0
+    assert [row.geoid for row in report.accepted] == [str(incumbent.geoid)] * 2
 
-async def test_disclosure_anonymous_true_for_public_incumbent(monkeypatch):
-    # The restored public_read leg: a public incumbent discloses to every
-    # caller, anonymous included — and without a grant query.
-    _no_grant_query(monkeypatch)
-    assert (
-        await registry_service._may_disclose_incumbent(
-            None, Principal.anonymous(), _loser(public_read=True), {}
+
+async def test_bulk_dedup_loser_without_incumbent_aborts_the_batch(monkeypatch):
+    drift_geoid = uuid.uuid4()
+
+    async def _drift(*args, **kwargs):
+        return InsertResult(geoid=drift_geoid, created=False, collection_slug=None)
+
+    monkeypatch.setattr(place_repo, "insert_place", _drift)
+
+    with pytest.raises(RegistryConsistencyError):
+        await registry_service.create_places_bulk(
+            _FakeSession(),
+            settings=Settings(),
+            principal=Principal.admin(),
+            collection=_collection(),
+            features=[_SQUARE],
         )
-        is True
-    )
-
-
-async def test_disclosure_anonymous_false_for_private_incumbent(monkeypatch):
-    # Anonymity still masks a PRIVATE incumbent (no grant to hold, no sub).
-    _no_grant_query(monkeypatch)
-    assert (
-        await registry_service._may_disclose_incumbent(None, Principal.anonymous(), _loser(), {})
-        is False
-    )
-
-
-async def test_disclosure_anonymous_incumbent_never_matches_anonymous_caller(monkeypatch):
-    # created_by None == subject None must NOT read as "own mint".
-    _no_grant_query(monkeypatch)
-    assert (
-        await registry_service._may_disclose_incumbent(
-            None, Principal.anonymous(), _loser(created_by=None), {}
-        )
-        is False
-    )
-
-
-async def test_disclosure_creator_true_without_grant_query(monkeypatch):
-    _no_grant_query(monkeypatch)
-    caller = Principal(subject="kc-me", email="me@x.org", email_verified=True)
-    assert (
-        await registry_service._may_disclose_incumbent(None, caller, _loser(created_by="kc-me"), {})
-        is True
-    )
-
-
-@pytest.mark.parametrize("granted", [True, False])
-async def test_disclosure_follows_the_caller_grant(monkeypatch, granted):
-    async def _grant(*args, **kwargs):
-        return object() if granted else None
-
-    monkeypatch.setattr(registry_service.authz_service, "load_caller_grant", _grant)
-    caller = Principal(subject="kc-other", email="o@x.org", email_verified=True)
-    assert await registry_service._may_disclose_incumbent(None, caller, _loser(), {}) is granted
-
-
-async def test_disclosure_memoizes_the_grant_lookup_per_collection(monkeypatch):
-    calls = {"n": 0}
-
-    async def _grant(*args, **kwargs):
-        calls["n"] += 1
-        return object()
-
-    monkeypatch.setattr(registry_service.authz_service, "load_caller_grant", _grant)
-    caller = Principal(subject="kc-other", email="o@x.org", email_verified=True)
-    collection_id = uuid.uuid4()
-    cache: dict[uuid.UUID, bool] = {}
-    for _ in range(3):
-        assert (
-            await registry_service._may_disclose_incumbent(
-                None, caller, _loser(collection_id=collection_id), cache
-            )
-            is True
-        )
-    assert calls["n"] == 1
 
 
 async def test_classify_integrity_unknown_constraint_is_internal_error(monkeypatch):

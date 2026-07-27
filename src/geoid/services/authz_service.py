@@ -3,8 +3,8 @@
 Precedence (highest first): **sysadmin** (Keycloak's ``geoid.sysadmin`` role)
 bypasses every per-collection check; then the grant ladder
 **owner > editor > viewer**; then the data-layer fallback (``public_write``)
-for callers with no grant. (``public_read``'s one remaining function — dedup-409
-incumbent disclosure — is decided in the registry service, not here.)
+for callers with no grant. ``public_read`` is inert and retained only for
+database/schema alignment.
 
 :func:`load_caller_grant` is the single grant lookup — it returns ``None`` (no
 query needed) for sysadmin / anonymous / unverified-email callers, who never carry
@@ -88,11 +88,12 @@ def can_see_metadata(
 ) -> bool:
     """sysadmin OR the feature's creator OR any grant (viewer+) → full metadata.
 
-    Metadata visibility is membership-based and ``public_read``-independent
-    (client ruling 2026-07-09): everyone else gets the geometry-only masked body
-    on both resolvers. The non-null subject guard is load-bearing — anonymous
-    mints record ``created_by=None``, and an anonymous caller (``subject=None``)
-    must never match them.
+    Metadata visibility on caller-aware managed reads is membership-based and
+    ``public_read``-independent (client ruling 2026-07-09): everyone else gets the
+    geometry-only masked body. The public geoid resolver no longer calls this
+    predicate because its body is authentication-invariant. The non-null subject
+    guard is load-bearing — anonymous mints record ``created_by=None``, and an
+    anonymous caller (``subject=None``) must never match them.
     """
     return (
         principal.is_admin

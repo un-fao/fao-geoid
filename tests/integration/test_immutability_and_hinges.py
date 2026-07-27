@@ -118,12 +118,12 @@ async def test_change_log_hinge_records_create(client, session, unit_square_ccw)
     assert set(row[1]) == {"external_id", "originating_instance"}
 
 
-async def test_duplicate_geometry_409_leaves_hinges_untouched(
+async def test_duplicate_geometry_leaves_hinges_untouched(
     client, session, unit_square_ccw, unit_square_reversed
 ):
     await client.post("/collections/public/items", json=unit_square_ccw)
     second = await client.post("/collections/public/items", json=unit_square_reversed)
-    assert second.status_code == 409  # identical geometry → insert fails
+    assert second.status_code == 201  # identical geometry → the incumbent geoid, no new row
 
     place_count = (await session.execute(text("SELECT count(*) FROM place"))).scalar_one()
     registry_count = (
@@ -132,4 +132,4 @@ async def test_duplicate_geometry_409_leaves_hinges_untouched(
     changelog_count = (await session.execute(text("SELECT count(*) FROM change_log"))).scalar_one()
     assert place_count == 1
     assert registry_count == 1
-    assert changelog_count == 1  # the rejected second POST adds nothing
+    assert changelog_count == 1  # the deduped second POST writes nothing

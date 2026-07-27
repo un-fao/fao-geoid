@@ -1,10 +1,10 @@
 """Coordinate-precision behaviour: ONE global identity lattice (~1cm, 1e-7
 deg/vertex — exact-match semantics), a frozen recipe constant (migration 0008's
 ``geoid_quantize_v2`` SCALE). Geometry uniqueness is catalog-wide, and an
-identical submission fails with a 409 carrying the incumbent geoid.
+identical submission returns the already-minted geoid with the same 201 response.
 
 These tests demonstrate the lattice in action via the live write path: sub-cell
-float jitter collapses onto the incumbent (409), a shift of several cells is a
+float jitter collapses onto the incumbent (201, same geoid), a shift of several cells is a
 different place (201, distinct geoid).
 """
 
@@ -39,21 +39,16 @@ def _square(dx: float) -> dict:
     }
 
 
-async def test_within_cell_conflicts_across_cell_mints(client, admin_headers):
+async def test_within_cell_dedups_across_cell_mints(client):
     base_resp = await client.post("/collections/public/items", json=_square(0.0))
     assert base_resp.status_code == 201
     base = base_resp.json()
 
     # +1e-8 deg (~1mm): every vertex snaps back to the base cell -> identical
-    # canonical geometry -> 409 carrying the incumbent geoid (disclosed — the
-    # public collection is public_read).
-    same_cell = await client.post(
-        "/collections/public/items", headers=admin_headers, json=_square(1e-8)
-    )
-    assert same_cell.status_code == 409
-    body = same_cell.json()
-    assert body["geoid"] == base["geoid"]
-    assert body["constraint"] == "uq_geoid_registry_geom_hash"
+    # canonical geometry -> the base geoid, answered like a first mint.
+    same_cell = await client.post("/collections/public/items", json=_square(1e-8))
+    assert same_cell.status_code == 201
+    assert same_cell.json() == base
 
     # +3e-7 deg (3 cells, ~3cm): a clearly different cell -> a distinct geoid.
     other_cell = await client.post("/collections/public/items", json=_square(3e-7))

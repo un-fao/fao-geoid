@@ -7,9 +7,8 @@
 
 Scenarios
     mint  — POST a unique polygon each time   (single-POST hot path; expects 201)
-    dedup — POST the SAME polygon every time   (conflict-lookup hot path; expects
-                                                409 after the first 201 — global
-                                                dedup rejects duplicates)
+    dedup — POST the SAME polygon every time   (idempotent re-mint/arbiter hot
+                                                path; every request expects 201)
 
 NOTE: a local PostGIS running under amd64 emulation on Apple Silicon is several
 times slower than native — treat these numbers as a pessimistic LOWER BOUND and
@@ -57,11 +56,11 @@ async def _dedup(client: httpx.AsyncClient) -> httpx.Response:
     return await client.post(f"{BASE}/collections/{COLLECTION}/items", json=_DEDUP_BODY)
 
 
-# (request fn, success statuses): dedup duplicates are *expected* to 409 — that
-# IS the measured hot path (arbiter conflict + incumbent lookup).
+# (request fn, success statuses): dedup measures the idempotent re-mint/arbiter
+# path. A duplicate signal is retired; every successful request is 201.
 SCENARIOS = {
     "mint": (_mint, {201}),
-    "dedup": (_dedup, {201, 409}),
+    "dedup": (_dedup, {201}),
 }
 
 

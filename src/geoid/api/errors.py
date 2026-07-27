@@ -4,10 +4,11 @@ Constraint→HTTP mapping (DB is the source of truth; switch on constraint_name)
 
     geoid (registry/pk) duplicate          -> 409 (fail)
     (collection_id, external_id) duplicate -> 409 (fail)
-    geom_hash duplicate (catalog-wide)     -> 409 carrying the incumbent geoid,
-                                              raised as GeometryConflictError by
-                                              the service; the IntegrityError
-                                              branch is only a backstop
+    geom_hash duplicate (catalog-wide)     -> never reaches a handler: the arbiter
+                                              CTE swallows it and the service
+                                              returns the incumbent geoid (201);
+                                              the IntegrityError branch is only a
+                                              backstop
     invalid / unsupported-type / empty geom -> 422 with ST_IsValidReason
     immutability (restrict_violation)       -> 409
     NUL byte in an input string (22021)     -> 422 "invalid characters in input (NUL)"
@@ -21,8 +22,6 @@ from fastapi import FastAPI, Request, status
 from fastapi.responses import JSONResponse
 from sqlalchemy.exc import DBAPIError, IntegrityError
 
-from geoid.config import get_settings
-from geoid.domain.identifiers import derive_identifiers
 from geoid.models import (
     PK_GEOID_REGISTRY,
     PK_PLACE,
@@ -42,7 +41,6 @@ from geoid.services.exceptions import (
     BulkLimitExceededError,
     CollectionForbiddenError,
     CollectionNotFoundError,
-    GeometryConflictError,
     GeometryInvalidError,
     GrantNotFoundError,
     LastOwnerGuardError,
@@ -114,32 +112,6 @@ def register_exception_handlers(app: FastAPI) -> None:
     async def _last_owner_guard(_: Request, exc: LastOwnerGuardError) -> JSONResponse:
         return _error(status.HTTP_409_CONFLICT, str(exc), collection=exc.slug, email=exc.email)
 
-    @app.exception_handler(GeometryConflictError)
-    async def _geometry_conflict(_: Request, exc: GeometryConflictError) -> JSONResponse:
-        # The insert fails AND the body names the existing geoid — when the
-        # service disclosed it. A masked conflict (exc.geoid is None) keeps the
-        # identical message with null incumbent fields; ``constraint`` still
-        # discriminates this 409 from the external_id one.
-        if exc.geoid is None:
-            return _error(
-                status.HTTP_409_CONFLICT,
-                str(exc),
-                geoid=None,
-                uri=None,
-                collection=None,
-                constraint=UQ_GEOID_REGISTRY_GEOM_HASH,
-            )
-        settings = get_settings()
-        ids = derive_identifiers(exc.geoid, base_url=settings.base_url_clean)
-        return _error(
-            status.HTTP_409_CONFLICT,
-            str(exc),
-            geoid=ids["geoid"],
-            uri=ids["uri"],
-            collection=exc.collection,
-            constraint=UQ_GEOID_REGISTRY_GEOM_HASH,
-        )
-
     @app.exception_handler(RegistryConsistencyError)
     async def _registry_consistency(_: Request, exc: RegistryConsistencyError) -> JSONResponse:
         # Should-not-happen registry/recipe drift: a dedup loser whose incumbent
@@ -172,12 +144,12 @@ def register_exception_handlers(app: FastAPI) -> None:
         if constraint in (PK_GEOID_REGISTRY, PK_PLACE):
             return _error(status.HTTP_409_CONFLICT, "geoid already exists", constraint=constraint)
         if constraint == UQ_GEOID_REGISTRY_GEOM_HASH:
-            # Backstop only: the service normally raises GeometryConflictError
-            # (whose body carries the incumbent geoid — there is no session
-            # here to look it up). Surfacing this branch is unexpected, so log it.
+            # Backstop only: the arbiter CTE swallows a geom_hash clash and the
+            # service returns the incumbent geoid (mint is idempotent), so this
+            # constraint should never reach an error handler. Log it loudly.
             logger.error(
                 "geom_hash 409 served from the IntegrityError backstop "
-                "(no incumbent geoid in the body)",
+                "(the idempotent dedup path should have handled it)",
                 exc_info=exc,
             )
             return _error(

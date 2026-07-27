@@ -51,8 +51,8 @@ def _has_z(coordinates: Any) -> bool:
 
 # Swagger "Try it out" bodies. Coordinates are obviously-dummy sequential-digit runs
 # at the 7-decimal identity precision (1e-7° lattice) — executable, never a real place.
-# The single and bulk polygons are DISTINCT so first-click single-then-bulk both mint
-# instead of cross-409ing (a repeat of either answers 409/geometry_conflict: global dedup).
+# The single and bulk polygons are DISTINCT so first-click single-then-bulk mint two
+# geoids rather than converging on one (a repeat of either returns the same geoid).
 _EXAMPLE_FEATURE = {
     "type": "Feature",
     "id": "my-plot-001",
@@ -101,7 +101,7 @@ class PlaceCreate(Feature[SupportedGeometry, dict[str, Any] | None]):
 
         Runs BEFORE geojson-pydantic parses, so a WKT polygon converges on the exact
         same geometry dict a GeoJSON polygon would — identical geometry text →
-        identical ``geoid_geom_hash_default`` → same geoid / 409. A GeoJSON object
+        identical ``geoid_geom_hash_default`` → same geoid / 201. A GeoJSON object
         ``geometry`` is left untouched (the default path is byte-for-byte unchanged);
         a malformed WKT string raises ``ValueError`` → ``ValidationError`` → 422.
         """
@@ -165,10 +165,11 @@ def geometry_to_geojson(feature: PlaceCreate) -> str:
 
 
 class MintResponse(BaseModel):
-    """Response to a successful POST (201): the resolvable forms of the NEW geoid.
+    """Response to a successful POST (201): the resolvable forms of the geoid.
 
-    A duplicate geometry never reaches this model — it fails with a 409 whose
-    body is :class:`GeometryConflictResponse`.
+    The mint is idempotent: a geometry already registered answers with the same
+    status and body shape as a first mint, carrying its existing geoid. The body
+    reports the geoid, never where the row lives.
     """
 
     geoid: str = Field(
@@ -176,7 +177,6 @@ class MintResponse(BaseModel):
         "the canonical, immutable identifier."
     )
     uri: str = Field(description="Durable resolver URI, e.g. https://data.fao.org/geoid/<uuid>.")
-    collection: str = Field(description="Collection slug the place was minted into.")
     external_id: str | None = Field(default=None)
 
 
@@ -207,45 +207,6 @@ class PlaceRecord(BaseModel):
         )
 
 
-class GeometryConflictResponse(BaseModel):
-    """409 body when an identical geometry already exists anywhere in the catalog.
-
-    Uses the standard error envelope (``code``/``message``) plus the incumbent's
-    identifiers. The ``constraint`` field discriminates this conflict from the
-    external_id 409.
-
-    The incumbent fields are CONDITIONAL: geometry dedup is global, so a conflict
-    can point at an incumbent in another collection — they are withheld (null)
-    unless the incumbent's collection is ``public_read`` or the caller is a
-    member of it (sysadmin, the caller's own mint, or any grant on it).
-    Note the geoid value itself is recomputable from the submitted geometry
-    (content-addressed, public recipe); the mask protects the incumbent's
-    collection + uri, not the identifier.
-    """
-
-    code: int = Field(description="HTTP status code (409).")
-    message: str = Field(description="Human-readable conflict description.")
-    geoid: str | None = Field(
-        default=None,
-        description="The INCUMBENT geoid the geometry is already registered under. "
-        "Withheld (null) unless the incumbent's collection is public_read or "
-        "the caller is a member of it.",
-    )
-    uri: str | None = Field(
-        default=None,
-        description="Durable resolver URI of the incumbent geoid. "
-        "Withheld (null) unless the incumbent's collection is public_read or "
-        "the caller is a member of it.",
-    )
-    collection: str | None = Field(
-        default=None,
-        description="Collection slug the incumbent belongs to. "
-        "Withheld (null) unless the incumbent's collection is public_read or "
-        "the caller is a member of it.",
-    )
-    constraint: str = Field(description='Always "uq_geoid_registry_geom_hash" for this conflict.')
-
-
 # --- Bulk write (synchronous multi-geometry POST) ---------------------------
 
 # Per-feature reject discriminator. Maps 1:1 to the single-row write path's status
@@ -255,7 +216,6 @@ class GeometryConflictResponse(BaseModel):
 BulkRejectReason = Literal[
     "schema_invalid",  # failed the PlaceCreate pydantic schema (single-row 422)
     "invalid_geometry",  # unsupported type (line/GC) / not ST_IsValid / unparseable GeoJSON (422)
-    "geometry_conflict",  # identical geometry already registered — 409 + incumbent
     "external_id_conflict",  # duplicate (collection, external_id) — 409
     "geoid_conflict",  # geoid PK collision — 409 (backstop)
     "internal_error",  # unrecognised integrity constraint — logged, surfaced honestly
@@ -305,7 +265,8 @@ class BulkFeatureCollection(BaseModel):
 
 
 class BulkAccepted(BaseModel):
-    """A feature that minted a new geoid (mirrors :class:`MintResponse`)."""
+    """A feature that minted a new geoid or matched an existing one (mirrors
+    :class:`MintResponse`)."""
 
     index: int = Field(description="Zero-based position in the submitted features array.")
     geoid: str
@@ -317,28 +278,20 @@ class BulkRejected(BaseModel):
     """A feature that did not mint, with the reason it was skipped.
 
     Partial success is the contract: one bad feature never aborts the batch. The
-    fields mirror the single-row error envelope — for a geometry conflict the
-    incumbent ``geoid``/``uri``/``collection`` are carried under the same
-    caller-aware disclosure gate as the single duplicate POST's 409 (withheld
-    when the caller may not read the incumbent's collection).
+    fields mirror the single-row error envelope.
     """
 
     index: int = Field(description="Zero-based position in the submitted features array.")
     reason: BulkRejectReason
     detail: str | None = Field(default=None, description="Human-readable explanation.")
-    geoid: str | None = Field(default=None, description="Incumbent geoid for a geometry conflict.")
-    uri: str | None = Field(
-        default=None, description="Incumbent resolver URI for a geometry conflict."
-    )
-    collection: str | None = Field(
-        default=None, description="Incumbent collection for a geometry conflict."
-    )
     external_id: str | None = None
 
 
 class BulkSummary(BaseModel):
     received: int = Field(description="Features in the submitted FeatureCollection.")
-    accepted: int = Field(description="Features that minted a new geoid.")
+    accepted: int = Field(
+        description="Features that minted a new geoid or matched an existing geometry."
+    )
     rejected: int = Field(description="Features skipped (see ``rejected`` for the reasons).")
 
 
@@ -348,6 +301,8 @@ class BulkReport(BaseModel):
     Valid geometries are inserted; bad ones are reported with the same reason the
     single-item endpoint returns. ``accepted`` + ``rejected`` are disjoint and
     together account for every submitted feature (``summary.received``).
+    ``accepted`` may carry the SAME geoid more than once — identical geometries in
+    one batch all resolve to the one geoid that geometry mints.
     """
 
     summary: BulkSummary

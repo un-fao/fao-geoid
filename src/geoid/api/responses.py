@@ -6,9 +6,9 @@ type (not ``application/json``); some clients content-negotiate on it. We subcla
 ``response_model`` efficiently, so no faster JSON library is needed here.
 
 Also the single home of the flag-gated resolver HTTP-cache trial
-(:func:`resolver_cache`): both public resolvers delegate here so the header
-semantics, the ETag shape, and the RFC 9110 If-None-Match matching cannot drift
-between routes.
+(:func:`resolver_cache`): the geoid and external-id resolvers delegate here so
+the header semantics, ETag shape, and RFC 9110 If-None-Match matching cannot
+drift between routes even though only the latter is caller-aware.
 """
 
 from __future__ import annotations
@@ -69,6 +69,7 @@ def resolver_cache(
     geoid: uuid.UUID,
     fmt: GeometryFormat,
     if_none_match: str | None,
+    vary_authorization: bool = True,
 ) -> Response | dict[str, str]:
     """Cache directives for a public-resolver 200 (the flag-gated trial).
 
@@ -77,7 +78,9 @@ def resolver_cache(
     no-store`` for authenticated callers (their ``If-None-Match`` is ignored —
     an authed body is caller-dependent, never revalidated), or the anonymous
     trio (strong per-representation ETag ``"{geoid}:{format}:{salt}"`` +
-    ``Cache-Control: public`` + ``Vary``). A matching anonymous
+    ``Cache-Control: public`` + ``Vary``). ``vary_authorization=False`` is for an
+    authentication-invariant resolver whose representation cannot vary by caller.
+    A matching anonymous
     ``If-None-Match`` short-circuits to a ready-to-return empty 304 carrying
     those same headers.
     """
@@ -90,7 +93,7 @@ def resolver_cache(
     headers = {
         "ETag": etag,
         "Cache-Control": f"public, max-age={max_age}",
-        "Vary": "Accept, Authorization",
+        "Vary": "Accept, Authorization" if vary_authorization else "Accept",
     }
     if _if_none_match_hit(if_none_match, etag):
         return Response(status_code=status.HTTP_304_NOT_MODIFIED, headers=headers)

@@ -30,17 +30,21 @@ def _square(x: float, y: float, *, external_id: str | None = None) -> dict:
     return feature
 
 
-async def test_public_duplicate_external_id_both_mint_and_echo(client, admin_headers):
+async def test_public_duplicate_external_id_both_mint_and_store(client, session):
     a = await client.post("/collections/public/items", json=_square(0, 0, external_id="dup-pub"))
     b = await client.post("/collections/public/items", json=_square(10, 10, external_id="dup-pub"))
     assert a.status_code == 201, a.text
     assert b.status_code == 201, b.text
 
-    # The submitted value is stored and echoed on both rows (full body is
-    # member-only, so read as sysadmin).
+    # The public resolver is always masked, so pin storage directly.
     for resp in (a, b):
-        feat = (await client.get(f"/{resp.json()['geoid']}", headers=admin_headers)).json()
-        assert feat["properties"]["external_id"] == "dup-pub"
+        stored = (
+            await session.execute(
+                text("SELECT external_id FROM place WHERE id = :id"),
+                {"id": resp.json()["geoid"]},
+            )
+        ).scalar_one()
+        assert stored == "dup-pub"
 
 
 async def test_public_external_id_lookup_answers_explicit_400(client):

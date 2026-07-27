@@ -46,13 +46,19 @@ def test_report_summary_counts_add_up():
         rejected=[
             BulkRejected(
                 index=2,
-                reason="geometry_conflict",
-                geoid="g0",
-                uri="u0",
-                collection="public",
+                reason="external_id_conflict",
+                detail="external_id already exists in this collection",
+                external_id="x1",
             )
         ],
     )
     assert report.summary.received == len(report.accepted) + len(report.rejected)
     assert report.summary.accepted == len(report.accepted)
     assert report.summary.rejected == len(report.rejected)
+
+
+def test_reject_reasons_no_longer_include_geometry_conflict():
+    # Mint is idempotent: a duplicate geometry is ACCEPTED with the incumbent
+    # geoid, so the reason no longer exists at the schema level.
+    with pytest.raises(ValidationError):
+        BulkRejected(index=0, reason="geometry_conflict")

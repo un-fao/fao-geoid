@@ -2,18 +2,15 @@
 """Post-deploy smoke test — verify a deployed GeoID instance end-to-end.
 
 Read-only by default, so it is safe against production (places are append-only;
-nothing is minted unless asked). ``--mint`` adds a write probe that mints ONE
-fixed sentinel feature; global exact-match dedup makes it idempotent — first
-run 201, every later run 409 with ``constraint == "uq_geoid_registry_geom_hash"``.
-The 409's incumbent fields are disclosed when the incumbent's collection is
-``public_read`` (the default ``public`` collection is — so the full three-probe
-run works anonymously) or the caller is a member (sysadmin / creator / any
-grant); a PRIVATE incumbent yields a MASKED 409 (null geoid) for non-members —
-reported as such, with the resolve probes skipped.
-At most one permanent row per catalog, ever.
+nothing is minted unless asked). ``--mint`` adds a three-operation write probe
+that submits ONE fixed sentinel through the public and collection-scoped single
+routes, then through bulk. The mint is idempotent: both single submissions answer
+**201 with byte-identical bodies and matching Location headers**, and bulk accepts
+the same geoid without creating another row. At most one permanent row per
+catalog, ever.
 
     uv run python scripts/smoke_test.py            # read-only checks
-    uv run python scripts/smoke_test.py --mint     # + idempotent write probe
+    uv run python scripts/smoke_test.py --mint     # + single/scoped/bulk write probe
 
 Env:
     GEOID_BASE_URL     default http://localhost:8000 — the URL under test;
@@ -160,35 +157,126 @@ ADMIN_READ_CHECKS: tuple[tuple[str, Callable[[httpx.Client], str]], ...] = (
 # --- Write probe (--mint, idempotent) ----------------------------------------
 
 
+def _sentinel_paths(collection: str, public_collection: str) -> tuple[str, str, str, str]:
+    """(single, single repeat, bulk, bulk repeat) — the public paths pair with the
+    scoped ones only when this run targets the public collection."""
+    scoped = f"/collections/{collection}/items"
+    if collection == public_collection:
+        return "/items", scoped, "/items/bulk", f"{scoped}/bulk"
+    return scoped, scoped, f"{scoped}/bulk", f"{scoped}/bulk"
+
+
+def _post_sentinel(client: httpx.Client, path: str, label: str) -> httpx.Response:
+    """Submit the fixed sentinel and retain the raw response for byte comparison."""
+    resp = record(
+        label,
+        client.post(f"{BASE}{path}", json=SENTINEL_FEATURE, headers=_headers()),
+    )
+    if resp.status_code == 409:
+        raise CheckFailed(
+            "409 external_id conflict — the sentinel external_id exists with a "
+            "DIFFERENT geometry; was SENTINEL_FEATURE changed since the first run?"
+        )
+    _ensure(resp.status_code == 201, f"{path} → {resp.status_code}: {resp.text[:200]}")
+    return resp
+
+
+def _validate_single_mints(first: httpx.Response, second: httpx.Response) -> dict:
+    first_body = first.json()
+    second_body = second.json()
+    first_geoid = first_body.get("geoid")
+    second_geoid = second_body.get("geoid")
+    _ensure(bool(first_geoid), f"first mint response has no geoid: {first.text[:200]}")
+    _ensure(
+        second_geoid == first_geoid,
+        f"repeat mint geoid diverged: {second_geoid!r} != {first_geoid!r}",
+    )
+    _ensure(
+        second.content == first.content,
+        "repeat mint raw body diverged — decoded JSON equality is insufficient",
+    )
+    first_location = first.headers.get("Location")
+    second_location = second.headers.get("Location")
+    _ensure(bool(first_location), "first mint response has no Location header")
+    _ensure(
+        second_location == first_location,
+        f"repeat mint Location diverged: {second_location!r} != {first_location!r}",
+    )
+    return first_body
+
+
+def _validate_bulk_mint(resp: httpx.Response, geoid: str) -> None:
+    _ensure(
+        resp.status_code == 200, f"{resp.request.url.path} → {resp.status_code}: {resp.text[:200]}"
+    )
+    body = resp.json()
+    _ensure(
+        body.get("summary") == {"received": 1, "accepted": 1, "rejected": 0},
+        f"bulk sentinel summary is not one accepted/no rejects: {body.get('summary')!r}",
+    )
+    accepted = body.get("accepted")
+    rejected = body.get("rejected")
+    _ensure(
+        isinstance(accepted, list) and len(accepted) == 1,
+        f"bulk sentinel did not return exactly one accepted row: {accepted!r}",
+    )
+    _ensure(rejected == [], f"bulk sentinel unexpectedly rejected rows: {rejected!r}")
+    _ensure(
+        accepted[0].get("geoid") == geoid,
+        f"bulk sentinel geoid diverged: {accepted[0].get('geoid')!r} != {geoid!r}",
+    )
+
+
+def _validate_bulk_alias_parity(first: httpx.Response, second: httpx.Response) -> None:
+    """The two bulk URLs are one operation — same status, same bytes, same media type."""
+    _ensure(
+        second.status_code == first.status_code,
+        f"bulk alias status diverged: {second.status_code} != {first.status_code}",
+    )
+    _ensure(
+        second.content == first.content,
+        "bulk alias raw body diverged — decoded JSON equality is insufficient",
+    )
+    _ensure(
+        second.headers.get("content-type") == first.headers.get("content-type"),
+        (
+            f"bulk alias content-type diverged: {second.headers.get('content-type')!r} "
+            f"!= {first.headers.get('content-type')!r}"
+        ),
+    )
+
+
 def run_mint_probe(client: httpx.Client) -> list[bool]:
     minted: dict = {}
+    first_path, repeat_path, bulk_path, bulk_repeat_path = _sentinel_paths(
+        COLLECTION, PUBLIC_COLLECTION
+    )
 
-    def probe_mint() -> str:
-        resp = record(
-            "POST items",
+    def _post_bulk_sentinel(path: str, label: str) -> httpx.Response:
+        return record(
+            label,
             client.post(
-                f"{BASE}/collections/{COLLECTION}/items", json=SENTINEL_FEATURE, headers=_headers()
+                f"{BASE}{path}",
+                json={"type": "FeatureCollection", "features": [SENTINEL_FEATURE]},
+                headers=_headers(),
             ),
         )
-        if resp.status_code == 409:
-            body = resp.json()
-            if body.get("constraint") == "uq_geoid_registry_geom_hash":
-                # Expected on every run after the first: global dedup rejects the
-                # duplicate. A public_read incumbent (the default `public`
-                # collection) discloses to every caller; only a PRIVATE incumbent
-                # is masked for non-members — still a healthy dedup.
-                minted.update(body)
-                if body.get("geoid") is None:
-                    return "[409] duplicate geometry → incumbent masked (caller is not a member)"
-                return f"[409] duplicate geometry → incumbent geoid={body['geoid']}"
-            raise CheckFailed(
-                "409 external_id conflict — the sentinel external_id exists with a "
-                "DIFFERENT geometry; was SENTINEL_FEATURE changed since the first run?"
-            )
-        _ensure(resp.status_code == 201, f"{resp.status_code}: {resp.text[:200]}")
-        body = resp.json()
-        minted.update(body)
-        return f"[201] minted (first run against this catalog), geoid={body['geoid']}"
+
+    def probe_mint() -> str:
+        first = _post_sentinel(client, first_path, f"POST {first_path}")
+        second = _post_sentinel(client, repeat_path, f"POST {repeat_path} (repeat)")
+        minted.update(_validate_single_mints(first, second))
+        return f"[201 ×2] byte-identical, geoid={minted['geoid']}"
+
+    def probe_bulk() -> str:
+        resp = _post_bulk_sentinel(bulk_path, f"POST {bulk_path}")
+        _validate_bulk_mint(resp, minted["geoid"])
+        if bulk_repeat_path == bulk_path:
+            return f"[200] one accepted, no rejects, geoid={minted['geoid']}"
+        repeat = _post_bulk_sentinel(bulk_repeat_path, f"POST {bulk_repeat_path} (repeat)")
+        _validate_bulk_mint(repeat, minted["geoid"])
+        _validate_bulk_alias_parity(resp, repeat)
+        return f"[200 ×2] both bulk paths byte-identical, geoid={minted['geoid']}"
 
     def probe_resolve_geoid() -> str:
         # Resolver lives at the app root: BASE already carries the /geoid root_path.
@@ -202,11 +290,11 @@ def run_mint_probe(client: httpx.Client) -> list[bool]:
         return f"resolved; uri on {uri_netloc!r}"
 
     def probe_resolve_external() -> str:
-        # The incumbent's collection (from the 201/409 body) — with global dedup
-        # it may differ from the collection this run targeted. A masked 409 body
-        # carries the key with value None (present, so .get's default won't fire),
-        # hence `or`.
-        collection = minted.get("collection") or COLLECTION
+        # The mint response names no collection, so this probes the collection
+        # this run targeted. Dedup is global: if the sentinel geometry was first
+        # minted into a DIFFERENT collection, no row exists here and this 404s —
+        # re-run with GEOID_COLLECTION pointing at the incumbent's collection.
+        collection = COLLECTION
         path = f"/collections/{collection}/external/{SENTINEL_EXTERNAL_ID}"
         if collection == PUBLIC_COLLECTION:
             resp = record(f"GET {path}", client.get(f"{BASE}{path}"))
@@ -219,15 +307,13 @@ def run_mint_probe(client: httpx.Client) -> list[bool]:
         )
         return f"external_id {SENTINEL_EXTERNAL_ID!r} → same geoid"
 
-    results = [_run_check("mint sentinel", probe_mint)]
+    results = [_run_check("single-route aliases", probe_mint)]
     if not results[0]:
         print("  – resolve checks skipped (mint failed)")
         return results
-    if minted.get("geoid") is None:
-        # Masked 409 (private incumbent, caller not a member): dedup verified,
-        # but there is no geoid to resolve. Run with a member/sysadmin
-        # GEOID_BEARER_TOKEN for the full probe.
-        print("  – resolve checks skipped (incumbent masked for this caller)")
+    results.append(_run_check("bulk-route alias", probe_bulk))
+    if not results[-1]:
+        print("  – resolve checks skipped (bulk failed)")
         return results
     return results + [
         _run_check("resolve by geoid", probe_resolve_geoid),

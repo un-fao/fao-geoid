@@ -117,12 +117,13 @@ class Settings(DatabaseSettings):
         default=0,
         ge=0,
         description=(
-            "HTTP-caching trial on the two public resolvers (env: "
+            "HTTP-caching trial on the geoid and external-id resolvers (env: "
             "GEOID_RESOLVER_CACHE_MAX_AGE), in seconds. 0 (default) = fully off — "
-            "responses stay byte-identical. > 0: anonymous 200s carry a strong "
-            "per-representation ETag + Cache-Control: public, max-age=<n> + Vary "
-            "and answer a matching If-None-Match with 304; authenticated "
-            "responses are marked private, no-store (no ETag, never a 304)."
+            "responses stay byte-identical. > 0: public representations carry a "
+            "strong per-representation ETag + Cache-Control: public, max-age=<n> + "
+            "Vary and answer a matching If-None-Match with 304. The geoid resolver "
+            "ignores authentication; authenticated external-id responses are marked "
+            "private, no-store (no ETag, never a 304)."
         ),
     )
 

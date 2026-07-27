@@ -267,9 +267,10 @@ jobs:
         run: |
           # Hard gate on the direct Cloud Run URL (always exists, served at root, no
           # LB/DNS dependency): liveness + DB probe, then the full end-to-end smoke.
-          # Review deploys add the idempotent --mint sentinel (first run 201, every
-          # later run a dedup 409) so each review deploy exercises the whole write
-          # path; production smoke stays read-only (no test rows in prod).
+          # Review deploys add the idempotent --mint sentinel: public POST /items,
+          # a scoped single-route repeat with a byte-identical 201 + Location, then
+          # POST /items/bulk accepting the same geoid. Production stays read-only
+          # (no test rows in prod).
           URL=$(gcloud run services describe "$SERVICE" --region "$REGION" --project "$PROJECT" --format='value(status.url)')
           curl --fail --silent --show-error "$URL/health"
           MINT=()

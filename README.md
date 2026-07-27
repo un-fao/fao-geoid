@@ -11,9 +11,13 @@ is the **write path** — *mint an immutable geoid → deduplicate by canonical 
 
 ```
 QGIS / ogr / Whisp / Ground ──►  GeoID FastAPI (one image)
-                                  ├─ POST place → mint geoid + dedup + provenance   ◄── the product
-                                  ├─ GET by geoid / by (external_id, collection)   ◄── the only reads
-                                  ├─ OGC landing + conformance (public); collections list/describe (admin)
+                                  ├─ POST /items      → mint geoid + provenance      ◄── the product
+                                  ├─ POST /items/bulk  → one geoid per feature       ◄── public surface
+                                  ├─ GET /{geoid}      → durable resolver            ◄── (these three)
+                                  ├─ internal, live but hidden from /docs: the
+                                  │  collection-scoped writes, the external_id
+                                  │  resolver, /me/geoids, grants, /manage,
+                                  │  OGC landing + conformance + collections
                                   └─ /docs (Swagger)
                                           │
                                           ▼
@@ -52,9 +56,10 @@ corrections mint a *new* geoid, and the original resolves forever.
 Identity and deduplication now share **one fingerprint**: the geoid is derived from the same **global**
 canonical `geom_hash` (see below) that enforces uniqueness, so the two can never disagree and the same
 geometry yields the same geoid on every deployment. One geometry → one geoid across the whole catalog —
-POSTing an identical geometry fails with **409**; the body names the **incumbent geoid** (plus its
-uri and collection) when the incumbent's collection is `public_read` or the caller is a member of it
-(sysadmin, the incumbent's creator, or any grant) — otherwise those fields are null.
+POSTing an identical geometry returns **that geoid**, with the same 201 and body shape as a first
+mint. The mint is idempotent: re-uploading is safe, writes no second row, and carries no duplicate
+signal. Because the response names only the geoid (never a collection), a repeat POST reveals
+nothing about where — or whether — the geometry already lives.
 
 ## The identity recipe (load-bearing correctness)
 
@@ -118,10 +123,9 @@ mint → dedup → validation → resolve in one command:
 uv run python scripts/seed_samples.py
 ```
 
-Expected: 5 plots minted, a reversed-winding duplicate rejected with 409 naming the incumbent geoid
-(the `public` collection is `public_read`, so it discloses even to the anonymous seeder), a
-self-intersecting polygon rejected (422), and the first plot resolved by its geoid. See
-`samples/README.md` for details.
+Expected: 5 plots minted, a reversed-winding duplicate answering 201 with the FIRST plot's geoid
+(no second row — the mint is idempotent), a self-intersecting polygon rejected (422), and the first
+plot resolved by its geoid. See `samples/README.md` for details.
 
 ## Tests
 
@@ -201,13 +205,25 @@ locally, tests & pre-commit, migrations, and the release process.
 
 ## Status
 
-**Authenticated access is live and Keycloak-only**: OIDC (RS256 JWTs) with per-collection
-owner/editor/viewer grants (the owner role itself is sysadmin-granted). Existence is never masked:
-both resolvers answer 200 to every caller for an existing feature, with full bodies member-only
-(sysadmin, the feature's creator, or grant holders — everyone else gets a geometry-only body). The
-dedup-409 names the incumbent to members and to everyone when the incumbent's collection is
-`public_read`; `public_write` governs open minting. The matrix is pinned in
+**The public surface is three operations** (client ruling 2026-07-25): `POST /items`,
+`POST /items/bulk` and the resolver `GET /{geoid}`. Everything else — collections, external_id,
+grants, `/manage`, `/me/geoids`, the OGC read surface — stays live and keeps its existing
+authorization, but is hidden from `/docs` until the authorization and functionality decisions are
+finalised. The three public operations ignore authentication until further notice: valid, invalid,
+expired, and absent credentials produce the same contract; public mints record no caller identity,
+and the resolver always returns the geometry + `{geoid, uri}` representation. Hiding is cosmetic,
+never a security control.
+
+**The mint is idempotent**: submitting a geometry that is already registered returns its existing
+geoid with the same 201 and body shape as a first mint — no duplicate signal, no conflict. Bulk
+reports such features as `accepted`.
+
+**Authenticated access on hidden managed surfaces is live and Keycloak-only**: OIDC (RS256 JWTs)
+with per-collection owner/editor/viewer grants (the owner role itself is sysadmin-granted). The
+hidden external-id resolver remains caller-aware, with full bodies for sysadmins, the feature's
+creator, or grant holders and a geometry-only body for everyone else. `public_write` governs open
+minting on managed collections. The matrix is pinned in
 `tests/integration/test_authz_scenarios.py`; see
 [`local-scripts/docs/auth.html`](local-scripts/docs/auth.html).
-**Synchronous bulk write is live**: `POST /collections/{id}/items/bulk`. Planned next: an
-open-source release, and standalone country instances with federation.
+**Synchronous bulk write is live**. Planned next: an open-source release, and standalone country
+instances with federation.

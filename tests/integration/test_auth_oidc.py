@@ -147,6 +147,26 @@ async def test_unknown_kid_jwks_failure_is_401(jwks_error_client, make_token, be
     assert resp.json() == {"detail": "Invalid bearer token"}
 
 
+async def test_public_operations_do_not_touch_failing_jwks(
+    jwks_error_client, make_token, bearer, unit_square_ccw
+):
+    headers = bearer(make_token(sub="kc-public"))
+
+    single = await jwks_error_client.post("/items", headers=headers, json=unit_square_ccw)
+    assert single.status_code == 201
+
+    bulk = await jwks_error_client.post(
+        "/items/bulk",
+        headers=headers,
+        json={"type": "FeatureCollection", "features": [unit_square_ccw]},
+    )
+    assert bulk.status_code == 200
+
+    resolved = await jwks_error_client.get(f"/{single.json()['geoid']}", headers=headers)
+    assert resolved.status_code == 200
+    assert set(resolved.json()["properties"]) == {"geoid", "uri"}
+
+
 async def test_rejection_401s_are_byte_identical_across_failure_modes(
     oidc_client, make_token, bearer
 ):

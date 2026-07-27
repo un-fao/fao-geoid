@@ -252,7 +252,7 @@ def test_rejects_out_of_bounds_wkt_via_lonlat_after_validator():
 
 def test_wkt_and_geojson_produce_identical_hash_text():
     # THE sacred parity: WKT and the equivalent GeoJSON converge on byte-identical
-    # geometry text -> identical geoid_geom_hash_default -> same geoid / 409.
+    # geometry text -> identical geoid_geom_hash_default -> same geoid / 201.
     from_wkt = PlaceCreate.model_validate(_wkt_feature("POLYGON((10 10,11 10,11 11,10 11,10 10))"))
     from_geojson = PlaceCreate.model_validate(_VALID_POLYGON)
     assert geometry_to_geojson(from_wkt) == geometry_to_geojson(from_geojson)

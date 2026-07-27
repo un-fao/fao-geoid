@@ -8,11 +8,11 @@ if the registry arbiter won. So an identical-geometry clash (catalog-wide) write
 no row and never aborts the transaction, while an external_id or geoid clash on
 the ``place`` leg still raises 23505 (mapped to 409 by constraint name) and rolls
 the whole statement — including the registry row — back. When the place row is
-not written the geoid is still derived in-statement from the geometry (race-free);
-only the incumbent's collection facts (slug/id/public_read/creator) are read back
-from ``geoid_registry`` (via the same ``geoid_geom_hash_default`` wrapper, with a
-bounded retry for the rare concurrent pre-commit window), so the service can
-decide 409 disclosure and raise ``GeometryConflictError``.
+not written the geoid is still derived in-statement from the geometry (race-free)
+and the mint is idempotent; only the incumbent's collection slug is read back from
+``geoid_registry`` (via the same ``geoid_geom_hash_default`` wrapper, with a
+bounded retry for the rare concurrent pre-commit window), as the service's proof
+that the returned geoid actually resolves.
 """
 
 from __future__ import annotations
@@ -40,12 +40,10 @@ _INCUMBENT_SLUG_BACKOFF_S = 0.02
 class InsertResult:
     geoid: uuid.UUID
     created: bool  # True = newly minted; False = an identical geometry already exists
-    # Incumbent facts when created=False (None on the winner path); 409 disclosure
-    # is the service's call, the repo only reports.
+    # The incumbent's collection when created=False (None on the winner path). It
+    # backs ONLY the service's registry-drift guard: a resolvable incumbent must
+    # exist before the idempotent mint returns its geoid.
     collection_slug: str | None = None
-    collection_id: uuid.UUID | None = None
-    collection_public_read: bool | None = None
-    created_by: str | None = None  # the incumbent place's provenance->>'created_by'
 
 
 _SUPPORTED_GEOM_TYPES = ("POINT", "MULTIPOINT", "POLYGON", "MULTIPOLYGON")
@@ -71,29 +69,26 @@ async def geometry_invalid_reason(session: AsyncSession, geojson: str) -> str:
     return row["reason"] or "invalid geometry"
 
 
-async def _resolve_incumbent(
-    session: AsyncSession, geojson: str
-) -> tuple[uuid.UUID, str, bool, str | None] | None:
-    """Re-read the incumbent's facts until the winner's row is visible.
+async def _resolve_incumbent(session: AsyncSession, geojson: str) -> str | None:
+    """Re-read the incumbent's collection slug until the winner's row is visible.
 
     Paid ONLY on the rare concurrent pre-commit miss, where the in-statement LEFT
     JOIN couldn't yet see the winner's not-yet-committed registry row. Each execute
     starts a fresh statement snapshot under READ COMMITTED, so a bounded retry
     catches the winner's commit; the geoid is already derived in-statement and never
-    depends on this. Returns the whole ``(collection_id, slug, public_read,
-    created_by)`` tuple — disclosure must never be decided on partial data — or
-    None if the row never appears (genuine recipe drift).
+    depends on this. Without the retry that window would raise spurious 500s from
+    the service's drift guard. Returns None if the row never appears (genuine
+    recipe drift).
     """
     stmt = text(
-        "SELECT c.id, c.slug, c.public_read, ip.provenance->>'created_by' AS created_by "
+        "SELECT c.slug "
         "FROM geoid_registry r JOIN collection c ON c.id = r.collection_id "
-        "LEFT JOIN place ip ON ip.id = r.place_id "
         f"WHERE r.geom_hash = geoid_geom_hash_default({_GEOM_EXPR})"
     )
     for _ in range(_INCUMBENT_SLUG_RETRIES):
         row = (await session.execute(stmt, {"geojson": geojson})).first()
         if row is not None:
-            return (row[0], row[1], row[2], row[3])
+            return str(row[0])
         await asyncio.sleep(_INCUMBENT_SLUG_BACKOFF_S)
     return None
 
@@ -107,7 +102,7 @@ async def insert_place(
     provenance: dict[str, Any],
     originating_instance: str | None,
 ) -> InsertResult:
-    """Insert a place; an identical geometry ANYWHERE in the catalog conflicts.
+    """Insert a place; an identical geometry ANYWHERE in the catalog dedups.
 
     Single-statement arbiter CTE. The geoid is **derived DB-side** from the geometry:
     the ``calc``/``ids`` legs compute the canonical ``geom_hash`` once and the
@@ -129,11 +124,11 @@ async def insert_place(
     (``COALESCE(r.geoid, i.geoid)``): identical to ``i.geoid`` on the winner path
     (the LEFT JOIN can't see the arbiter's own insert, so ``r`` is NULL) and on
     every post-0004 loser, but self-correcting against a legacy/drifted row whose
-    stored geoid predates deterministic derivation — the 409 must name a geoid
-    that actually resolves. Only the incumbent's collection facts can be missing, in the narrow
+    stored geoid predates deterministic derivation — the returned geoid must be one
+    that actually resolves. Only the incumbent's collection can be missing, in the narrow
     concurrent pre-commit window where the in-statement ``LEFT JOIN`` ran before the
     winner committed; ``_resolve_incumbent`` re-snapshots under READ COMMITTED
-    with a bounded retry to recover them. If it still never appears (genuine recipe
+    with a bounded retry to recover it. If it still never appears (genuine recipe
     drift) the result carries ``collection_slug=None`` and the service raises
     ``RegistryConsistencyError`` (a structured 500) — the repo reports the fact, it
     does not decide the HTTP outcome. This retry relies on READ COMMITTED taking a
@@ -142,9 +137,9 @@ async def insert_place(
     Dual-violation precedence: when a submission duplicates BOTH the geometry and
     an existing external_id, the geometry arbiter wins — the registry leg runs
     first and DOES NOTHING, so the place leg inserts no row and its external_id
-    index is never touched; the request yields the geometry 409 (incumbent geoid
-    attached) rather than the external_id 409. Pinned by
-    ``test_review_fixes.py::test_dual_geometry_and_external_id_duplicate_yields_geometry_409``.
+    index is never touched; the request yields the idempotent geometry result
+    (the incumbent geoid, 201) rather than the external_id 409. Pinned by
+    ``test_review_fixes.py::test_dual_geometry_and_external_id_duplicate_yields_incumbent_geoid``.
     """
     insert_stmt = text(
         f"""
@@ -176,14 +171,10 @@ async def insert_place(
         SELECT
             COALESCE(r.geoid, i.geoid) AS geoid,
             EXISTS (SELECT 1 FROM ins) AS created,
-            c.slug AS incumbent_slug,
-            c.id AS incumbent_collection_id,
-            c.public_read AS incumbent_public_read,
-            ip.provenance->>'created_by' AS incumbent_created_by
+            c.slug AS incumbent_slug
         FROM ids i
         LEFT JOIN geoid_registry r ON r.geom_hash = i.h
         LEFT JOIN collection c ON c.id = r.collection_id
-        LEFT JOIN place ip ON ip.id = r.place_id
         """
     )
     params = {
@@ -199,25 +190,13 @@ async def insert_place(
         return InsertResult(geoid=geoid, created=True)
 
     # Dedup loser: the geoid above is the deterministic incumbent geoid (derived
-    # in-statement, never null). Only the incumbent's collection facts can lag — NULL
-    # in the rare concurrent pre-commit window where the LEFT JOIN ran before the
-    # winner committed — so re-read them with a bounded retry. If they still never
-    # appear (genuine recipe drift) report the fact with collection_slug=None; the
+    # in-statement, never null). Only the incumbent's collection can lag — NULL in
+    # the rare concurrent pre-commit window where the LEFT JOIN ran before the
+    # winner committed — so re-read it with a bounded retry. If it still never
+    # appears (genuine recipe drift) report the fact with collection_slug=None; the
     # service decides the HTTP outcome (RegistryConsistencyError → structured 500).
-    incumbent = (row[3], row[2], row[4], row[5]) if row[2] is not None else None
-    if incumbent is None:
-        incumbent = await _resolve_incumbent(session, geojson)
-    if incumbent is None:
-        return InsertResult(geoid=geoid, created=False)
-    collection_id, slug, public_read, created_by = incumbent
-    return InsertResult(
-        geoid=geoid,
-        created=False,
-        collection_slug=slug,
-        collection_id=collection_id,
-        collection_public_read=public_read,
-        created_by=created_by,
-    )
+    slug = row[2] if row[2] is not None else await _resolve_incumbent(session, geojson)
+    return InsertResult(geoid=geoid, created=False, collection_slug=slug)
 
 
 # --- Read path --------------------------------------------------------------

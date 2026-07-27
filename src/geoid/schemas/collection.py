@@ -30,11 +30,10 @@ class CollectionCreate(BaseModel):
     public_write: bool = Field(default=False, examples=[False])
     public_read: bool = Field(
         default=True,
-        description="Governs whether a duplicate-geometry 409 names the "
-        "incumbent (geoid/uri/collection) to non-members; members (sysadmin / "
-        "creator / any grant) always see it. Does not affect feature reads: "
-        "both resolvers answer 200 to every caller, with member-only full "
-        "bodies.",
+        description="Inert compatibility field retained for database/schema alignment. "
+        "It authorizes no reads or writes; resolvers answer existing ids to every "
+        "caller. The public geoid resolver is always masked; the hidden external-id "
+        "resolver exposes full bodies only to members.",
         examples=[True],
     )
     metadata: dict[str, Any] = Field(
@@ -70,12 +69,12 @@ class CollectionOut(BaseModel):
 class GrantCreate(BaseModel):
     """Grant (or re-grant) a per-collection role to a principal by email.
 
-    ``viewer`` is the read tier: full feature bodies on both resolvers
-    (non-members get the geometry-only masked body) and dedup-409 incumbent
-    disclosure when the incumbent's collection is private; it does NOT authorize
-    writes (``editor``+) or grant management (``owner``). The ``owner`` role
-    itself is sysadmin-only to grant — a collection owner may grant
-    ``editor``/``viewer`` only.
+    ``viewer`` is the read tier for caller-aware managed surfaces, including full
+    feature bodies on the hidden external-id resolver (non-members get the
+    geometry-only masked body). It does NOT change the public ``/{geoid}``
+    representation, authorize writes (``editor``+), or grant management
+    (``owner``). The ``owner`` role itself is sysadmin-only to grant — a collection
+    owner may grant ``editor``/``viewer`` only.
     """
 
     email: str = Field(min_length=3, max_length=320, examples=["alice@example.org"])

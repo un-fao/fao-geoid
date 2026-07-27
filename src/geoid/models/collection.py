@@ -26,9 +26,11 @@ class Collection(Base):
     public_write: Mapped[bool] = mapped_column(
         Boolean, nullable=False, server_default=text("false")
     )
-    # Governs only dedup-409 incumbent disclosure to non-members (see
-    # registry_service._may_disclose_incumbent); feature reads are never
-    # existence-masked and full bodies are member-only regardless of this flag.
+    # INERT since the idempotent-mint change retired its last consumer. Feature
+    # reads are never existence-masked; the public geoid resolver is always masked,
+    # while caller-aware managed reads are member-only regardless of this flag. The
+    # column drop is queued for the hardening bundle; the mapping stays for schema
+    # alignment.
     # default=True alongside server_default avoids an async refetch after flush.
     public_read: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=True, server_default=text("true")

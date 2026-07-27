@@ -156,6 +156,21 @@ async def require_principal(
     is anonymous-only). ``settings``/``jwks_client`` are injected (not fetched
     directly) so the auth path honours ``app.dependency_overrides`` in tests.
     """
+    return await principal_from_credentials(creds, settings, jwks_client)
+
+
+async def principal_from_credentials(
+    creds: HTTPAuthorizationCredentials | None,
+    settings: Settings,
+    jwks_client: PyJWKClient | None,
+) -> Principal:
+    """Resolve already-extracted HTTP credentials without declaring a dependency.
+
+    ``require_principal`` is the normal FastAPI dependency. This lower-level seam
+    exists for a conditionally authenticated route: the public collection must
+    ignore even malformed credentials, while managed collection writes still use
+    the exact same validation and error contract.
+    """
     if creds is None:
         return Principal.anonymous()
     if creds.scheme.lower() != _BEARER.lower():

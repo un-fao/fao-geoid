@@ -123,29 +123,14 @@ class BulkLimitExceededError(GeoidServiceError):
         )
 
 
-class GeometryConflictError(GeoidServiceError):
-    """An identical geometry already exists in the catalog (global dedup, 409).
-
-    ``geoid``/``collection`` name the incumbent when its collection is
-    ``public_read`` or the caller is a member of it (sysadmin / own mint / any
-    grant); both are None otherwise and the 409 body carries null incumbent
-    fields.
-    """
-
-    def __init__(self, geoid: uuid.UUID | None, collection: str | None) -> None:
-        self.geoid = geoid
-        self.collection = collection
-        super().__init__("identical geometry already exists in the catalog")
-
-
 class RegistryConsistencyError(GeoidServiceError):
     """A dedup loser whose incumbent collection never materialised (500).
 
     Should not happen: the geoid is derived in-statement so a loser always carries
-    it, and ``_resolve_incumbent_slug`` recovers the collection slug across the rare
+    it, and ``_resolve_incumbent`` recovers the collection slug across the rare
     concurrent pre-commit window. A persistent miss means genuine registry/recipe
-    drift — surfaced as a structured 500 (carrying the geoid) instead of an
-    unstructured crash.
+    drift — the guard against returning a 201 whose geoid does not resolve, so it
+    is surfaced as a structured 500 (carrying the geoid) instead.
     """
 
     def __init__(self, geoid: uuid.UUID) -> None:

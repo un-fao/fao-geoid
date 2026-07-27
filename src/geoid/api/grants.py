@@ -67,8 +67,7 @@ async def _require_manageable(
     "the owner role itself is sysadmin-only)",
     description=(
         "Roles: `owner` (manage grants + write + read), `editor` (write + read), "
-        "`viewer` (read: full feature bodies on both resolvers and dedup-409 "
-        "incumbent disclosure when the incumbent's collection is private). "
+        "`viewer` (read: full feature bodies on caller-aware managed surfaces). "
         "Granting `owner` requires sysadmin (403 otherwise) — a collection owner "
         "may grant `editor`/`viewer` only. "
         "Demoting the last owner is blocked (409); grant another owner first."

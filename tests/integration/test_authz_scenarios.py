@@ -4,17 +4,18 @@ Personas: anonymous, stranger (authenticated, no grant), viewer, editor, owner,
 creator (minted the seed feature; holds NO grant at assert time — provenance
 ``created_by`` is their only link), sysadmin.
 
-Collection configs (public_read, public_write): publicish (T,T) — the bootstrap
-``public``'s shape; open-read (T,F); dropbox (F,T); vault (F,F).
+Collection configs vary both compatibility ``public_read`` and active
+``public_write`` flags. The matrix proves that ``public_read`` is inert while
+``public_write`` alone controls anonymous minting.
 
 The rules this file pins (client meeting 2026-07-07 + rulings 2026-07-09, round 2):
 - WRITE ladder: editor/owner/sysadmin always; everyone else iff ``public_write``.
-- Dedup-409 disclosure: sysadmin / creator / any grant, OR the incumbent's
-  collection is ``public_read`` — masked only for non-members of a private
-  incumbent.
+- Repeat mints: identical 201 body for every persona and config (the mint is
+  idempotent and names no collection — nothing to disclose).
 - BOTH resolvers answer 200 to every caller for an existing feature (no 404
-  existence mask anywhere); the BODY is full only for members/creator/sysadmin —
-  flag-independent. 404 is reserved for a genuinely unknown id.
+  existence mask anywhere). The public geoid resolver is authentication-invariant
+  and always masked; the hidden external-id resolver remains full only for
+  members/creator/sysadmin. 404 is reserved for a genuinely unknown id.
 - ``/me/geoids`` is authenticated and own-only.
 - ``/manage`` + ``GET /collections[/{id}]`` are sysadmin-only (401 anonymous,
   403 for everyone else — a collection's own owner included).
@@ -41,10 +42,8 @@ CONFIGS = {
 GRANTEES = ("viewer", "editor", "owner")
 # Personas whose write is grant-carried (allowed regardless of public_write).
 WRITERS_ALWAYS = {"editor", "owner", "sysadmin"}
-# Personas who see the incumbent in a dedup 409 / the full feature body.
+# Personas who see the full feature body.
 MEMBERS = {"viewer", "editor", "owner", "creator", "sysadmin"}
-
-CONFLICT_MESSAGE = "identical geometry already exists in the catalog"
 
 
 @pytest.fixture(autouse=True)
@@ -169,38 +168,31 @@ async def test_bulk_matrix(oidc_client, personas, config):
         assert resp.status_code == expected, f"{persona} on {config}: {resp.text}"
 
 
-# --- dedup-409 incumbent disclosure -------------------------------------------------
+# --- repeat mints answer identically for every persona ------------------------------
 
 
 @pytest.mark.parametrize("config", CONFIGS)
-async def test_dedup_409_disclosure_matrix(oidc_client, personas, config):
+async def test_repeat_mint_matrix(oidc_client, personas, config):
     cfg = CONFIGS[config]
     slug = f"dup-{config}"
     seed = await _setup_collection(oidc_client, slug, cfg, personas)
     # A separate open-write target so EVERY persona (anonymous included) can
-    # trigger the conflict against the seed's geometry.
+    # re-submit the seed's geometry.
     await _create(oidc_client, "target", public_write=True)
 
+    expected = {"geoid": seed["geoid"], "uri": seed["uri"], "external_id": None}
     for persona, headers in personas.items():
         resp = await oidc_client.post(
             "/collections/target/items", headers=headers, json=_square(0, 0)
         )
-        assert resp.status_code == 409, f"{persona} on {config}: {resp.text}"
-        body = resp.json()
-        assert body["message"] == CONFLICT_MESSAGE
-        assert body["constraint"] == "uq_geoid_registry_geom_hash"
-        if persona in MEMBERS or cfg["public_read"]:
-            assert body["geoid"] == seed["geoid"], f"{persona} on {config} should disclose"
-            assert body["uri"] == seed["uri"]
-            assert body["collection"] == slug
-        else:
-            # Masked only for non-members of a PRIVATE incumbent.
-            assert body["geoid"] is None, f"{persona} on {config} should be masked"
-            assert body["uri"] is None
-            assert body["collection"] is None
+        assert resp.status_code == 201, f"{persona} on {config}: {resp.text}"
+        # Persona- and config-independent: the body is the incumbent geoid and
+        # nothing else. Membership buys no extra field, so a repeat POST is not a
+        # probe for where a geometry lives.
+        assert resp.json() == expected, f"{persona} on {config} diverged"
 
 
-# --- GET /{geoid}: open existence, member-only metadata (flag-independent) ----------
+# --- GET /{geoid}: authentication-invariant masked representation ------------------
 
 
 @pytest.mark.parametrize("config", CONFIGS)
@@ -212,11 +204,7 @@ async def test_resolver_body_matrix(oidc_client, personas, config):
     for persona, headers in personas.items():
         resp = await oidc_client.get(f"/{seed['geoid']}", headers=headers)
         assert resp.status_code == 200, f"{persona} on {config}: {resp.text}"
-        feature = resp.json()
-        if persona in MEMBERS:
-            _assert_full(feature, external_id=f"seed-{slug}")
-        else:
-            _assert_masked(feature)
+        _assert_masked(resp.json())
 
 
 # --- external-id resolver: open existence (like /{geoid}); body follows membership --
@@ -325,10 +313,14 @@ async def test_landing_and_conformance_stay_public(oidc_client):
     assert (await oidc_client.get("/conformance")).status_code == 200
 
 
-async def test_malformed_bearer_is_401_on_both_resolvers(oidc_client, personas):
+async def test_malformed_bearer_is_ignored_publicly_but_401s_on_hidden_resolver(
+    oidc_client, personas
+):
     seed = await _setup_collection(oidc_client, "mb", CONFIGS["publicish"], personas)
     garbage = {"Authorization": "Bearer nope"}
-    assert (await oidc_client.get(f"/{seed['geoid']}", headers=garbage)).status_code == 401
+    public = await oidc_client.get(f"/{seed['geoid']}", headers=garbage)
+    assert public.status_code == 200
+    _assert_masked(public.json())
     assert (
         await oidc_client.get("/collections/mb/external/seed-mb", headers=garbage)
     ).status_code == 401

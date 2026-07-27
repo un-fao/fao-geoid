@@ -10,43 +10,28 @@ from sqlalchemy import text
 pytestmark = pytest.mark.integration
 
 
-async def test_concurrent_identical_posts_converge_to_one_geoid(
-    client, admin_headers, session, unit_square_ccw
-):
-    """K simultaneous POSTs of the SAME geometry → exactly one mint, one row.
+async def test_concurrent_identical_posts_converge_to_one_geoid(client, session, unit_square_ccw):
+    """K simultaneous POSTs of the SAME geometry → one row, K identical 201s.
 
     Exercises the arbiter CTE (registry ON CONFLICT DO NOTHING + incumbent-lookup)
-    race: one arbiter insert wins (201); the rest block on the registry's geom_hash
-    UNIQUE, see the conflict, and fail with a 409 that carries the winner's geoid.
-    The invariant is one place row total. Sysadmin caller on every POST so each
-    loser's 409 discloses (is_admin short-circuits before any grant query — the
-    race semantics and DB traffic are unchanged).
+    race: one arbiter insert wins and writes the place row; the rest see the
+    conflict swallowed and return that winner's geoid. Since the mint is
+    idempotent every caller gets the same 201 body — a stronger identity assertion
+    than the old one-201-plus-losers split. The invariant is one place row total.
     """
     k = 16
     responses = await asyncio.gather(
-        *[
-            client.post("/collections/public/items", headers=admin_headers, json=unit_square_ccw)
-            for _ in range(k)
-        ]
+        *[client.post("/collections/public/items", json=unit_square_ccw) for _ in range(k)]
     )
 
     # Assert statuses BEFORE reading geoids so a stray 500 surfaces with its body,
     # not as an opaque KeyError on a missing "geoid" key.
-    statuses = [r.status_code for r in responses]
-    offenders = [(r.status_code, r.json()) for r in responses if r.status_code not in (201, 409)]
+    offenders = [(r.status_code, r.json()) for r in responses if r.status_code != 201]
     assert not offenders, f"unexpected statuses: {offenders}"
-    assert statuses.count(201) == 1, f"expected exactly one mint, got {statuses}"
-    assert statuses.count(409) == k - 1, f"expected {k - 1} conflicts, got {statuses}"
 
-    # Every winner/loser response converges on the one deterministic geoid, and
-    # every loser's 409 body must carry the incumbent geoid (no empty conflicts).
-    geoids = {r.json()["geoid"] for r in responses if r.status_code in (201, 409)}
-    assert len(geoids) == 1, f"expected a single geoid, got {geoids}"
-    for resp in responses:
-        if resp.status_code == 409:
-            body = resp.json()
-            assert body["constraint"] == "uq_geoid_registry_geom_hash", body
-            assert body["geoid"], body
+    bodies = [r.json() for r in responses]
+    assert all(body == bodies[0] for body in bodies), f"bodies diverged: {bodies}"
+    assert bodies[0]["geoid"]
 
     place_count = (await session.execute(text("SELECT count(*) FROM place"))).scalar_one()
     registry_count = (
@@ -83,13 +68,13 @@ async def test_concurrent_distinct_posts_all_mint(client, session):
 
 
 async def test_resolve_incumbent_returns_committed_collection(client, session, unit_square_ccw):
-    """The incumbent-recovery helper reads back the incumbent's facts once visible.
+    """The incumbent-recovery helper reads back the incumbent's slug once visible.
 
-    Covers ``_resolve_incumbent``'s success path deterministically (no race):
-    mint a place via the API (committed), then call the helper directly — it must
-    return the incumbent's collection facts (id/slug/public_read/creator) from
-    the now-visible registry row. The concurrent path only reaches this helper
-    when the in-statement LEFT JOIN missed.
+    Covers ``_resolve_incumbent``'s success path deterministically (no race): mint
+    a place via the API (committed), then call the helper directly — it must return
+    the incumbent's collection slug from the now-visible registry row. The
+    concurrent path only reaches this helper when the in-statement LEFT JOIN
+    missed; without it that window would raise spurious 500s from the drift guard.
     """
     from geoid.repositories.place_repo import _resolve_incumbent
     from geoid.schemas.place import PlaceCreate, geometry_to_geojson
@@ -97,10 +82,4 @@ async def test_resolve_incumbent_returns_committed_collection(client, session, u
     assert (await client.post("/collections/public/items", json=unit_square_ccw)).status_code == 201
 
     geojson = geometry_to_geojson(PlaceCreate.model_validate(unit_square_ccw))
-    incumbent = await _resolve_incumbent(session, geojson)
-    assert incumbent is not None
-    collection_id, slug, public_read, created_by = incumbent
-    assert slug == "public"
-    assert collection_id is not None
-    assert public_read is True  # the bootstrap `public` collection
-    assert created_by is None  # minted anonymously above
+    assert await _resolve_incumbent(session, geojson) == "public"

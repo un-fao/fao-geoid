@@ -14,7 +14,7 @@ async def test_post_polygon_mints_geoid_uri(client, unit_square_ccw):
     resp = await client.post("/collections/public/items", json=unit_square_ccw)
     assert resp.status_code == 201
     body = resp.json()
-    assert body["collection"] == "public"
+    assert "collection" not in body  # the mint reports the geoid, not where it lives
     geoid = body["geoid"]
     assert body["uri"] == f"http://testserver/{geoid}"
     assert "item_url" not in body  # the collection-scoped item read route was removed
@@ -39,22 +39,10 @@ async def test_submitted_properties_are_accepted_but_never_persisted(
     assert resp.status_code == 201
     geoid = resp.json()["geoid"]
 
-    # Read as sysadmin (full body is member-only): properties are exactly the
-    # server-collected metadata — nothing submitted is echoed back.
+    # The public resolver is authentication-invariant, so even a sysadmin gets
+    # the same masked representation and no submitted property can leak there.
     feat = (await client.get(f"/{geoid}", headers=admin_headers)).json()
-    assert set(feat["properties"]) == {
-        "geoid",
-        "uri",
-        "external_id",
-        "created_at",
-        "originating_instance",
-        "_geoid_provenance",
-    }
-    assert feat["properties"]["_geoid_provenance"] == {
-        "schema": "geoid-prov/0.2",
-        "created_by": None,
-        "originating_instance": "test-instance",
-    }
+    assert set(feat["properties"]) == {"geoid", "uri"}
 
     # Pin STORAGE, not just presentation: the provenance jsonb is the 3-key contract.
     stored = (
@@ -77,29 +65,19 @@ async def test_feature_without_properties_member_mints(client):
     assert resp.status_code == 201
 
 
-async def test_identical_geometry_returns_409_with_incumbent_geoid(
-    client, admin_headers, unit_square_ccw, unit_square_reversed
+async def test_identical_geometry_returns_the_same_geoid(
+    client, unit_square_ccw, unit_square_reversed
 ):
     first = await client.post("/collections/public/items", json=unit_square_ccw)
     assert first.status_code == 201
-    original_geoid = first.json()["geoid"]
+    original = first.json()
 
     # Same square, reversed winding + rotated ring start -> identical canonical
-    # geometry -> the insert FAILS (409) and the body carries the incumbent.
-    # Sysadmin caller (disclosure would hold for any caller here — the
-    # incumbent's collection is public_read; pinned in test_authz_scenarios).
-    second = await client.post(
-        "/collections/public/items", headers=admin_headers, json=unit_square_reversed
-    )
-    assert second.status_code == 409
-    body = second.json()
-    assert body["geoid"] == original_geoid
-    assert body["collection"] == "public"
-    assert body["constraint"] == "uq_geoid_registry_geom_hash"
-    assert body["uri"] == f"http://testserver/{original_geoid}"
-    assert "message" in body
-    # Requirement 6 scopes the Location header to 201 only — a 409 carries none.
-    assert "Location" not in second.headers
+    # geometry -> the same geoid, answered exactly like the first mint.
+    second = await client.post("/collections/public/items", json=unit_square_reversed)
+    assert second.status_code == 201
+    assert second.json() == original
+    assert second.headers["Location"] == first.headers["Location"]
 
 
 async def test_different_geometry_mints_distinct_geoid(client, unit_square_ccw, other_square):
@@ -242,35 +220,26 @@ async def test_post_wkt_string_mints_geoid(client):
     assert feat["geometry"]["type"] == "Polygon"
 
 
-async def test_wkt_then_equivalent_geojson_is_409_same_incumbent(
-    client, admin_headers, unit_square_ccw
-):
+async def test_wkt_then_equivalent_geojson_yields_the_same_geoid(client, unit_square_ccw):
     # Parity: a WKT polygon and the equivalent GeoJSON polygon are the SAME geometry
-    # -> one geoid. The second POST (sysadmin, so the 409 discloses) carries the
-    # first's geoid as incumbent.
+    # -> one geoid, returned to both submissions.
     first = await client.post("/collections/public/items", json=_wkt_feature(_WKT_SQUARE))
     assert first.status_code == 201
     incumbent = first.json()["geoid"]
 
-    second = await client.post(
-        "/collections/public/items", headers=admin_headers, json=unit_square_ccw
-    )
-    assert second.status_code == 409
+    second = await client.post("/collections/public/items", json=unit_square_ccw)
+    assert second.status_code == 201
     assert second.json()["geoid"] == incumbent
 
 
-async def test_geojson_then_equivalent_wkt_is_409_same_incumbent(
-    client, admin_headers, unit_square_ccw
-):
+async def test_geojson_then_equivalent_wkt_yields_the_same_geoid(client, unit_square_ccw):
     # Reverse order: GeoJSON first, then the equivalent WKT — same parity, same geoid.
     first = await client.post("/collections/public/items", json=unit_square_ccw)
     assert first.status_code == 201
     incumbent = first.json()["geoid"]
 
-    second = await client.post(
-        "/collections/public/items", headers=admin_headers, json=_wkt_feature(_WKT_SQUARE)
-    )
-    assert second.status_code == 409
+    second = await client.post("/collections/public/items", json=_wkt_feature(_WKT_SQUARE))
+    assert second.status_code == 201
     assert second.json()["geoid"] == incumbent
 
 
@@ -365,6 +334,7 @@ async def test_bulk_nul_byte_aborts_batch_and_persists_nothing(
     assert resp.status_code == 422
     assert resp.json()["message"] == "invalid characters in input (NUL)"
 
-    # The aborted batch persisted nothing — the good feature re-mints solo (201, not 409).
+    # The aborted batch persisted nothing — pinned by the good feature minting a
+    # geoid that no earlier row can have claimed.
     solo = await client.post("/collections/public/items", json=unit_square_ccw)
     assert solo.status_code == 201

@@ -84,19 +84,16 @@ async def test_hash_is_sha256_32_bytes(session):
 
 
 async def test_dedup_is_global_across_collections(client, admin_headers, unit_square_ccw):
-    # The SAME geometry in two different collections → 409 carrying the first
-    # geoid: one geometry → one geoid across the whole catalog.
+    # The SAME geometry in two different collections → the SAME geoid: one
+    # geometry → one geoid across the whole catalog, and the second POST is
+    # answered exactly like the first (no cross-collection signal at all).
     await client.post(
         "/manage/collections",
         headers=admin_headers,
         json={"id": "cola", "public_write": True},
     )
     a = await client.post("/collections/public/items", json=unit_square_ccw)
-    # The cross-collection 409 names the public_read incumbent to any caller.
-    b = await client.post("/collections/cola/items", headers=admin_headers, json=unit_square_ccw)
+    b = await client.post("/collections/cola/items", json=unit_square_ccw)
     assert a.status_code == 201
-    assert b.status_code == 409
-    body = b.json()
-    assert body["geoid"] == a.json()["geoid"]
-    assert body["collection"] == "public"  # the INCUMBENT's collection, not the target
-    assert body["constraint"] == "uq_geoid_registry_geom_hash"
+    assert b.status_code == 201
+    assert b.json() == a.json()

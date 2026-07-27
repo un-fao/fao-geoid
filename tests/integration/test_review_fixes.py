@@ -11,48 +11,43 @@ from sqlalchemy.exc import DBAPIError, IntegrityError
 pytestmark = pytest.mark.integration
 
 
-# --- dual-violation precedence: the geometry 409 wins over external_id's -----
+# --- dual-violation precedence: the geometry arbiter wins over external_id's -
 # The arbiter CTE inserts the geoid_registry row first (ON CONFLICT DO NOTHING on
 # the geom_hash UNIQUE); the place row — and so its external_id index — is only
 # touched if the registry arbiter won. So a submission duplicating BOTH geometry
-# and external_id yields the GEOMETRY conflict (409 carrying the incumbent geoid),
-# never the external_id 409. Minted into a managed collection: only there can the
-# external_id leg still conflict (the public one is index-excluded since 0012),
-# so the precedence pin stays meaningful.
+# and external_id takes the GEOMETRY path — which since the idempotent-mint change
+# is a 201 carrying the incumbent geoid, NOT the external_id 409. Minted into a
+# managed collection: only there can the external_id leg still conflict (the
+# public one is index-excluded since 0012), so the precedence pin stays meaningful.
 
 
-async def test_dual_geometry_and_external_id_duplicate_yields_geometry_409(
-    client, admin_headers, ext_collection, unit_square_ccw
+async def test_dual_geometry_and_external_id_duplicate_yields_incumbent_geoid(
+    client, ext_collection, unit_square_ccw
 ):
     feature = dict(unit_square_ccw, id="dup-ext")
     base = await client.post(f"/collections/{ext_collection}/items", json=feature)
     assert base.status_code == 201
 
-    # Sysadmin resubmit: the 409 discloses the incumbent (only a private
-    # incumbent is masked for non-members).
-    resub = await client.post(
-        f"/collections/{ext_collection}/items", headers=admin_headers, json=feature
-    )
-    assert resub.status_code == 409
-    assert resub.json()["constraint"] == "uq_geoid_registry_geom_hash"
-    assert resub.json()["geoid"] == base.json()["geoid"]
+    resub = await client.post(f"/collections/{ext_collection}/items", json=feature)
+    assert resub.status_code == 201
+    assert resub.json() == base.json()
 
 
-async def test_geometry_dup_with_another_rows_external_id_yields_geometry_409(
-    client, admin_headers, ext_collection, unit_square_ccw, other_square
+async def test_geometry_dup_with_another_rows_external_id_yields_incumbent_geoid(
+    client, ext_collection, unit_square_ccw, other_square
 ):
     items = f"/collections/{ext_collection}/items"
     a = await client.post(items, json=dict(unit_square_ccw, id="ext-a"))
     b = await client.post(items, json=dict(other_square, id="ext-b"))
     assert a.status_code == 201 and b.status_code == 201
 
-    # A's geometry + B's external_id: the geometry arbiter prechecks first, so
-    # the 409 carries A's geoid; the conflicting external_id is never reached.
-    # (Sysadmin caller so the incumbent is disclosed.)
-    resub = await client.post(items, headers=admin_headers, json=dict(unit_square_ccw, id="ext-b"))
-    assert resub.status_code == 409
-    assert resub.json()["constraint"] == "uq_geoid_registry_geom_hash"
+    # A's geometry + B's external_id: the geometry arbiter runs first, so the
+    # response carries A's geoid and the conflicting external_id is never reached
+    # (it would otherwise be a 409).
+    resub = await client.post(items, json=dict(unit_square_ccw, id="ext-b"))
+    assert resub.status_code == 201
     assert resub.json()["geoid"] == a.json()["geoid"]
+    assert resub.json()["external_id"] == "ext-b"
 
 
 # --- #4 TRUNCATE is blocked on place ----------------------------------------
@@ -167,11 +162,11 @@ async def test_bulk_registry_consistency_drift_returns_structured_500(
     assert resp.json()["message"] == "internal registry inconsistency"
 
 
-# --- H4: the dedup 409 names the STORED incumbent geoid, not a re-derived one ---
+# --- H4: a repeat mint returns the STORED incumbent geoid, not a re-derived one ---
 
 
-async def test_dedup_409_carries_the_stored_registry_geoid_for_legacy_rows(
-    client, admin_headers, session, unit_square_ccw
+async def test_repeat_mint_returns_the_stored_registry_geoid_for_legacy_rows(
+    client, session, unit_square_ccw
 ):
     minted = (await client.post("/collections/public/items", json=unit_square_ccw)).json()["geoid"]
     # Simulate a legacy (pre-0004, random-UUIDv7) registry row: rewrite the stored
@@ -185,13 +180,10 @@ async def test_dedup_409_carries_the_stored_registry_geoid_for_legacy_rows(
     await session.execute(text("SET session_replication_role = origin"))
     await session.commit()
 
-    # The duplicate 409 must report what is actually STORED (COALESCE(r.geoid, ...)),
-    # never a freshly re-derived geoid that resolves nowhere. Sysadmin caller: the
-    # rewritten place_id resolves to no place row, so only the admin leg discloses.
-    dup = await client.post(
-        "/collections/public/items", headers=admin_headers, json=unit_square_ccw
-    )
-    assert dup.status_code == 409
+    # The repeat must report what is actually STORED (COALESCE(r.geoid, ...)),
+    # never a freshly re-derived geoid that resolves nowhere.
+    dup = await client.post("/collections/public/items", json=unit_square_ccw)
+    assert dup.status_code == 201
     assert dup.json()["geoid"] == legacy
 
 

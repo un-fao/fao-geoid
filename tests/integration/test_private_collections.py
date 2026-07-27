@@ -1,11 +1,11 @@
-"""Integration: non-public collections (``public_read=false``) end to end.
+"""Integration: collections with the inert ``public_read=false`` field end to end.
 
-Existence is never masked on either resolver (client ruling 2026-07-09 round 2):
-an existing feature answers 200 to every caller — the full body for members,
-the geometry-only masked body for everyone else; 404 is reserved for a genuinely
-unknown id. Also covers caller-aware dedup-409 disclosure (single + bulk;
-membership OR a ``public_read`` incumbent), ``GET /me/geoids``, and the sysadmin
-``/manage`` item inventory.
+Existence is never masked on either resolver (client ruling 2026-07-09 round 2).
+The public geoid resolver is authentication-invariant and always returns the
+geometry-only body; the hidden external-id resolver remains full for members and
+masked for everyone else. 404 is reserved for a genuinely unknown id. Also covers
+the idempotent mint's uniform body across a private incumbent (single + bulk),
+``GET /me/geoids``, and the sysadmin ``/manage`` item inventory.
 """
 
 from __future__ import annotations
@@ -17,7 +17,6 @@ pytestmark = pytest.mark.integration
 # Module helpers close over ADMIN; the autouse fixture repopulates it per test
 # with a fresh sysadmin JWT (there is no static credential to inline anymore).
 ADMIN: dict[str, str] = {}
-CONFLICT_MESSAGE = "identical geometry already exists in the catalog"
 
 
 @pytest.fixture(autouse=True)
@@ -71,7 +70,7 @@ async def test_public_read_defaults_true(client, admin_headers):
     assert by_id["public"]["public_read"] is True
 
 
-# --- resolver existence: open on both, body member-only ---------------------------
+# --- resolver existence: open on both; public body is always masked ----------------
 
 
 async def test_resolver_serves_private_collection_to_any_geoid_holder(
@@ -125,14 +124,12 @@ async def test_public_collection_still_resolves_anonymously(client, unit_square_
     assert (await client.get(f"/{minted['geoid']}")).status_code == 200
 
 
-async def test_geoid_resolver_rejects_malformed_bearer(client, unit_square_ccw):
-    # The resolver now takes a principal (it decides body masking): a
-    # PRESENT-but-invalid credential is 401, never silently anonymous —
-    # mirroring the external-id twin below. No header stays anonymous (200).
+async def test_geoid_resolver_ignores_malformed_bearer(client, unit_square_ccw):
     minted = await _mint(client, "public", unit_square_ccw)
     resp = await client.get(f"/{minted['geoid']}", headers={"Authorization": "Bearer nope"})
-    assert resp.status_code == 401
-    assert (await client.get(f"/{minted['geoid']}")).status_code == 200
+    anonymous = await client.get(f"/{minted['geoid']}")
+    assert resp.status_code == anonymous.status_code == 200
+    assert resp.content == anonymous.content
 
 
 async def test_external_id_resolver_rejects_malformed_bearer(client, ext_collection):
@@ -146,12 +143,10 @@ async def test_external_id_resolver_rejects_malformed_bearer(client, ext_collect
     assert resp.status_code == 401
 
 
-# --- read-path metadata masking (R3/R4: membership-based, public_read-independent) -
+# --- public geoid resolver masking is identity- and public_read-independent --------
 
 
-async def test_geoid_resolver_masks_metadata_for_non_members(oidc_client, make_token, bearer):
-    # Full feature only for sysadmin / creator / members — in a PUBLIC collection:
-    # metadata visibility is independent of public_read.
+async def test_geoid_resolver_masks_metadata_for_every_caller(oidc_client, make_token, bearer):
     creator = bearer(make_token(sub="kc-cr", email="cr@x.org"))
     minted = await _mint(
         oidc_client, "public", _square(85, 40, external_id="mask-1"), headers=creator
@@ -159,7 +154,7 @@ async def test_geoid_resolver_masks_metadata_for_non_members(oidc_client, make_t
     geoid = minted["geoid"]
 
     stranger = bearer(make_token(sub="kc-st", email="stranger@x.org"))
-    for headers in (None, stranger):
+    for headers in (None, stranger, creator, ADMIN):
         resp = await oidc_client.get(f"/{geoid}", headers=headers)
         assert resp.status_code == 200
         body = resp.json()
@@ -168,121 +163,66 @@ async def test_geoid_resolver_masks_metadata_for_non_members(oidc_client, make_t
         assert set(body["properties"]) == {"geoid", "uri"}
         assert {link["rel"] for link in body["links"]} == {"self", "alternate"}
 
-    for headers in (creator, ADMIN):
-        body = (await oidc_client.get(f"/{geoid}", headers=headers)).json()
-        assert body["properties"]["external_id"] == "mask-1"
-        assert "_geoid_provenance" in body["properties"]
-        assert "collection" in {link["rel"] for link in body["links"]}
 
-
-async def test_viewer_grant_unlocks_full_metadata(oidc_client, make_token, bearer):
+async def test_viewer_grant_does_not_change_public_geoid_body(oidc_client, make_token, bearer):
     await _create(oidc_client, "priv-m", public_read=False)
     await _grant(oidc_client, "priv-m", "viewer@x.org", "viewer")
     minted = await _mint(oidc_client, "priv-m", _square(105, 40, external_id="mask-3"))
 
     viewer = bearer(make_token(sub="kc-vw", email="viewer@x.org"))
     body = (await oidc_client.get(f"/{minted['geoid']}", headers=viewer)).json()
-    assert body["properties"]["external_id"] == "mask-3"
+    assert set(body["properties"]) == {"geoid", "uri"}
 
     stranger = bearer(make_token(sub="kc-st", email="stranger@x.org"))
     masked = (await oidc_client.get(f"/{minted['geoid']}", headers=stranger)).json()
     assert set(masked["properties"]) == {"geoid", "uri"}
 
 
-# --- caller-aware dedup-409 disclosure --------------------------------------------
+# --- cross-collection repeats reveal nothing about the incumbent ------------------
+# A repeat mint answers 201 with the existing geoid, in a body that names no collection. That
+# uniform body is what dissolves the probe oracle — a stranger POSTing a guessed
+# geometry can no longer learn where, or whether, it already lives.
 
 
-async def test_dedup_409_masked_for_stranger_and_anonymous(oidc_client, make_token, bearer):
+async def test_repeat_of_a_private_incumbent_mints_201_and_names_no_collection(
+    oidc_client, make_token, bearer
+):
     await _create(oidc_client, "priv-d", public_read=False)
-    await _mint(oidc_client, "priv-d", _square(30, 30))
+    minted = await _mint(oidc_client, "priv-d", _square(30, 30))
 
     stranger = bearer(make_token(sub="kc-st", email="stranger@x.org"))
     for headers in (stranger, None):
         resp = await oidc_client.post(
             "/collections/public/items", headers=headers, json=_square(30, 30)
         )
-        assert resp.status_code == 409
+        assert resp.status_code == 201
         body = resp.json()
-        assert body["message"] == CONFLICT_MESSAGE
-        assert body["constraint"] == "uq_geoid_registry_geom_hash"
-        assert body["geoid"] is None
-        assert body["uri"] is None
-        assert body["collection"] is None
+        assert body == {"geoid": minted["geoid"], "uri": minted["uri"], "external_id": None}
+        assert resp.headers["Location"] == minted["uri"]
 
 
-async def test_dedup_409_disclosed_when_incumbent_is_public(
-    oidc_client, make_token, bearer, unit_square_ccw
+async def test_repeat_body_is_identical_for_stranger_member_and_anonymous(
+    oidc_client, make_token, bearer
 ):
-    # Client ruling 2026-07-09 round 2 (restoring the public_read leg):
-    # a public_read incumbent's 409 names the incumbent to EVERY caller —
-    # anonymous and authenticated non-members included. Only a private
-    # incumbent is masked for non-members (pinned above).
-    minted = (await oidc_client.post("/collections/public/items", json=unit_square_ccw)).json()
-
-    stranger = bearer(make_token(sub="kc-st", email="stranger@x.org"))
-    for headers in (None, stranger):
-        resp = await oidc_client.post(
-            "/collections/public/items", headers=headers, json=unit_square_ccw
-        )
-        assert resp.status_code == 409
-        body = resp.json()
-        assert body["message"] == CONFLICT_MESSAGE
-        assert body["constraint"] == "uq_geoid_registry_geom_hash"
-        assert body["geoid"] == minted["geoid"]
-        assert body["uri"] == minted["uri"]
-        assert body["collection"] == "public"
-
-
-async def test_dedup_409_disclosed_for_viewer_and_sysadmin(oidc_client, make_token, bearer):
+    # The oracle regression pin: membership must make NO difference to the body.
     await _create(oidc_client, "priv-e", public_read=False)
     await _grant(oidc_client, "priv-e", "viewer@x.org", "viewer")
-    minted = await _mint(oidc_client, "priv-e", _square(40, 40))
+    await _mint(oidc_client, "priv-e", _square(40, 40))
 
     viewer = bearer(make_token(sub="kc-vw", email="viewer@x.org"))
-    for headers in (viewer, ADMIN):
+    stranger = bearer(make_token(sub="kc-st", email="stranger@x.org"))
+    bodies = []
+    for headers in (viewer, stranger, ADMIN, None):
         resp = await oidc_client.post(
             "/collections/public/items", headers=headers, json=_square(40, 40)
         )
-        assert resp.status_code == 409
-        body = resp.json()
-        assert body["geoid"] == minted["geoid"]
-        assert body["uri"] == minted["uri"]
-        assert body["collection"] == "priv-e"
+        assert resp.status_code == 201
+        bodies.append(resp.json())
+    assert all(body == bodies[0] for body in bodies)
 
 
-async def test_dedup_409_disclosed_to_the_creator_via_sub(oidc_client, make_token, bearer):
-    # Disclosure through created_by == sub alone: the creator's grant is revoked
-    # after the mint, so neither grant nor public_read can explain the disclosure.
-    await _create(oidc_client, "priv-f", public_read=False)
-    await _grant(oidc_client, "priv-f", "cr@x.org", "editor")
-    creator = bearer(make_token(sub="kc-cr", email="cr@x.org"))
-    minted = await _mint(oidc_client, "priv-f", _square(50, 50), headers=creator)
-    deleted = await oidc_client.delete("/collections/priv-f/grants/cr@x.org", headers=ADMIN)
-    assert deleted.status_code == 204
-
-    resp = await oidc_client.post(
-        "/collections/public/items", headers=creator, json=_square(50, 50)
-    )
-    assert resp.status_code == 409
-    assert resp.json()["geoid"] == minted["geoid"]
-    assert resp.json()["collection"] == "priv-f"
-
-
-async def test_dedup_409_anonymous_incumbent_never_matches_anonymous_caller(oidc_client):
-    # Both created_by and the caller's subject are None; the non-null guard must
-    # keep None == None from reading as "own mint".
-    await _create(oidc_client, "dropbox", public_write=True, public_read=False)
-    await _mint(oidc_client, "dropbox", _square(60, 60), headers={})
-
-    resp = await oidc_client.post("/collections/dropbox/items", json=_square(60, 60))
-    assert resp.status_code == 409
-    assert resp.json()["geoid"] is None
-    assert resp.json()["collection"] is None
-
-
-async def test_bulk_geometry_conflict_masked_and_disclosed(oidc_client, make_token, bearer):
+async def test_bulk_repeat_of_a_private_incumbent_is_accepted(oidc_client, make_token, bearer):
     await _create(oidc_client, "priv-b", public_read=False)
-    await _grant(oidc_client, "priv-b", "viewer@x.org", "viewer")
     minted = await _mint(oidc_client, "priv-b", _square(70, 70))
 
     stranger = bearer(make_token(sub="kc-st", email="stranger@x.org"))
@@ -290,23 +230,9 @@ async def test_bulk_geometry_conflict_masked_and_disclosed(oidc_client, make_tok
     report = (
         await oidc_client.post("/collections/public/items/bulk", headers=stranger, json=fc)
     ).json()
-    assert report["summary"] == {"received": 2, "accepted": 1, "rejected": 1}
-    masked = report["rejected"][0]
-    assert masked["reason"] == "geometry_conflict"
-    assert masked["detail"] == CONFLICT_MESSAGE
-    assert masked["geoid"] is None
-    assert masked["uri"] is None
-    assert masked["collection"] is None
-
-    viewer = bearer(make_token(sub="kc-vw", email="viewer@x.org"))
-    fc2 = {"type": "FeatureCollection", "features": [_square(70, 70), _square(90, 90)]}
-    report2 = (
-        await oidc_client.post("/collections/public/items/bulk", headers=viewer, json=fc2)
-    ).json()
-    disclosed = report2["rejected"][0]
-    assert disclosed["reason"] == "geometry_conflict"
-    assert disclosed["geoid"] == minted["geoid"]
-    assert disclosed["collection"] == "priv-b"
+    assert report["summary"] == {"received": 2, "accepted": 2, "rejected": 0}
+    assert report["accepted"][0]["geoid"] == minted["geoid"]
+    assert "collection" not in report["accepted"][0]
 
 
 # --- GET /me/geoids ---------------------------------------------------------------
@@ -319,9 +245,12 @@ async def test_me_geoids_requires_authentication(client):
 async def test_me_geoids_lists_only_own_mints_newest_first(oidc_client, make_token, bearer):
     alice = bearer(make_token(sub="kc-alice", email="alice@x.org"))
     bob = bearer(make_token(sub="kc-bob", email="bob@x.org"))
-    first = await _mint(oidc_client, "public", _square(100, 10), headers=alice)
-    second = await _mint(oidc_client, "public", _square(102, 10, external_id="mine"), headers=alice)
-    await _mint(oidc_client, "public", _square(104, 10), headers=bob)
+    await _create(oidc_client, "authored", public_write=True)
+    first = await _mint(oidc_client, "authored", _square(100, 10), headers=alice)
+    second = await _mint(
+        oidc_client, "authored", _square(102, 10, external_id="mine"), headers=alice
+    )
+    await _mint(oidc_client, "authored", _square(104, 10), headers=bob)
 
     resp = await oidc_client.get("/me/geoids", headers=alice)
     assert resp.status_code == 200
@@ -331,7 +260,7 @@ async def test_me_geoids_lists_only_own_mints_newest_first(oidc_client, make_tok
         set(r) == {"geoid", "uri", "collection", "external_id", "created_at"} for r in records
     )
     assert records[0]["external_id"] == "mine"
-    assert records[0]["collection"] == "public"
+    assert records[0]["collection"] == "authored"
 
     bobs = (await oidc_client.get("/me/geoids", headers=bob)).json()
     assert len(bobs) == 1
@@ -339,8 +268,11 @@ async def test_me_geoids_lists_only_own_mints_newest_first(oidc_client, make_tok
 
 async def test_me_geoids_pagination(oidc_client, make_token, bearer):
     carol = bearer(make_token(sub="kc-carol", email="carol@x.org"))
+    await _create(oidc_client, "carol-authored", public_write=True)
     minted = {
-        (await _mint(oidc_client, "public", _square(110 + 2 * i, 20), headers=carol))["geoid"]
+        (await _mint(oidc_client, "carol-authored", _square(110 + 2 * i, 20), headers=carol))[
+            "geoid"
+        ]
         for i in range(3)
     }
     page1 = (await oidc_client.get("/me/geoids?limit=2", headers=carol)).json()

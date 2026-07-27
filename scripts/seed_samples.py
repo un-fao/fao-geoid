@@ -61,15 +61,9 @@ def main() -> int:
             body = resp.json()
             ext = str(feature.get("id"))
             if resp.status_code == 201:
+                # Re-running the seed answers 201 again with the SAME geoid — the
+                # mint is idempotent, so seeding is safe to repeat.
                 print(f"  [201] {ext:<22} {'minted':<18} geoid={body['geoid']}")
-            elif (
-                resp.status_code == 409 and body.get("constraint") == "uq_geoid_registry_geom_hash"
-            ):
-                # Re-running the seed: the geometry is already registered. The
-                # public collection is public_read, so the 409 names the incumbent
-                # even for the anonymous seeder; only a private incumbent masks.
-                shown = body.get("geoid") or "masked (private incumbent, not a member)"
-                print(f"  [409] {ext:<22} {'duplicate→existing':<18} geoid={shown}")
             else:
                 print(f"  [{resp.status_code}] {ext:<22} ERROR {body}")
                 errors += 1
@@ -81,20 +75,11 @@ def main() -> int:
         dup = json.loads((SAMPLES / "duplicate_of_GH-COCOA-001.geojson").read_text())
         resp = _post(client, dup)
         body = resp.json()
-        if resp.status_code == 409:
-            status = "409 Conflict"
+        if resp.status_code == 201 and body.get("geoid") == first_geoid:
+            print(f"  [201] no new row; the existing geoid comes back: {body['geoid']}")
         else:
-            status = f"?? {resp.status_code}"
             errors += 1
-        if body.get("geoid") is None:
-            # Masked only when the incumbent lives in a private collection —
-            # a public_read incumbent (the demo's case) discloses to anonymous.
-            print(f"  [{status}] insert rejected; incumbent masked (private collection)")
-        else:
-            print(
-                f"  [{status}] insert rejected; incumbent geoid={body.get('geoid')} "
-                f"(collection={body.get('collection')})"
-            )
+            print(f"  [{resp.status_code}] expected 201 carrying geoid={first_geoid}, got {body}")
 
         print("\n== Validation demo (self-intersecting bow-tie) ==")
         invalid = json.loads((SAMPLES / "invalid_selfintersecting.geojson").read_text())

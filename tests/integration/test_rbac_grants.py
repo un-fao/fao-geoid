@@ -1,9 +1,9 @@
 """Integration: per-collection grant ladder (viewer < editor < owner) on the
 write + manage paths, plus Keycloak-``sub`` backfill on first authorized access.
 
-These pin who may WRITE to a collection and who may MANAGE its grants. Read
-enforcement (``public_read``/viewer) is pinned in ``test_private_collections.py``;
-``GET /collections`` stays admin-gated (unchanged).
+These pin who may WRITE to a collection and who may MANAGE its grants. Resolver
+metadata visibility (membership-based and ``public_read``-independent) is pinned
+in ``test_private_collections.py``; ``GET /collections`` stays admin-gated.
 """
 
 from __future__ import annotations

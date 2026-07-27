@@ -31,8 +31,8 @@ class GeoidRegistry(Base):
     # the same derived value into both). Kept as its own column because the
     # registry is the sharding hinge and must stand alone as a reference table.
     place_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
-    # Deliberately denormalized from place.collection_id: the dedup-409 incumbent
-    # lookup reads THIS copy, so it keeps working when place is sharded away.
+    # Deliberately denormalized from place.collection_id: the idempotent arbiter's
+    # consistency lookup reads THIS copy, so it keeps working when place is sharded.
     collection_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
     # The global geometry-dedup hash (canonical recipe @ the one global grid).
     # Written by the arbiter CTE; the UNIQUE above is the enforced dedup invariant.

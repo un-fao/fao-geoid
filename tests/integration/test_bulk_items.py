@@ -82,59 +82,48 @@ async def test_bulk_feature_without_properties_member_is_accepted(client):
     assert resp.json()["summary"] == {"received": 2, "accepted": 2, "rejected": 0}
 
 
-async def test_bulk_geoid_matches_single_route_hash(client, admin_headers, unit_square_ccw):
-    # Hash parity: the same geometry minted via the single route is recognised as a
-    # duplicate by the bulk route, and the conflict names the single-route geoid —
-    # proving both paths compute the identical geom_hash. (The public_read
-    # incumbent's geometry_conflict reject discloses to any caller.)
+async def test_bulk_geoid_matches_single_route_hash(client, unit_square_ccw):
+    # Hash parity: the same geometry minted via the single route comes back from the
+    # bulk route carrying that same geoid — proving both paths compute the identical
+    # geom_hash.
     single = await client.post("/collections/public/items", json=unit_square_ccw)
     assert single.status_code == 201
     incumbent = single.json()["geoid"]
 
-    resp = await client.post(_BULK, headers=admin_headers, json=_fc(unit_square_ccw))
+    resp = await client.post(_BULK, json=_fc(unit_square_ccw))
     assert resp.status_code == 200
     body = resp.json()
-    assert body["summary"] == {"received": 1, "accepted": 0, "rejected": 1}
-    rejected = body["rejected"][0]
-    assert rejected["reason"] == "geometry_conflict"
-    assert rejected["geoid"] == incumbent
-    assert rejected["collection"] == "public"
+    assert body["summary"] == {"received": 1, "accepted": 1, "rejected": 0}
+    assert body["accepted"][0]["geoid"] == incumbent
 
 
-async def test_bulk_in_batch_geometry_twins_collapse(
-    client, make_token, bearer, unit_square_ccw, unit_square_reversed, other_square
+async def test_bulk_in_batch_geometry_twins_collapse_onto_one_geoid(
+    client, unit_square_ccw, unit_square_reversed, other_square
 ):
     # Two encodings of the same canonical geometry in one batch: the first mints,
-    # the second collapses onto it (the arbiter sees the in-batch row), the third
-    # (distinct) mints. No SAVEPOINT poisoning — the batch survives the conflict.
-    # Authenticated caller: the in-batch twin's incumbent is the caller's OWN mint
-    # from moments earlier — disclosed via created_by == sub (and public_read).
-    submitter = bearer(make_token(sub="kc-bulk", email="bulk@x.org"))
-    resp = await client.post(
-        _BULK, headers=submitter, json=_fc(unit_square_ccw, unit_square_reversed, other_square)
-    )
+    # the second collapses onto it (the arbiter sees the in-batch row) and is
+    # ACCEPTED with that geoid, the third (distinct) mints its own. No SAVEPOINT
+    # poisoning — the batch survives, and `accepted` carries a repeated geoid.
+    resp = await client.post(_BULK, json=_fc(unit_square_ccw, unit_square_reversed, other_square))
     assert resp.status_code == 200
     body = resp.json()
-    assert body["summary"] == {"received": 3, "accepted": 2, "rejected": 1}
-    rejected = body["rejected"][0]
-    assert rejected["index"] == 1
-    assert rejected["reason"] == "geometry_conflict"
-    first_accepted = next(a["geoid"] for a in body["accepted"] if a["index"] == 0)
-    assert rejected["geoid"] == first_accepted
+    assert body["summary"] == {"received": 3, "accepted": 3, "rejected": 0}
+    by_index = {a["index"]: a["geoid"] for a in body["accepted"]}
+    assert by_index[0] == by_index[1]
+    assert by_index[2] != by_index[0]
 
 
-async def test_bulk_geometry_conflict_against_existing_place(
-    client, admin_headers, unit_square_ccw
+async def test_bulk_resubmitting_a_whole_batch_accepts_everything_again(
+    client, unit_square_ccw, other_square
 ):
-    first = await client.post(_BULK, json=_fc(unit_square_ccw))
-    minted = first.json()["accepted"][0]["geoid"]
-    # Re-POST the same geometry -> all geometry_conflict against the incumbent
-    # (disclosed — the public collection is public_read).
-    again = await client.post(_BULK, headers=admin_headers, json=_fc(unit_square_ccw))
+    first = await client.post(_BULK, json=_fc(unit_square_ccw, other_square))
+    assert first.json()["summary"] == {"received": 2, "accepted": 2, "rejected": 0}
+    minted = {a["index"]: a["geoid"] for a in first.json()["accepted"]}
+
+    again = await client.post(_BULK, json=_fc(unit_square_ccw, other_square))
     body = again.json()
-    assert body["summary"] == {"received": 1, "accepted": 0, "rejected": 1}
-    assert body["rejected"][0]["reason"] == "geometry_conflict"
-    assert body["rejected"][0]["geoid"] == minted
+    assert body["summary"] == {"received": 2, "accepted": 2, "rejected": 0}
+    assert {a["index"]: a["geoid"] for a in body["accepted"]} == minted
 
 
 async def test_bulk_external_id_conflict_in_batch(client, ext_collection):

@@ -18,22 +18,21 @@ from geoid.services.bootstrap import ensure_public_collection
 logger = logging.getLogger("geoid")
 
 _DESCRIPTION = """\
-**GeoID** mints a globally unique, secure, **immutable** identifier (a *geoid*,
-UUIDv8) for every geospatial place, deduplicates by canonical geometry, tracks
-provenance — served over **OGC API Features**.
+**GeoID** mints a globally unique, **immutable** identifier (a *geoid*, UUIDv8)
+for every geospatial place, derived from the geometry itself — the same geometry
+always returns the same geoid — and tracks provenance.
 
-* **Write / registry** — `POST /collections/{id}/items` → `{geoid, uri}`
-* **Bulk write** — `POST /collections/{id}/items/bulk` (a GeoJSON FeatureCollection,
-  processed in-request, returns a per-feature report)
-* **Resolve** — `GET /{uuid}`, `GET /collections/{id}/external/{external_id}`
-* **Health** — `GET /health` (DB connectivity probe)
+* **Mint** — `POST /items` (one GeoJSON Feature) → `{geoid, uri}`
+* **Bulk mint** — `POST /items/bulk` (a GeoJSON FeatureCollection, processed
+  in-request, returns a per-feature report)
+* **Resolve** — `GET /{geoid}` (GeoJSON, or WKT with `?format=wkt`)
+
+These three public operations ignore authentication until further notice.
 """
 
 
 _TAGS_METADATA = [
-    {"name": "health", "description": "App health check"},
     {"name": "registry", "description": "Write and resolution endpoints"},
-    {"name": "manage", "description": "Admin-gated management endpoints"},
 ]
 
 
@@ -133,16 +132,18 @@ def create_app() -> FastAPI:
     )
     register_exception_handlers(app)
 
-    # Probe surface first, then the OGC read surface (hidden from /docs), the
-    # per-collection grant routes, the registry/resolver, and the admin /manage
-    # router. The grants router is mounted BEFORE places so its literal
-    # /collections/... routes are matched ahead of the root /{geoid} catch-all;
-    # /health is a literal path — no OGC collision.
-    app.include_router(health.router)
-    app.include_router(ogc.router, include_in_schema=False)  # live, but hidden from /docs
-    app.include_router(grants.router)
+    # Probe surface first, then the OGC read surface, the per-collection grant
+    # routes, the registry/resolver, and the admin /manage router. The grants
+    # router is mounted BEFORE places so its literal /collections/... routes are
+    # matched ahead of the root /{geoid} catch-all; /health is a literal path —
+    # no OGC collision. Everything but `places` is hidden from /docs: the public
+    # surface is the three registry operations the client fixed. Hiding is
+    # cosmetic — every route stays live and keeps its existing auth gate.
+    app.include_router(health.router, include_in_schema=False)
+    app.include_router(ogc.router, include_in_schema=False)
+    app.include_router(grants.router, include_in_schema=False)
     app.include_router(places.router)
-    app.include_router(manage.router)
+    app.include_router(manage.router, include_in_schema=False)
 
     app.state.settings = settings
     return app
