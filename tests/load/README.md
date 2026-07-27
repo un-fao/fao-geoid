@@ -20,7 +20,8 @@ bytes, Cloud Monitoring peaks/log checks, wipe SQL) lives in the gitignored
 `local-scripts/stress-campaign/`; campaign reports land in `local-scripts/docs/`.
 The current review certification is
 `local-scripts/docs/STRESS-CAMPAIGN-2026-07-27.md`: 4,000 simple features per request
-at up to two concurrent bulk requests. It does not raise production's 2,500 cap.
+at up to two concurrent bulk requests. Release v0.10.2 promotes the same cap to
+production.
 
 Historical note: the k6/locust scripts that used to live here predated the current
 idempotent-mint contract and were removed 2026-07-17 — don't resurrect them; extend

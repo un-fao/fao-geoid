@@ -1,7 +1,7 @@
 """Bulk-path timing gate for the v2 identity recipe (ADR-007 risk: the v2 hash is
 plpgsql — never inlined, loops per vertex — and the schema layer adds a per-feature
 Python degeneracy pre-check; both run up to GEOID_BULK_MAX_FEATURES times per
-synchronous bulk request, 4000 at the review setting).
+synchronous bulk request, 4000 at the deployed setting).
 
 This is a smoke GATE, not a benchmark: the ceiling is deliberately generous (the
 deployed request window is 600s on a faster machine than an emulated CI container)
@@ -21,7 +21,7 @@ from geoid.config import Settings, get_settings
 
 pytestmark = pytest.mark.integration
 
-_DEPLOYED_BULK_MAX = 4000  # deploy.yml sets review GEOID_BULK_MAX_FEATURES=4000
+_DEPLOYED_BULK_MAX = 4000  # deploy.yml sets GEOID_BULK_MAX_FEATURES=4000
 _CEILING_SECONDS = 180.0  # generous vs the deployed 600s window; prints actual
 
 

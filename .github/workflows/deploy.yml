@@ -234,7 +234,7 @@ jobs:
             --subnet "${{ vars.VPC_SUBNET }}" \
             --vpc-egress private-ranges-only \
             --set-secrets GEOID_DATABASE_URL=geoid-database-url:latest \
-            --set-env-vars "^@^GEOID_ENVIRONMENT=$TARGET_ENV@GEOID_BASE_URL=${{ vars.GEOID_BASE_URL }}@GEOID_ROOT_PATH=${{ vars.GEOID_ROOT_PATH }}@GEOID_INSTANCE_ID=${{ vars.GEOID_INSTANCE_ID }}@GEOID_PUBLIC_COLLECTION=${{ vars.GEOID_PUBLIC_COLLECTION }}@GEOID_BULK_MAX_FEATURES=${{ github.event_name == 'release' && '2500' || '4000' }}@GEOID_DB_POOL_SIZE=5@GEOID_DB_MAX_OVERFLOW=15@GEOID_OIDC_ISSUER=${{ vars.GEOID_OIDC_ISSUER }}@GEOID_OIDC_JWKS_URL=${{ vars.GEOID_OIDC_JWKS_URL }}@GEOID_SWAGGER_OAUTH2_ENABLED=true@GEOID_RESOLVER_CACHE_MAX_AGE=${{ github.event_name == 'release' && '0' || '3600' }}" \
+            --set-env-vars "^@^GEOID_ENVIRONMENT=$TARGET_ENV@GEOID_BASE_URL=${{ vars.GEOID_BASE_URL }}@GEOID_ROOT_PATH=${{ vars.GEOID_ROOT_PATH }}@GEOID_INSTANCE_ID=${{ vars.GEOID_INSTANCE_ID }}@GEOID_PUBLIC_COLLECTION=${{ vars.GEOID_PUBLIC_COLLECTION }}@GEOID_BULK_MAX_FEATURES=4000@GEOID_DB_POOL_SIZE=5@GEOID_DB_MAX_OVERFLOW=15@GEOID_OIDC_ISSUER=${{ vars.GEOID_OIDC_ISSUER }}@GEOID_OIDC_JWKS_URL=${{ vars.GEOID_OIDC_JWKS_URL }}@GEOID_SWAGGER_OAUTH2_ENABLED=true@GEOID_RESOLVER_CACHE_MAX_AGE=${{ github.event_name == 'release' && '0' || '3600' }}" \
             --port 8000 \
             --allow-unauthenticated \
             --execution-environment gen2 \
@@ -250,10 +250,9 @@ jobs:
           # Per-environment shape: production runs warm (min-instances 1, 4 GiB —
           # perf finding F1 / decision D1, 2026-07-11) while review stays
           # scale-to-zero (min 0, 1 GiB). --concurrency 16 bounds how many (up to
-          # 4000-feature in review, 2500-feature in production) bulk bodies one instance
-          # parses at once — sized against the SMALLER review instance (1 GiB); the Cloud
-          # Run default of 80 was an OOM risk. Review's higher cap is capacity-gated and
-          # deliberately does not flow into a release event.
+          # 4000-feature bulk bodies one instance parses at once — sized and
+          # capacity-certified against the SMALLER review instance (1 GiB); the Cloud
+          # Run default of 80 was an OOM risk. Production has the same cap with 4 GiB.
 
       - name: Install uv (for the smoke script)
         uses: astral-sh/setup-uv@v8.2.0

@@ -153,7 +153,7 @@ platform-measured request latencies.
 - The capacity ceiling is the instance slot budget (instances × `--concurrency`). Past it, Cloud Run
   sheds load with retryable **429s** — the app itself returned no 5xx at any load level tested.
 - The certified review bulk envelope is **4,000 simple farm plots per request at up to two concurrent
-  requests**. Review uses that cap; production remains 2,500 and the code default remains 1,000.
+  requests**. Review and production use that cap; the code default remains 1,000.
 - In the 4,000-feature gate, Cloud Run memory stayed below 10% and Cloud SQL peaked at 46.8% CPU,
   27.0% memory, and five backends. The serial per-feature loop remains the scaling constraint.
 - A mint costs ~2× a read server-side (hash + dedup arbiter + three-table insert + audit trigger);
