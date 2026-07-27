@@ -4,6 +4,15 @@ All notable changes to GeoID are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- The synchronous bulk cap is **4,000 on review only**, certified for simple
+  farm-plot payloads at up to two concurrent requests. Release/production remains
+  at 2,500 and the application default remains 1,000. The deployed-scale
+  integration timing gate now exercises 4,000 features.
+
 ## [0.10.1] - 2026-07-27
 
 ### Fixed

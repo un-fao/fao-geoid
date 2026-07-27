@@ -137,22 +137,25 @@ uv run ruff check .
 
 ## Performance
 
-Measured 2026-07-17 against a staging deployment — Cloud Run (1 vCPU / 1 GiB per instance,
+Measured 2026-07-17 and 2026-07-27 against the review deployment — Cloud Run (1 vCPU / 1 GiB per instance,
 `--concurrency 16`, max 4 instances, single uvicorn worker) over Cloud SQL PostgreSQL 17 + PostGIS
 (2 vCPU / 4 GB). Load generated from a remote client (~80 ms network RTT); "server" figures are the
 platform-measured request latencies.
 
 | Path | Result |
 |---|---|
-| Bulk ingest — `POST /items/bulk`, 1,000-feature batches, 2 concurrent | **40,000 features in 211 s (~190 features/s)**, zero rejects |
+| Bulk ingest — `POST /items/bulk`, **4,000-feature batches, 2 concurrent** | **40,000 features at 180.7 features/s**, zero rejects/errors; batch p95/max 54.0 s |
+| Bulk heavy probes | 2 KiB properties and 100-vertex polygons passed at concurrency 1/2; heaviest pair max 126.4 s, memory <26% |
 | Sustained mixed reads — resolve-by-geoid + conformance, 10 min | **101,109 requests @ 168 RPS, zero errors**; client p50 88 ms, server p50 ~6 ms |
 | Read concurrency ramp | linear to **~280 RPS** at 32 client concurrency; server p50 6–10 ms, p95 ≤ 19 ms at every step |
 | Single-mint concurrency ramp | **~91 mints/s** at 32 concurrency, **zero failures**; server p95 ≤ 107 ms |
 
 - The capacity ceiling is the instance slot budget (instances × `--concurrency`). Past it, Cloud Run
   sheds load with retryable **429s** — the app itself returned no 5xx at any load level tested.
-- The bottleneck is app CPU; the database stayed under 20% CPU in every steady-state window (~40%
-  during bulk ingest). Each additional instance adds roughly **+60–70 RPS reads / +23 mints/s**.
+- The certified review bulk envelope is **4,000 simple farm plots per request at up to two concurrent
+  requests**. Review uses that cap; production remains 2,500 and the code default remains 1,000.
+- In the 4,000-feature gate, Cloud Run memory stayed below 10% and Cloud SQL peaked at 46.8% CPU,
+  27.0% memory, and five backends. The serial per-feature loop remains the scaling constraint.
 - A mint costs ~2× a read server-side (hash + dedup arbiter + three-table insert + audit trigger);
   client-observed latency is dominated by network transport, not the API.
 
