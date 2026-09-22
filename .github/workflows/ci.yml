@@ -7,6 +7,9 @@ on:
     branches: [main, review]
   pull_request:
 
+permissions:
+  contents: read
+
 # Lint/format is owned by pre-commit.yml; this workflow is the test + migration gate.
 concurrency:
   group: ci-${{ github.ref }}

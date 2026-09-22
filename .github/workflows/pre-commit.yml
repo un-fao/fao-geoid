@@ -4,6 +4,9 @@ on:
   push:
     branches: [main, review]
 
+permissions:
+  contents: read
+
 # Cancel a superseded lint run when rapid pushes stack up (mirrors ci.yml).
 concurrency:
   group: pre-commit-${{ github.ref }}
