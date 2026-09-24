@@ -184,7 +184,7 @@ every one. The ones that matter for a deployment:
 | `GEOID_DATABASE_URL` | asyncpg SQLAlchemy URL of the PostGIS database |
 | `GEOID_BASE_URL` | Public origin used in minted URIs and links |
 | `GEOID_ROOT_PATH` | Sub-path the API is mounted under behind a proxy (e.g. `/geoid`) |
-| `GEOID_ENVIRONMENT` | `development` (default), `review` or `production` |
+| `GEOID_ENVIRONMENT` | `development` (default), `review` or `production`; `review` also lists the collection, grant, external-id and admin routes in `/docs` |
 | `GEOID_PUBLIC_COLLECTION` | Slug of the collection that receives public mints |
 | `GEOID_INSTANCE_ID` | This instance's id, recorded in provenance |
 | `GEOID_BULK_MAX_FEATURES` | Cap per bulk request (default 1000); over it → `413` |

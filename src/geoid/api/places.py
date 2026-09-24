@@ -28,6 +28,7 @@ from fastapi import (
     Depends,
     Header,
     HTTPException,
+    Path,
     Query,
     Request,
     Response,
@@ -247,11 +248,20 @@ async def list_my_geoids(
 # prefixed include — same handlers, so the two shapes cannot drift. Both run BEFORE
 # the /{geoid} catch-all below, so the literal single segment "items" is matched as
 # a route, not parsed as a geoid.
-# The scoped include is hidden from the schema; were it ever unhidden, its
-# {collection_id} would go undocumented — it is deliberately absent from the
-# handler signatures (see _target_collection).
+# {collection_id} is deliberately absent from the handler signatures (see
+# _target_collection), so the scoped include declares it through a no-op dependency
+# that documents it wherever the scoped paths are listed.
+async def _scoped_collection_path(collection_id: str = Path()) -> None:
+    pass
+
+
 router.include_router(_writes)
-router.include_router(_writes, prefix="/collections/{collection_id}", include_in_schema=False)
+router.include_router(
+    _writes,
+    prefix="/collections/{collection_id}",
+    include_in_schema=False,
+    dependencies=[Depends(_scoped_collection_path)],
+)
 
 
 @router.post(

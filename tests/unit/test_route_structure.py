@@ -17,6 +17,7 @@ import json
 import pytest
 from fastapi.routing import APIRoute
 
+from geoid.config import get_settings
 from geoid.main import create_app
 from geoid.schemas.collection import CollectionCreate
 from geoid.schemas.place import BulkFeatureCollection, PlaceCreate
@@ -68,6 +69,53 @@ def test_the_public_schema_is_exactly_the_four_client_facing_operations():
         "/{geoid}",
         "/resolve",
     }
+
+
+@pytest.fixture
+def review_app(monkeypatch):
+    monkeypatch.setenv("GEOID_ENVIRONMENT", "review")
+    monkeypatch.setenv("GEOID_OIDC_ISSUER", "https://idp.test/realms/geoid")
+    monkeypatch.setenv("GEOID_OIDC_JWKS_URL", "https://idp.test/jwks")
+    get_settings.cache_clear()
+    yield create_app()
+    get_settings.cache_clear()
+
+
+def test_review_schema_is_the_pre_narrowing_surface_plus_the_public_operations(review_app):
+    # The review env restores what /docs listed before the public surface was
+    # narrowed; the OGC reads were hidden before that and stay hidden.
+    documented = {
+        (method.upper(), path)
+        for path, operations in review_app.openapi()["paths"].items()
+        for method in operations
+    }
+    assert documented == {
+        ("GET", "/health"),
+        ("GET", "/collections/{collection_id}/grants"),
+        ("POST", "/collections/{collection_id}/grants"),
+        ("DELETE", "/collections/{collection_id}/grants/{email}"),
+        ("POST", "/items"),
+        ("POST", "/items/bulk"),
+        ("POST", "/resolve"),
+        ("POST", "/collections/{collection_id}/items"),
+        ("POST", "/collections/{collection_id}/items/bulk"),
+        ("GET", "/me/geoids"),
+        ("GET", "/{geoid}"),
+        ("GET", "/collections/{collection_id}/external/{external_id}"),
+        ("GET", "/manage/collections"),
+        ("POST", "/manage/collections"),
+        ("GET", "/manage/collections/{collection_id}/items"),
+    }
+
+
+@pytest.mark.parametrize("suffix", ["", "/bulk"])
+def test_review_schema_declares_the_scoped_write_collection_id(review_app, suffix):
+    operation = review_app.openapi()["paths"][f"/collections/{{collection_id}}/items{suffix}"][
+        "post"
+    ]
+    assert {"name": "collection_id", "in": "path"}.items() <= next(
+        p for p in operation["parameters"] if p["name"] == "collection_id"
+    ).items()
 
 
 def test_the_four_public_operations_declare_no_security_requirement():
