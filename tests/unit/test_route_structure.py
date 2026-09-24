@@ -76,6 +76,7 @@ def review_app(monkeypatch):
     monkeypatch.setenv("GEOID_ENVIRONMENT", "review")
     monkeypatch.setenv("GEOID_OIDC_ISSUER", "https://idp.test/realms/geoid")
     monkeypatch.setenv("GEOID_OIDC_JWKS_URL", "https://idp.test/jwks")
+    monkeypatch.setenv("GEOID_SWAGGER_OAUTH2_ENABLED", "true")
     get_settings.cache_clear()
     yield create_app()
     get_settings.cache_clear()
@@ -118,15 +119,30 @@ def test_review_schema_declares_the_scoped_write_collection_id(review_app, suffi
     ).items()
 
 
-def test_the_four_public_operations_declare_no_security_requirement():
-    schema = create_app().openapi()
-    operations = (
-        schema["paths"]["/items"]["post"],
-        schema["paths"]["/items/bulk"]["post"],
-        schema["paths"]["/{geoid}"]["get"],
-        schema["paths"]["/resolve"]["post"],
-    )
-    assert all("security" not in operation for operation in operations)
+def test_only_signed_in_operations_carry_the_swagger_lock(review_app):
+    # The SSO scheme is app-wide so Swagger renders Authorize; operations that
+    # ignore credentials must not show a lock, the rest keep it so Swagger sends
+    # the token to them.
+    paths = review_app.openapi()["paths"]
+    locked = {
+        (method.upper(), path)
+        for path, operations in paths.items()
+        for method, operation in operations.items()
+        if "security" in operation
+    }
+    assert not locked & {
+        ("POST", "/items"),
+        ("POST", "/items/bulk"),
+        ("GET", "/{geoid}"),
+        ("POST", "/resolve"),
+        ("GET", "/health"),
+    }
+    assert {
+        ("GET", "/me/geoids"),
+        ("POST", "/collections/{collection_id}/items"),
+        ("GET", "/collections/{collection_id}/grants"),
+        ("GET", "/manage/collections"),
+    } <= locked
 
 
 @pytest.mark.parametrize("suffix", ["", "/bulk"])

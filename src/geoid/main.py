@@ -118,6 +118,25 @@ def _swagger_oauth2(settings: Settings) -> tuple[list, dict | None]:
     return [Depends(oauth2_scheme)], init_oauth
 
 
+# Operations that ignore credentials. The SSO scheme is app-wide only so Swagger
+# renders Authorize, which would otherwise put a lock on these too.
+_CREDENTIAL_FREE_PATHS = frozenset({"/items", "/items/bulk", "/{geoid}", "/resolve", "/health"})
+
+
+def _unlock_credential_free_operations(app: FastAPI) -> None:
+    generate = app.openapi
+
+    def openapi() -> dict:
+        if app.openapi_schema is None:
+            paths = generate()["paths"]
+            for path in _CREDENTIAL_FREE_PATHS & paths.keys():
+                for operation in paths[path].values():
+                    operation.pop("security", None)
+        return app.openapi_schema
+
+    app.openapi = openapi
+
+
 def create_app() -> FastAPI:
     settings = get_settings()
     oauth2_dependencies, swagger_init_oauth = _swagger_oauth2(settings)
@@ -154,6 +173,8 @@ def create_app() -> FastAPI:
         for route in app.routes:
             if isinstance(route, APIRoute) and route.endpoint not in ogc_endpoints:
                 route.include_in_schema = True
+
+    _unlock_credential_free_operations(app)
 
     app.state.settings = settings
     return app
