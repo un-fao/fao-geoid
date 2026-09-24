@@ -4,10 +4,11 @@ POST a polygon → ``{geoid, uri}``; resolve durably by geoid; resolve by
 ``(external_id, collection)``. Anonymous POSTs are allowed into ``public_write``
 collections via the shared registry service (no special code path).
 
-Three operations are public (visible in ``/docs``): ``POST /items``,
-``POST /items/bulk`` and the resolver ``GET /{geoid}``. They are deliberately
-authentication-invariant: Authorization is ignored, public mints record no caller
-identity, and the resolver always returns the anonymous representation. The
+Four operations are public (visible in ``/docs``): ``POST /items``,
+``POST /items/bulk``, the resolver ``GET /{geoid}`` and its bulk form
+``POST /resolve``. They are deliberately authentication-invariant: Authorization is
+ignored, public mints record no caller identity, and both resolvers always return
+the anonymous representation. The
 collection-scoped originals stay live and are simply hidden from the schema —
 hiding is cosmetic, never an authorization control.
 
@@ -54,6 +55,8 @@ from geoid.schemas.place import (
     MintResponse,
     PlaceCreate,
     PlaceRecord,
+    ResolveRequest,
+    ResolveResponse,
 )
 from geoid.services import authz_service, ogc_service, registry_service
 from geoid.services.exceptions import (
@@ -61,6 +64,7 @@ from geoid.services.exceptions import (
     CollectionNotFoundError,
     PlaceNotFoundError,
     PublicExternalIdLookupError,
+    ResolveLimitExceededError,
 )
 
 router = APIRouter(tags=["registry"])
@@ -248,6 +252,39 @@ async def list_my_geoids(
 # handler signatures (see _target_collection).
 router.include_router(_writes)
 router.include_router(_writes, prefix="/collections/{collection_id}", include_in_schema=False)
+
+
+@router.post(
+    "/resolve",
+    response_model=ResolveResponse,
+    response_class=GeoJSONResponse,
+    summary="Resolve many geoids at once",
+    description=(
+        "Submit a list of geoids and get back a GeoJSON FeatureCollection with each "
+        "found geoid's feature — the same body `GET /{geoid}` returns — plus a "
+        "`not_found` list of the ones that resolve to nothing. Duplicate ids are "
+        "returned once. Over the configured limit, the whole request is rejected (413)."
+    ),
+)
+async def resolve_geoids(
+    body: ResolveRequest,
+    session: AsyncSession = Depends(get_session),
+    settings: Settings = Depends(get_settings),
+) -> ResolveResponse:
+    # Authentication-invariant like GET /{geoid}: no principal dependency, so the
+    # body is always the anonymous representation.
+    if len(body.geoids) > settings.bulk_resolve_max_geoids:
+        raise ResolveLimitExceededError(len(body.geoids), settings.bulk_resolve_max_geoids)
+    requested = list(dict.fromkeys(body.geoids))
+    rows = {row["geoid"]: row for row in await place_repo.get_by_geoids(session, requested)}
+    return ResolveResponse(
+        features=[
+            ogc_service.build_feature(settings, rows[geoid], full=False)
+            for geoid in requested
+            if geoid in rows
+        ],
+        not_found=[str(geoid) for geoid in requested if geoid not in rows],
+    )
 
 
 @router.get(

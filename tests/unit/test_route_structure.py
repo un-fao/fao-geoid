@@ -52,24 +52,31 @@ def test_all_known_literal_single_segment_routes_precede_the_catchall():
         "/collections",
         "/health",
         "/items",
+        "/resolve",
         "/docs",
         "/redoc",
         "/openapi.json",
     } <= before
 
 
-def test_the_public_schema_is_exactly_the_three_client_facing_operations():
-    # The executable spec for the narrowed public surface (2026-07-25 client
-    # ruling): mint, bulk mint, resolve. Everything else stays live but hidden.
-    assert set(create_app().openapi()["paths"]) == {"/items", "/items/bulk", "/{geoid}"}
+def test_the_public_schema_is_exactly_the_four_client_facing_operations():
+    # The executable spec for the narrowed public surface (ADR-009, ADR-010): mint,
+    # bulk mint, resolve, bulk resolve. Everything else stays live but hidden.
+    assert set(create_app().openapi()["paths"]) == {
+        "/items",
+        "/items/bulk",
+        "/{geoid}",
+        "/resolve",
+    }
 
 
-def test_the_three_public_operations_declare_no_security_requirement():
+def test_the_four_public_operations_declare_no_security_requirement():
     schema = create_app().openapi()
     operations = (
         schema["paths"]["/items"]["post"],
         schema["paths"]["/items/bulk"]["post"],
         schema["paths"]["/{geoid}"]["get"],
+        schema["paths"]["/resolve"]["post"],
     )
     assert all("security" not in operation for operation in operations)
 
@@ -121,7 +128,7 @@ def test_registry_post_body_schemas_carry_executable_examples():
     assert len({json.dumps(g, sort_keys=True) for g in geometries}) == len(geometries)
 
 
-@pytest.mark.parametrize("path", ["/items", "/items/bulk"])
+@pytest.mark.parametrize("path", ["/items", "/items/bulk", "/resolve"])
 def test_registry_post_body_has_no_examples_dropdown(path):
     # Mirror of the path-param pin: the body must seed from `schema.example` only —
     # an `examples` map would render as a Swagger dropdown.
@@ -143,6 +150,8 @@ def test_every_mutating_route_is_in_the_authorized_inventory():
     #   /items[/bulk]       -> the same handler objects, included twice
     #   grants routes       -> api.grants._require_manageable (anon→401, owner|sysadmin)
     #   /manage/*           -> require_admin router dependency
+    #   /resolve            -> none by design: a read, authentication-invariant like
+    #                          GET /{geoid} (ADR-010), mutating only by HTTP method
     # Adding a mutating route? Wire its authz, then extend this set.
     assert mutating == {
         ("POST", "/collections/{collection_id}/items"),
@@ -152,4 +161,5 @@ def test_every_mutating_route_is_in_the_authorized_inventory():
         ("POST", "/collections/{collection_id}/grants"),
         ("DELETE", "/collections/{collection_id}/grants/{email}"),
         ("POST", "/manage/collections"),
+        ("POST", "/resolve"),
     }
