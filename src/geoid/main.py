@@ -6,6 +6,7 @@ import logging
 from contextlib import asynccontextmanager
 
 from fastapi import Depends, FastAPI
+from fastapi.routing import APIRoute
 from sqlalchemy.exc import InterfaceError, OperationalError
 
 from geoid import __version__
@@ -26,8 +27,10 @@ always returns the same geoid — and tracks provenance.
 * **Bulk mint** — `POST /items/bulk` (a GeoJSON FeatureCollection, processed
   in-request, returns a per-feature report)
 * **Resolve** — `GET /{geoid}` (GeoJSON, or WKT with `?format=wkt`)
+* **Bulk resolve** — `POST /resolve` (a list of geoids → a GeoJSON FeatureCollection
+  plus the `not_found` ids)
 
-These three public operations ignore authentication until further notice.
+These four public operations ignore authentication until further notice.
 """
 
 
@@ -137,13 +140,20 @@ def create_app() -> FastAPI:
     # router is mounted BEFORE places so its literal /collections/... routes are
     # matched ahead of the root /{geoid} catch-all; /health is a literal path —
     # no OGC collision. Everything but `places` is hidden from /docs: the public
-    # surface is the three registry operations the client fixed. Hiding is
-    # cosmetic — every route stays live and keeps its existing auth gate.
+    # surface is the four registry operations. Hiding is
+    # cosmetic — every route stays live and keeps its existing auth gate — so the
+    # review env lists everything but the OGC reads, which were hidden before the
+    # public surface was narrowed.
     app.include_router(health.router, include_in_schema=False)
     app.include_router(ogc.router, include_in_schema=False)
     app.include_router(grants.router, include_in_schema=False)
     app.include_router(places.router)
     app.include_router(manage.router, include_in_schema=False)
+    if settings.environment == "review":
+        ogc_endpoints = {route.endpoint for route in ogc.router.routes}
+        for route in app.routes:
+            if isinstance(route, APIRoute) and route.endpoint not in ogc_endpoints:
+                route.include_in_schema = True
 
     app.state.settings = settings
     return app
