@@ -1,6 +1,7 @@
-# ADR-010 — Bulk resolve: `POST /resolve`, a partial FeatureCollection, and its own cap
+# ADR-010 — Bulk resolve: `POST /bulk_resolve`, a partial FeatureCollection, and its own cap
 
-- **Status:** Accepted — 2026-09-24.
+- **Status:** Accepted — 2026-09-24; path renamed from `/resolve` to `/bulk_resolve`
+  2026-10-13.
 - **Extends:** [ADR-009](ADR-009-idempotent-mint-and-narrowed-public-surface.md) (the public
   surface gains a fourth operation; its authentication-invariance applies unchanged)
 - **Implemented by:** `api.places.resolve_geoids`, `repositories.place_repo.get_by_geoids`,
@@ -15,7 +16,7 @@ counterpart of `POST /items/bulk`.
 
 ## Decision
 
-### 1. `POST /resolve` with a JSON body, not `GET` with a query string
+### 1. `POST /bulk_resolve` with a JSON body, not `GET` with a query string
 
 A geoid is 36 characters, so a query string carrying many of them outgrows the URL length that
 proxies and servers commonly accept at a few hundred ids — and fails there with an error the

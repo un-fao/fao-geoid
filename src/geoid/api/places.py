@@ -6,7 +6,7 @@ collections via the shared registry service (no special code path).
 
 Four operations are public (visible in ``/docs``): ``POST /items``,
 ``POST /items/bulk``, the resolver ``GET /{geoid}`` and its bulk form
-``POST /resolve``. They are deliberately authentication-invariant: Authorization is
+``POST /bulk_resolve``. They are deliberately authentication-invariant: Authorization is
 ignored, public mints record no caller identity, and both resolvers always return
 the anonymous representation. The
 collection-scoped originals stay live and are simply hidden from the schema —
@@ -265,7 +265,7 @@ router.include_router(
 
 
 @router.post(
-    "/resolve",
+    "/bulk_resolve",
     response_model=ResolveResponse,
     response_class=GeoJSONResponse,
     summary="Resolve many geoids at once",

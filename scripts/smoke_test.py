@@ -144,28 +144,30 @@ def check_collection_desc(client: httpx.Client) -> str:
 
 
 def _post_resolve(client: httpx.Client, geoids: list[str]) -> httpx.Response:
-    return record("POST /resolve", client.post(f"{BASE}/resolve", json={"geoids": geoids}))
+    return record(
+        "POST /bulk_resolve", client.post(f"{BASE}/bulk_resolve", json={"geoids": geoids})
+    )
 
 
 def _validate_resolve(resp: httpx.Response, found: list[str], missing: list[str]) -> None:
-    """POST /resolve answered 200 GeoJSON with exactly ``found`` as features, in order,
+    """POST /bulk_resolve answered 200 GeoJSON with exactly ``found`` as features, in order,
     and exactly ``missing`` as not_found."""
-    _ensure(resp.status_code == 200, f"POST /resolve → {resp.status_code}: {resp.text[:200]}")
+    _ensure(resp.status_code == 200, f"POST /bulk_resolve → {resp.status_code}: {resp.text[:200]}")
     ctype = resp.headers.get("content-type", "")
     _ensure(
         ctype.startswith("application/geo+json"),
-        f"POST /resolve content-type {ctype!r}, expected 'application/geo+json'",
+        f"POST /bulk_resolve content-type {ctype!r}, expected 'application/geo+json'",
     )
     body = resp.json()
     _ensure(
         body.get("type") == "FeatureCollection",
-        f"POST /resolve type {body.get('type')!r}, expected 'FeatureCollection'",
+        f"POST /bulk_resolve type {body.get('type')!r}, expected 'FeatureCollection'",
     )
     ids = [feature.get("id") for feature in body.get("features") or []]
-    _ensure(ids == found, f"POST /resolve features {ids!r}, expected {found!r}")
+    _ensure(ids == found, f"POST /bulk_resolve features {ids!r}, expected {found!r}")
     _ensure(
         body.get("not_found") == missing,
-        f"POST /resolve not_found {body.get('not_found')!r}, expected {missing!r}",
+        f"POST /bulk_resolve not_found {body.get('not_found')!r}, expected {missing!r}",
     )
 
 

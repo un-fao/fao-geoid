@@ -53,7 +53,7 @@ def test_all_known_literal_single_segment_routes_precede_the_catchall():
         "/collections",
         "/health",
         "/items",
-        "/resolve",
+        "/bulk_resolve",
         "/docs",
         "/redoc",
         "/openapi.json",
@@ -67,7 +67,7 @@ def test_the_public_schema_is_exactly_the_four_client_facing_operations():
         "/items",
         "/items/bulk",
         "/{geoid}",
-        "/resolve",
+        "/bulk_resolve",
     }
 
 
@@ -97,7 +97,7 @@ def test_review_schema_is_the_pre_narrowing_surface_plus_the_public_operations(r
         ("DELETE", "/collections/{collection_id}/grants/{email}"),
         ("POST", "/items"),
         ("POST", "/items/bulk"),
-        ("POST", "/resolve"),
+        ("POST", "/bulk_resolve"),
         ("POST", "/collections/{collection_id}/items"),
         ("POST", "/collections/{collection_id}/items/bulk"),
         ("GET", "/me/geoids"),
@@ -134,7 +134,7 @@ def test_only_signed_in_operations_carry_the_swagger_lock(review_app):
         ("POST", "/items"),
         ("POST", "/items/bulk"),
         ("GET", "/{geoid}"),
-        ("POST", "/resolve"),
+        ("POST", "/bulk_resolve"),
         ("GET", "/health"),
     }
     assert {
@@ -192,7 +192,7 @@ def test_registry_post_body_schemas_carry_executable_examples():
     assert len({json.dumps(g, sort_keys=True) for g in geometries}) == len(geometries)
 
 
-@pytest.mark.parametrize("path", ["/items", "/items/bulk", "/resolve"])
+@pytest.mark.parametrize("path", ["/items", "/items/bulk", "/bulk_resolve"])
 def test_registry_post_body_has_no_examples_dropdown(path):
     # Mirror of the path-param pin: the body must seed from `schema.example` only —
     # an `examples` map would render as a Swagger dropdown.
@@ -214,7 +214,7 @@ def test_every_mutating_route_is_in_the_authorized_inventory():
     #   /items[/bulk]       -> the same handler objects, included twice
     #   grants routes       -> api.grants._require_manageable (anon→401, owner|sysadmin)
     #   /manage/*           -> require_admin router dependency
-    #   /resolve            -> none by design: a read, authentication-invariant like
+    #   /bulk_resolve       -> none by design: a read, authentication-invariant like
     #                          GET /{geoid} (ADR-010), mutating only by HTTP method
     # Adding a mutating route? Wire its authz, then extend this set.
     assert mutating == {
@@ -225,5 +225,5 @@ def test_every_mutating_route_is_in_the_authorized_inventory():
         ("POST", "/collections/{collection_id}/grants"),
         ("DELETE", "/collections/{collection_id}/grants/{email}"),
         ("POST", "/manage/collections"),
-        ("POST", "/resolve"),
+        ("POST", "/bulk_resolve"),
     }

@@ -27,7 +27,7 @@ always returns the same geoid — and tracks provenance.
 * **Bulk mint** — `POST /items/bulk` (a GeoJSON FeatureCollection, processed
   in-request, returns a per-feature report)
 * **Resolve** — `GET /{geoid}` (GeoJSON, or WKT with `?format=wkt`)
-* **Bulk resolve** — `POST /resolve` (a list of geoids → a GeoJSON FeatureCollection
+* **Bulk resolve** — `POST /bulk_resolve` (a list of geoids → a GeoJSON FeatureCollection
   plus the `not_found` ids)
 
 These four public operations ignore authentication until further notice.
@@ -120,7 +120,9 @@ def _swagger_oauth2(settings: Settings) -> tuple[list, dict | None]:
 
 # Operations that ignore credentials. The SSO scheme is app-wide only so Swagger
 # renders Authorize, which would otherwise put a lock on these too.
-_CREDENTIAL_FREE_PATHS = frozenset({"/items", "/items/bulk", "/{geoid}", "/resolve", "/health"})
+_CREDENTIAL_FREE_PATHS = frozenset(
+    {"/items", "/items/bulk", "/{geoid}", "/bulk_resolve", "/health"}
+)
 
 
 def _unlock_credential_free_operations(app: FastAPI) -> None:

@@ -12,7 +12,7 @@
   identity suppression), and the authentication-free `api.places.resolve_geoid`.
 - **Not changed:** managed-collection authorization, the identity recipe, the schema. No migration.
 - **Extended by:** [ADR-010](ADR-010-bulk-resolve.md), which adds a fourth public operation,
-  `POST /resolve`, under the same authentication-invariance.
+  `POST /bulk_resolve`, under the same authentication-invariance.
 
 ## Context
 

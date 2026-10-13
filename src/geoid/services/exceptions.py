@@ -125,7 +125,7 @@ class BulkLimitExceededError(GeoidServiceError):
 
 
 class ResolveLimitExceededError(BulkLimitExceededError):
-    """A POST /resolve body exceeds ``GEOID_BULK_RESOLVE_MAX_GEOIDS`` (413).
+    """A POST /bulk_resolve body exceeds ``GEOID_BULK_RESOLVE_MAX_GEOIDS`` (413).
 
     Subclassed so the one 413 handler serves both bulk routes with the same body.
     """
