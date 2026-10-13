@@ -313,7 +313,7 @@ class BulkReport(BaseModel):
 
 
 class ResolveRequest(BaseModel):
-    """The geoids to resolve in one POST /resolve call.
+    """The geoids to resolve in one POST /bulk_resolve call.
 
     One malformed id or an empty list rejects the whole request (422): the ids are
     the caller's input, not data the service can partially accept.

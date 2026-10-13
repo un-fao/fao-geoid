@@ -29,7 +29,7 @@ Developed by FAO under the [Open Foris Initiative](https://openforis.org).
 | Mint | `POST /items` | `201` + `{geoid, uri, external_id}`, `Location` header |
 | Bulk mint | `POST /items/bulk` | `200` + per-feature report |
 | Resolve | `GET /{geoid}` | GeoJSON Feature, or WKT with `?format=wkt` |
-| Bulk resolve | `POST /resolve` | `200` + GeoJSON FeatureCollection and `not_found` |
+| Bulk resolve | `POST /bulk_resolve` | `200` + GeoJSON FeatureCollection and `not_found` |
 
 Interactive docs live at `/docs` on a running instance. The examples below assume
 `http://localhost:8000` (see [Quickstart](#quickstart)).
@@ -108,7 +108,7 @@ self-hosted instance defaults to 1,000 (`GEOID_BULK_RESOLVE_MAX_GEOIDS`), and la
 refused with `413`.
 
 ```bash
-curl -s http://localhost:8000/resolve -H 'Content-Type: application/json' -d '{
+curl -s http://localhost:8000/bulk_resolve -H 'Content-Type: application/json' -d '{
   "geoids": ["e4b1a65e-a0cf-8738-a6c2-3c3b4250b0af", "00000000-0000-8000-8000-000000000000"]
 }'
 ```
@@ -188,7 +188,7 @@ every one. The ones that matter for a deployment:
 | `GEOID_PUBLIC_COLLECTION` | Slug of the collection that receives public mints |
 | `GEOID_INSTANCE_ID` | This instance's id, recorded in provenance |
 | `GEOID_BULK_MAX_FEATURES` | Cap per bulk request (default 1000); over it → `413` |
-| `GEOID_BULK_RESOLVE_MAX_GEOIDS` | Cap on geoids per `POST /resolve` (default 1000); over it → `413` |
+| `GEOID_BULK_RESOLVE_MAX_GEOIDS` | Cap on geoids per `POST /bulk_resolve` (default 1000); over it → `413` |
 | `GEOID_OIDC_ISSUER`, `GEOID_OIDC_JWKS_URL` | OIDC provider; required outside `development` |
 
 ## Deployment

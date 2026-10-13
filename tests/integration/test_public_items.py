@@ -1,6 +1,6 @@
 """The four public operations, end to end — the client-facing contract.
 
-``POST /items``, ``POST /items/bulk``, ``GET /{geoid}`` and ``POST /resolve`` are
+``POST /items``, ``POST /items/bulk``, ``GET /{geoid}`` and ``POST /bulk_resolve`` are
 the only operations in the published schema (ADR-009, ADR-010). They ignore authentication:
 valid, invalid, expired, and absent credentials have one wire contract, and public
 mints record anonymous provenance. Each write operation is ONE handler served at
@@ -250,7 +250,7 @@ async def test_the_four_public_operations_ignore_all_credentials(oidc_client, ma
 
     resolve_body = {"geoids": [singles[0].json()["geoid"]]}
     bulk_resolutions = [
-        await oidc_client.post("/resolve", json=resolve_body, headers=headers)
+        await oidc_client.post("/bulk_resolve", json=resolve_body, headers=headers)
         for headers in credential_variants
     ]
     assert {response.status_code for response in bulk_resolutions} == {200}
@@ -299,7 +299,7 @@ async def test_public_collection_mints_record_anonymous_provenance(
 
 async def test_hidden_routes_stay_live(client, admin_headers):
     schema_paths = set((await client.get("/openapi.json")).json()["paths"])
-    assert schema_paths == {"/items", "/items/bulk", "/{geoid}", "/resolve"}
+    assert schema_paths == {"/items", "/items/bulk", "/{geoid}", "/bulk_resolve"}
 
     assert (await client.post("/collections/public/items", json=_square(21, 21))).status_code == 201
     assert (await client.get("/health")).status_code == 200

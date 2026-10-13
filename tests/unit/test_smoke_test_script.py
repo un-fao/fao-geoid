@@ -125,7 +125,7 @@ def _resolve_response(
         status,
         content=body,
         headers={"content-type": content_type},
-        request=httpx.Request("POST", "https://example.test/resolve"),
+        request=httpx.Request("POST", "https://example.test/bulk_resolve"),
     )
 
 
