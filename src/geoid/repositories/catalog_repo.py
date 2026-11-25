@@ -8,10 +8,11 @@ guarantees the one default catalog via :func:`get_or_create_default`.
 
 from __future__ import annotations
 
+import uuid
+
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from geoid.domain.identifiers import uuid7
 from geoid.models import Catalog
 
 DEFAULT_CATALOG_SLUG = "geoid"
@@ -23,7 +24,7 @@ async def get_by_slug(session: AsyncSession, slug: str) -> Catalog | None:
 
 
 async def create(session: AsyncSession, *, slug: str, title: str | None = None) -> Catalog:
-    catalog = Catalog(id=uuid7(), slug=slug, title=title, meta={})
+    catalog = Catalog(id=uuid.uuid4(), slug=slug, title=title, meta={})
     session.add(catalog)
     await session.flush()
     return catalog
