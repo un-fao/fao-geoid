@@ -15,7 +15,6 @@ from sqlalchemy import delete, func, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from geoid.domain.identifiers import uuid7
 from geoid.domain.roles import Role
 from geoid.models import CollectionGrant
 
@@ -63,7 +62,7 @@ async def upsert_grant(
     stmt = (
         pg_insert(CollectionGrant)
         .values(
-            id=uuid7(),
+            id=uuid.uuid4(),
             collection_id=collection_id,
             principal_type=_USER,
             principal_email=_norm(email),

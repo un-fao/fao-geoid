@@ -16,7 +16,6 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from geoid.domain.identifiers import uuid7
 from geoid.models import Collection
 
 
@@ -46,7 +45,7 @@ async def create(
     metadata: dict[str, Any] | None = None,
 ) -> Collection:
     collection = Collection(
-        id=uuid7(),
+        id=uuid.uuid4(),
         catalog_id=catalog_id,
         slug=slug,
         title=title,
