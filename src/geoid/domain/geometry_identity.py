@@ -64,8 +64,7 @@ from geoid.domain.identifiers import geoid_from_geom_hash
 RECIPE_VERSION = "v2"
 
 # Integer lattice scale: one cell = 1e-7° (~1cm at the equator, exact-match
-# semantics). Pinned equal to migration 0008's SQL literal and to
-# round(1 / settings.dedup_grid_default) by unit tests.
+# semantics). Pinned equal to migration 0008's SQL literal by a unit test.
 SCALE = 10_000_000
 _SCALE_FLOAT = float(SCALE)  # 1e7 is exactly representable as a float64
 

@@ -14,7 +14,12 @@ from datetime import datetime
 from typing import Any, TypedDict
 
 from geoid.config import Settings
-from geoid.domain.geometry_format import WKT_MEDIA_TYPE, GeometryFormat, encode_geometry
+from geoid.domain.geometry_format import (
+    GEOJSON_MEDIA_TYPE,
+    WKT_MEDIA_TYPE,
+    GeometryFormat,
+    encode_geometry,
+)
 from geoid.domain.identifiers import uri_for
 from geoid.schemas.ogc import (
     CollectionDesc,
@@ -37,7 +42,6 @@ CONFORMANCE_CLASSES = [
     "http://www.opengis.net/spec/ogcapi-features-1/1.0/conf/geojson",
 ]
 
-_GEOJSON = "application/geo+json"
 _JSON = "application/json"
 
 
@@ -128,7 +132,7 @@ def _resolver_links(settings: Settings, geoid: uuid.UUID) -> list[Link]:
     """
     resolver_url = f"{settings.base_url_clean}/{geoid}"
     return [
-        Link(href=resolver_url, rel="self", type=_GEOJSON, title="GeoJSON"),
+        Link(href=resolver_url, rel="self", type=GEOJSON_MEDIA_TYPE, title="GeoJSON"),
         Link(href=f"{resolver_url}?f=wkt", rel="alternate", type=WKT_MEDIA_TYPE, title="WKT"),
     ]
 
@@ -195,4 +199,4 @@ def feature_geojson_alternate_header(feature: FeatureModel) -> str:
     """Reciprocal ``Link`` for a single bare-WKT item: its GeoJSON ``self`` href."""
     self_link = next((link for link in feature.links if link.rel == "self"), None)
     href = self_link.href if self_link is not None else ""
-    return f'<{href}>; rel="alternate"; type="{_GEOJSON}"'
+    return f'<{href}>; rel="alternate"; type="{GEOJSON_MEDIA_TYPE}"'

@@ -93,16 +93,6 @@ def test_swagger_oauth2_defaults_off():
     assert s.swagger_oauth2_client_id == "geoid-fe"
 
 
-def test_dedup_grid_default_is_1cm():
-    # Exact-match ruling: 1e-7 deg/vertex ≈ 1 cm — float-jitter immunity only.
-    assert _settings().dedup_grid_default == 1e-7
-
-
-def test_dedup_grid_default_env_override(monkeypatch):
-    monkeypatch.setenv("GEOID_DEDUP_GRID_DEFAULT", "0.0005")
-    assert _settings().dedup_grid_default == 0.0005
-
-
 def test_bulk_max_features_default_is_1000():
     # The synchronous bulk POST is sized for hundreds-to-a-few-thousand geometries.
     assert _settings().bulk_max_features == 1_000

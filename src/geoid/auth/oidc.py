@@ -61,7 +61,6 @@ def principal_from_claims(claims: dict[str, Any], settings: Settings) -> Princip
     return Principal(
         subject=subject,
         is_admin=settings.oidc_admin_role in roles,
-        roles=roles,
         email=email,
         email_verified=email_verified,
     )

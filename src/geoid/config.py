@@ -87,22 +87,6 @@ class Settings(DatabaseSettings):
         description="This instance's id, stamped into provenance + originating_instance.",
     )
 
-    # --- Geometry identity precision ----------------------------------------
-    dedup_grid_default: float = Field(
-        default=1e-7,
-        gt=0,
-        description=(
-            "The ONE global identity-lattice cell size (decimal degrees) for "
-            "geometry dedup/identity. 1e-7 ≈ 1cm/vertex — exact-match semantics "
-            "(float-jitter immunity only). "
-            "Documented canonical value: the app never passes it to the DB — recipe "
-            "v2 quantizes by the integer SCALE = 10^7 pinned inside migration 0008's "
-            "geoid_quantize_v2() (and mirrored by domain/geometry_identity.SCALE); a "
-            "unit test pins SCALE == round(1 / this value), so retunes are migration "
-            "events (identity-version events under v2), never a config-only change."
-        ),
-    )
-
     # --- Bulk write (synchronous multi-geometry POST) ----------------------
     bulk_max_features: int = Field(
         default=1_000,

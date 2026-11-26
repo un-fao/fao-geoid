@@ -16,7 +16,7 @@ byte-identical 401, so an unauthenticated caller learns nothing about the cause.
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from functools import lru_cache
 from typing import TYPE_CHECKING
 
@@ -49,18 +49,12 @@ class Principal:
     """The resolved caller. Anonymous principals have ``subject is None``.
 
     ``email``/``email_verified`` are populated from the Keycloak claims (anonymous
-    principals leave them at their defaults). They are appended after the original
-    three fields so ``admin()``/``anonymous()`` and every existing call site stay
-    valid. ``admin()`` is the sysadmin-tier constructor (tests and tooling).
-
-    ``roles`` is audit/logging-only — every authorization decision branches on the
-    precomputed ``is_admin`` (and the per-collection grant ladder), never on this
-    tuple. Do not treat it as a security control.
+    principals leave them at their defaults). ``admin()`` is the sysadmin-tier
+    constructor (tests and tooling).
     """
 
     subject: str | None
     is_admin: bool = False
-    roles: tuple[str, ...] = field(default_factory=tuple)
     email: str | None = None
     email_verified: bool = False
 
@@ -70,11 +64,11 @@ class Principal:
 
     @classmethod
     def anonymous(cls) -> Principal:
-        return cls(subject=None, is_admin=False, roles=())
+        return cls(subject=None, is_admin=False)
 
     @classmethod
     def admin(cls) -> Principal:
-        return cls(subject="admin", is_admin=True, roles=("sysadmin",))
+        return cls(subject="admin", is_admin=True)
 
 
 def _invalid_token() -> HTTPException:

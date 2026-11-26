@@ -1,8 +1,8 @@
 """Regression matrix for the item-listing removal + collections admin-gating.
 
 No endpoint may enumerate / filter / search a collection's items. The OGC
-collections read surface is gated behind the admin key (matching
-``GET /manage/collections``); landing + ``/conformance`` stay public.
+collections read surface is gated behind the sysadmin role (``require_admin``),
+matching ``GET /manage/collections``; landing + ``/conformance`` stay public.
 """
 
 from __future__ import annotations

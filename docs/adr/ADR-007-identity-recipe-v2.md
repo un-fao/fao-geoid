@@ -1,6 +1,7 @@
 # ADR-007 — Identity recipe v2: engine-independent integer-lattice canonicalization
 
 - **Status:** Accepted — 2026-07-02 (senior-review finding H5; sanctioned identity-version event)
+- **Amended:** §7 — the cell size is a recipe constant only; the unused grid setting was removed
 - **Supersedes:** [ADR-004](ADR-004-deterministic-geoid.md) (deterministic geoid; *recipe frozen
   for all time*) **in part** — the UUIDv8 derivation and the freeze *discipline* stand; the frozen
   v1 *recipe body* is replaced, executed as the identity-version event ADR-004 itself defined
@@ -116,8 +117,8 @@ GEOS/PostGIS calls remain in the identity bytes — only coordinate *accessors* 
    `invalid_geometry` reject). Empty/unsupported-type inputs keep their legacy 23514 class.
 7. **No grid parameter.** v1's `geoid_geom_hash(g, grid)` generality is dropped and the function
    itself is **dropped** by 0008 (no live GEOS-bound hash stays callable on an identity database).
-   `GEOID_DEDUP_GRID_DEFAULT` stays `1e-7` as the documented cell size; a unit test pins
-   `geometry_identity.SCALE == migration-0008 literal == round(1 / dedup_grid_default)`. Retunes
+   The 1e-7° cell lives only in the recipe: migration 0008's literal and
+   `geometry_identity.SCALE`, pinned equal by a unit test. No runtime setting carries it. Retunes
    remain migration events — now identity-version events.
 
 ## Lessons table (research gates 1a/1b — each footgun with v2's answer)

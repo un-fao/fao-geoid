@@ -44,12 +44,11 @@ from pathlib import Path
 from typing import Literal
 
 from geoid.domain.geometry_format import decode_geometry
-from geoid.domain.geometry_identity import DegenerateGeometryError, geom_hash_v2
+from geoid.domain.geometry_identity import RECIPE_VERSION, DegenerateGeometryError, geom_hash_v2
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 FIXTURE_PATH = REPO_ROOT / "scripts" / "data" / "dedup_golden_vectors_v2.json"
 
-RECIPE_VERSION = "v2"
 SQLSTATE_DEGENERATE = "GD001"
 
 # The deployed v2 function and the wrapper the arbiter CTE actually calls, fed
