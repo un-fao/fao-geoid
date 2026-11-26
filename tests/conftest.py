@@ -194,8 +194,12 @@ def _fake_jwks(oidc_keypair):
     """A stand-in JWKS client returning the in-test public key for any token."""
     from types import SimpleNamespace
 
+    import jwt
+    from jwt.algorithms import RSAAlgorithm
+
     _, public_key = oidc_keypair
-    return SimpleNamespace(get_signing_key_from_jwt=lambda _token: SimpleNamespace(key=public_key))
+    signing_key = jwt.PyJWK(RSAAlgorithm.to_jwk(public_key, as_dict=True))
+    return SimpleNamespace(get_signing_key_from_jwt=lambda _token: signing_key)
 
 
 @pytest.fixture(scope="session")

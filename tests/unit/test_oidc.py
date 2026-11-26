@@ -8,12 +8,14 @@ a pure projection.
 
 from __future__ import annotations
 
+import json
 import time
 from types import SimpleNamespace
 
 import jwt
 import pytest
-from cryptography.hazmat.primitives.asymmetric import rsa
+from cryptography.hazmat.primitives.asymmetric import ec, rsa
+from jwt.algorithms import ECAlgorithm, RSAAlgorithm
 
 from geoid.auth.oidc import decode_and_validate, principal_from_claims
 from geoid.config import Settings
@@ -40,7 +42,8 @@ def settings() -> Settings:
 
 
 def _fake_jwks(public_key):
-    return SimpleNamespace(get_signing_key_from_jwt=lambda _token: SimpleNamespace(key=public_key))
+    signing_key = jwt.PyJWK(RSAAlgorithm.to_jwk(public_key, as_dict=True))
+    return SimpleNamespace(get_signing_key_from_jwt=lambda _token: signing_key)
 
 
 def _claims(**overrides):
@@ -162,6 +165,58 @@ def test_unknown_kid_jwks_error_propagates_as_pyjwterror(_keypair, settings):
     with pytest.raises(jwt.PyJWKClientError):
         decode_and_validate(token, settings, SimpleNamespace(get_signing_key_from_jwt=_raise))
     assert issubclass(jwt.PyJWKClientError, jwt.PyJWTError)
+
+
+@pytest.mark.parametrize(
+    "raised",
+    [
+        json.JSONDecodeError("Expecting value", "<html>cf-challenge</html>", 0),
+        UnicodeDecodeError("utf-8", b"\xff", 0, 1, "invalid start byte"),
+        RecursionError(),
+        ConnectionResetError(),
+        TypeError("unhashable type: 'list'"),
+        NotImplementedError(),
+        KeyError("k"),
+        jwt.PyJWKSetError("The JWK Set did not contain any keys"),
+    ],
+    ids=[
+        "html-body",
+        "binary-body",
+        "deeply-nested-body",
+        "reset-mid-body",
+        "list-valued-alg",
+        "alg-none-key",
+        "oct-key-without-k",
+        "empty-key-set",
+    ],
+)
+def test_undecodable_jwks_response_surfaces_as_pyjwkclienterror(_keypair, settings, raised):
+    # PyJWT lets an unreadable JWKS response escape unwrapped; it must surface as
+    # PyJWKClientError (shared 401) with a fixed message that never echoes the body.
+    private_key, _ = _keypair
+    token = _encode(private_key, _claims())
+
+    def _raise(_token):
+        raise raised
+
+    with pytest.raises(jwt.PyJWKClientError) as exc_info:
+        decode_and_validate(token, settings, SimpleNamespace(get_signing_key_from_jwt=_raise))
+    assert str(exc_info.value) == "Unable to load the JWKS signing keys"
+    assert "cf-challenge" not in str(exc_info.value)
+
+
+def test_rs256_token_naming_an_ec_key_is_rejected_as_pyjwterror(_keypair, settings):
+    # A mixed-algorithm realm JWKS: the token's kid resolves to an EC key. The
+    # mismatch must be an ordinary PyJWTError (shared 401), never a TypeError (500).
+    private_key, _ = _keypair
+    token = _encode(private_key, _claims())
+    ec_jwk = jwt.PyJWK(
+        ECAlgorithm.to_jwk(ec.generate_private_key(ec.SECP256R1()).public_key(), as_dict=True)
+    )
+    jwks = SimpleNamespace(get_signing_key_from_jwt=lambda _token: ec_jwk)
+
+    with pytest.raises(jwt.InvalidAlgorithmError):
+        decode_and_validate(token, settings, jwks)
 
 
 # --- principal_from_claims (pure projection) ---------------------------------
