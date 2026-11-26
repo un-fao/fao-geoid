@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import os
+
 import pytest
 from pydantic import ValidationError
 
@@ -12,18 +14,10 @@ pytestmark = pytest.mark.unit
 
 @pytest.fixture(autouse=True)
 def _isolate_env(monkeypatch):
-    # Integration fixtures export GEOID_* into os.environ; clear the ones these
-    # derivation tests assert on so unit tests are order-independent.
-    for key in (
-        "GEOID_DATABASE_URL",
-        "GEOID_BASE_URL",
-        "GEOID_OIDC_ISSUER",
-        "GEOID_OIDC_JWKS_URL",
-        "GEOID_OIDC_AUDIENCE",
-        "GEOID_ENVIRONMENT",
-        "GEOID_ROOT_PATH",
-    ):
-        monkeypatch.delenv(key, raising=False)
+    # Integration fixtures and deploy shells export GEOID_* into os.environ; clear
+    # them all so these derivation tests see code defaults and run order-independently.
+    for key in [k for k in os.environ if k.upper().startswith("GEOID_")]:
+        monkeypatch.delenv(key)
 
 
 def _settings(**overrides) -> Settings:
@@ -178,3 +172,15 @@ def test_database_settings_excludes_app_level_fields():
 
 def test_settings_inherits_database_fields():
     assert _settings().db_pool_size == 10
+
+
+def test_validation_errors_never_echo_the_database_url(monkeypatch):
+    # A model-level error (missing OIDC outside development) would otherwise print
+    # the tail of the input dict, which ends with the database URL and its password.
+    monkeypatch.setenv("GEOID_ENVIRONMENT", "production")
+    with pytest.raises(ValidationError) as excinfo:
+        _settings(database_url="postgresql+asyncpg://geoid:pw@127.0.0.1:5432/geoid")
+    message = str(excinfo.value)
+    assert "OIDC is not configured" in message
+    assert "pw@" not in message
+    assert "127.0.0.1" not in message

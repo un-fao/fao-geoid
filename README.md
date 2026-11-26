@@ -189,7 +189,7 @@ every one. The ones that matter for a deployment:
 | `GEOID_INSTANCE_ID` | This instance's id, recorded in provenance |
 | `GEOID_BULK_MAX_FEATURES` | Cap per bulk request (default 1000); over it → `413` |
 | `GEOID_BULK_RESOLVE_MAX_GEOIDS` | Cap on geoids per `POST /bulk_resolve` (default 1000); over it → `413` |
-| `GEOID_OIDC_ISSUER`, `GEOID_OIDC_JWKS_URL` | OIDC provider; required outside `development` |
+| `GEOID_OIDC_ISSUER`, `GEOID_OIDC_JWKS_URL` | OIDC provider; required outside `development`. Per-collection grants match the token's `email` only when its `email_verified` claim is the JSON boolean `true` |
 
 ## Deployment
 

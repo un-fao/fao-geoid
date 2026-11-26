@@ -112,6 +112,13 @@ def test_missing_required_sub_is_rejected(_keypair, settings):
         decode_and_validate(token, settings, _fake_jwks(public_key))
 
 
+def test_empty_sub_is_rejected(_keypair, settings):
+    private_key, public_key = _keypair
+    token = _encode(private_key, _claims(sub=""))
+    with pytest.raises(jwt.MissingRequiredClaimError):
+        decode_and_validate(token, settings, _fake_jwks(public_key))
+
+
 def test_leeway_tolerates_small_clock_skew(_keypair, settings):
     # exp 10s in the past is within the 30s default leeway -> still valid.
     private_key, public_key = _keypair
@@ -191,6 +198,20 @@ def test_missing_email_degrades_gracefully(settings):
     assert p.email_verified is False
     # subject still present -> not anonymous
     assert p.is_anonymous is False
+
+
+@pytest.mark.parametrize("value", ["false", "true", 1, None], ids=repr)
+def test_email_verified_is_true_only_for_json_true(settings, value):
+    # A realm mapper typed as String emits "false"; bool("false") is True, which
+    # would let an unverified email inherit a grant.
+    p = principal_from_claims(_claims(email_verified=value), settings)
+    assert p.email_verified is False
+
+
+@pytest.mark.parametrize("value", [["alice@example.org"], {"a": 1}, 42], ids=repr)
+def test_non_string_email_is_treated_as_absent(settings, value):
+    p = principal_from_claims(_claims(email=value), settings)
+    assert p.email is None
 
 
 def test_empty_claims_never_raise(settings):
