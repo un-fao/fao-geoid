@@ -4,8 +4,9 @@ The item read surface (Features listing / CQL2 filtering / queryables / single
 feature) has been removed: no endpoint may enumerate, filter, or search a
 collection's geometries. Resolving a geoid you already hold is the durable
 ``GET /{geoid}`` resolver (``api/places.py``), the only resolution path.
-Listing/describing collections is kept but gated behind the admin key, matching
-``GET /manage/collections``. Landing and ``/conformance`` stay public.
+Listing/describing collections is kept but gated behind the sysadmin role
+(``require_admin``), matching ``GET /manage/collections``. Landing and
+``/conformance`` stay public.
 """
 
 from __future__ import annotations

@@ -20,7 +20,6 @@ def _isolate_env(monkeypatch):
         "GEOID_OIDC_ISSUER",
         "GEOID_OIDC_JWKS_URL",
         "GEOID_OIDC_AUDIENCE",
-        "GEOID_DEDUP_GRID_DEFAULT",
         "GEOID_ENVIRONMENT",
         "GEOID_ROOT_PATH",
     ):
@@ -98,16 +97,6 @@ def test_swagger_oauth2_defaults_off():
     s = _settings()
     assert s.swagger_oauth2_enabled is False
     assert s.swagger_oauth2_client_id == "geoid-fe"
-
-
-def test_dedup_grid_default_is_1cm():
-    # Exact-match ruling: 1e-7 deg/vertex ≈ 1 cm — float-jitter immunity only.
-    assert _settings().dedup_grid_default == 1e-7
-
-
-def test_dedup_grid_default_env_override(monkeypatch):
-    monkeypatch.setenv("GEOID_DEDUP_GRID_DEFAULT", "0.0005")
-    assert _settings().dedup_grid_default == 0.0005
 
 
 def test_bulk_max_features_default_is_1000():

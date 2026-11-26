@@ -166,22 +166,19 @@ def test_sysadmin_role_maps_to_admin(settings):
     assert p.email == "alice@example.org"
     assert p.email_verified is True
     assert p.is_admin is True
-    assert "geoid.sysadmin" in p.roles
 
 
 def test_non_admin_role_is_not_admin(settings):
     claims = _claims(resource_access={"geoid-roles": {"roles": ["some.other.role"]}})
     p = principal_from_claims(claims, settings)
     assert p.is_admin is False
-    assert p.roles == ("some.other.role",)
     assert p.is_anonymous is False
 
 
-def test_missing_resource_access_yields_empty_roles(settings):
+def test_missing_resource_access_is_not_admin(settings):
     claims = _claims()
     del claims["resource_access"]
     p = principal_from_claims(claims, settings)
-    assert p.roles == ()
     assert p.is_admin is False
 
 
@@ -199,7 +196,6 @@ def test_missing_email_degrades_gracefully(settings):
 def test_empty_claims_never_raise(settings):
     p = principal_from_claims({}, settings)
     assert p.subject is None
-    assert p.roles == ()
     assert p.is_admin is False
     assert p.email is None
 
@@ -220,14 +216,27 @@ def test_malformed_resource_access_shapes_never_raise(settings, resource_access)
     # no-roles/non-admin, never raise (a 500 from the auth path). In particular a
     # bare-string roles value must NOT be iterated character-by-character.
     p = principal_from_claims(_claims(resource_access=resource_access), settings)
-    assert p.roles == ()
     assert p.is_admin is False
 
 
-def test_non_string_role_entries_are_filtered(settings):
+def test_bare_string_roles_are_not_iterated_into_characters():
+    # With admin role "g", iterating the bare string "geoid.sysadmin" would yield "g"
+    # and grant admin; the guard must treat the whole value as no roles.
+    settings = Settings(
+        _env_file=None,
+        oidc_issuer=_ISSUER,
+        oidc_jwks_url="https://idp.test/jwks",
+        oidc_roles_client="geoid-roles",
+        oidc_admin_role="g",
+    )
+    claims = _claims(resource_access={"geoid-roles": {"roles": "geoid.sysadmin"}})
+    p = principal_from_claims(claims, settings)
+    assert p.is_admin is False
+
+
+def test_non_string_role_entries_do_not_block_admin(settings):
     claims = _claims(resource_access={"geoid-roles": {"roles": ["geoid.sysadmin", 42, None]}})
     p = principal_from_claims(claims, settings)
-    assert p.roles == ("geoid.sysadmin",)
     assert p.is_admin is True
 
 
