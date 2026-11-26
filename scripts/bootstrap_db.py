@@ -13,7 +13,8 @@ Steps (each idempotent):
     1. pre-flight    validate the full app Settings (from .env if present, and from
                      the environment alone) before anything mutates; outside
                      development that requires GEOID_OIDC_ISSUER/GEOID_OIDC_JWKS_URL
-                     unless --skip-seed is passed
+                     unless --skip-seed is passed; refuses a GEOID_PUBLIC_COLLECTION
+                     that migrate or seed would read differently from the app config
     2. role          CREATE ROLE ... LOGIN; an existing role's password is never
                      rotated unless --reset-app-password
     3. database      GRANT role TO admin (Cloud SQL's `postgres` is not a real
@@ -227,6 +228,11 @@ def _preflight_settings(cfg: BootstrapConfig):
     returned here. The migrate subprocess loads only DatabaseSettings, so it would
     not catch missing OIDC config, and migration 0012 reads GEOID_PUBLIC_COLLECTION
     straight from the environment, so only this check validates that slug.
+
+    The intended public collection is the ``.env`` build's slug when ``.env``
+    exists, else the env-only one. Each enabled step must write that slug: seed
+    uses the env-only build, and migration 0012 (if it runs) reads the exact
+    uppercase key with a ``public`` default, never ``.env``.
     """
     from pydantic import ValidationError
 
@@ -241,9 +247,12 @@ def _preflight_settings(cfg: BootstrapConfig):
     settings_cls = _SkipSeedSettings if cfg.skip_seed else Settings
     env_file = REPO_ROOT / ".env"
     try:
-        if env_file.is_file():  # what the migrate subprocess (cwd=REPO_ROOT) will see
+        file_settings = (  # what the service reading the same .env will see
             settings_cls(database_url=cfg.app_url, _env_file=str(env_file))
-        return settings_cls(database_url=cfg.app_url, _env_file=None)  # what seed uses
+            if env_file.is_file()
+            else None
+        )
+        settings = settings_cls(database_url=cfg.app_url, _env_file=None)  # what seed uses
     except ValidationError as exc:
         message = f"settings pre-flight failed:\n{exc}"
         if not cfg.skip_seed:
@@ -252,6 +261,34 @@ def _preflight_settings(cfg: BootstrapConfig):
                 "GEOID_OIDC_JWKS_URL in the environment before bootstrapping."
             )
         raise ConfigError(message) from exc
+
+    intended = (file_settings or settings).public_collection
+    migration_slug = os.environ.get("GEOID_PUBLIC_COLLECTION", "public")  # 0012's exact lookup
+    problems = []
+    if not cfg.skip_migrate and migration_slug != intended:
+        # A set-but-different exact key only happens when a case variant shadowed it in
+        # pydantic, so it never passed slug validation: don't echo it.
+        shown = (
+            "'public' (GEOID_PUBLIC_COLLECTION unset)"
+            if "GEOID_PUBLIC_COLLECTION" not in os.environ
+            else "the exact GEOID_PUBLIC_COLLECTION value (hidden; not validated)"
+        )
+        problems.append(f"migration 0012 would use {shown}")
+    if not cfg.skip_seed and settings.public_collection != intended:
+        problems.append(f"the seed step would use {settings.public_collection!r}")
+    if problems:
+        raise ConfigError(
+            f"GEOID_PUBLIC_COLLECTION mismatch: the app config resolves {intended!r} but "
+            f"{', '.join(problems)} (migration and seed read only the process environment, "
+            "never .env).\n"
+            f"  Fix: export GEOID_PUBLIC_COLLECTION={intended} in your shell and re-run.\n"
+            "  If this database already ran migration 0012 with another slug, re-running does "
+            "not move its exemption: recreate uq_place_collection_external_id for the "
+            f"{intended!r} collection's id (see migration 0012's docstring), and set "
+            "public_write = false on the collection 0012 created under the other slug unless "
+            "anonymous writes there are intended."
+        )
+    return settings
 
 
 def _connect(cfg: BootstrapConfig, *, dbname: str | None = None) -> psycopg.Connection:
@@ -454,7 +491,10 @@ def run_migrations(cfg: BootstrapConfig) -> None:
     # Subprocess, not the in-process alembic API: byte-parity with the production
     # Cloud Run migrate job, no lru_cache'd get_settings() bleed-through, and
     # env.py calls asyncio.run() which must own the event loop.
-    env = os.environ | {"GEOID_DATABASE_URL": cfg.app_url}
+    # Drop every case variant: pydantic in the child matches env keys case-insensitively,
+    # so a leftover lowercase key could point the migration at another database.
+    env = {k: v for k, v in os.environ.items() if k.upper() != "GEOID_DATABASE_URL"}
+    env["GEOID_DATABASE_URL"] = cfg.app_url
     result = subprocess.run([sys.executable, "-m", "geoid.cli", "migrate"], env=env, cwd=REPO_ROOT)
     if result.returncode != 0:
         raise StepError(f"`geoid migrate` exited {result.returncode} — see alembic output above")
