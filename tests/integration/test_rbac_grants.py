@@ -140,14 +140,16 @@ async def test_subject_backfilled_on_first_authorized_write(
 # --- H6: the unverified-email guard is load-bearing ---------------------------
 
 
+@pytest.mark.parametrize("email_verified", [False, "false"], ids=["bool", "string"])
 async def test_unverified_email_grant_is_not_honored(
-    oidc_client, make_token, bearer, unit_square_ccw
+    oidc_client, make_token, bearer, unit_square_ccw, email_verified
 ):
     # The only defense against registering a grantee's email unverified in Keycloak
-    # and inheriting the grant: email_verified=False must yield NO grant → 403.
+    # and inheriting the grant: an unverified email (including a String-typed
+    # mapper's "false") must yield NO grant → 403.
     await _create(oidc_client, "uv")
     await _grant(oidc_client, "uv", "ed@x.org", "editor")
-    unverified = bearer(make_token(sub="kc-ed", email="ed@x.org", email_verified=False))
+    unverified = bearer(make_token(sub="kc-ed", email="ed@x.org", email_verified=email_verified))
     resp = await oidc_client.post("/collections/uv/items", headers=unverified, json=unit_square_ccw)
     assert resp.status_code == 403
 

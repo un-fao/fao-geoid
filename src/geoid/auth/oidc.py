@@ -35,8 +35,13 @@ def principal_from_claims(claims: dict[str, Any], settings: Settings) -> Princip
     ``resource_access[oidc_roles_client]["roles"]``.
     """
     subject = claims.get("sub")
+    # OIDC Core types email as a string and email_verified as a JSON boolean; any
+    # other shape (e.g. a String-typed realm mapper's "false") is treated as absent /
+    # unverified, since grants are keyed by verified email.
     email = claims.get("email")
-    email_verified = bool(claims.get("email_verified", False))
+    if not isinstance(email, str):
+        email = None
+    email_verified = claims.get("email_verified") is True
     # isinstance-guarded so a realm-misconfigured claim shape (resource_access as a
     # list/string, roles as a bare string) degrades to no-roles instead of raising —
     # a validly-signed token must never 500 the auth path. A bare-string roles value
@@ -74,7 +79,7 @@ def decode_and_validate(token: str, settings: Settings, jwks_client: PyJWKClient
     (``PyJWKClientError`` is itself a ``PyJWTError``) — which the caller maps to 401.
     """
     signing_key = jwks_client.get_signing_key_from_jwt(token)
-    return jwt.decode(
+    claims = jwt.decode(
         token,
         signing_key.key,
         algorithms=["RS256"],
@@ -83,3 +88,8 @@ def decode_and_validate(token: str, settings: Settings, jwks_client: PyJWKClient
         leeway=settings.oidc_leeway_seconds,
         options={"require": ["exp", "iss", "aud", "sub"]},
     )
+    # PyJWT's "require" rejects only a missing/None sub and accepts "" as a valid
+    # string; an empty subject would use a grant without binding it on first use.
+    if not claims["sub"]:
+        raise jwt.MissingRequiredClaimError("sub")
+    return claims

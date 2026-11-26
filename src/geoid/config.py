@@ -18,12 +18,14 @@ class DatabaseSettings(BaseSettings):
     """DB-layer configuration — the full surface the migrate job needs."""
 
     # extra="ignore" is load-bearing: a full .env with app-level GEOID_* keys
-    # must not trip extra-field validation here.
+    # must not trip extra-field validation here. hide_input_in_errors keeps the
+    # database URL (and its password) out of every ValidationError message.
     model_config = SettingsConfigDict(
         env_prefix="GEOID_",
         env_file=".env",
         env_file_encoding="utf-8",
         extra="ignore",
+        hide_input_in_errors=True,
     )
 
     database_url: str = Field(

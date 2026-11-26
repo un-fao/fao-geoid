@@ -96,3 +96,36 @@ def test_derive_app_url_rejects_garbage():
 def test_psycopg_dsn_strips_the_async_driver_and_keeps_credentials():
     dsn = bootstrap_db._psycopg_dsn("postgresql+asyncpg://geoid:pw@host:5432/geoid")
     assert dsn == "postgresql://geoid:pw@host:5432/geoid"
+
+
+# --- _preflight_settings --------------------------------------------------------
+
+
+def test_preflight_error_names_missing_oidc_settings_without_echoing_the_dsn(monkeypatch, tmp_path):
+    # pydantic's error repr ends with the tail of the input dict, which here is the
+    # app URL: a short suffix like "pw@127.0.0.1:5432/geoid" would print the password.
+    monkeypatch.setattr(bootstrap_db, "REPO_ROOT", tmp_path)  # no .env
+    for key in ("GEOID_OIDC_ISSUER", "GEOID_OIDC_JWKS_URL"):
+        monkeypatch.delenv(key, raising=False)
+    monkeypatch.setenv("GEOID_ENVIRONMENT", "production")
+    cfg = bootstrap_db.BootstrapConfig(
+        admin_dsn="postgresql://postgres@127.0.0.1:5432/postgres",
+        admin_password=None,
+        app_url="postgresql+asyncpg://geoid:pw@127.0.0.1:5432/geoid",
+        app_role="geoid",
+        app_db="geoid",
+        dry_run=True,
+        skip_migrate=False,
+        skip_seed=False,
+        reset_app_password=False,
+        assume_yes=True,
+    )
+
+    with pytest.raises(bootstrap_db.ConfigError) as excinfo:
+        bootstrap_db._preflight_settings(cfg)
+
+    message = str(excinfo.value)
+    detail = message.split("Hint:")[0]
+    assert "OIDC is not configured in 'production'" in detail
+    assert "pw@" not in message
+    assert "127.0.0.1" not in message
