@@ -13,6 +13,7 @@ Steps (each idempotent):
     1. pre-flight    validate the full app Settings (from .env if present, and from
                      the environment alone) before anything mutates; outside
                      development that requires GEOID_OIDC_ISSUER/GEOID_OIDC_JWKS_URL
+                     unless --skip-seed is passed
     2. role          CREATE ROLE ... LOGIN; an existing role's password is never
                      rotated unless --reset-app-password
     3. database      GRANT role TO admin (Cloud SQL's `postgres` is not a real
@@ -177,7 +178,8 @@ def _load_config(argv: list[str] | None = None) -> BootstrapConfig:
     parser.add_argument(
         "--skip-seed",
         action="store_true",
-        help="skip seeding the default catalog + public collection",
+        help="skip seeding the default catalog + public collection; "
+        "pre-flight then skips the OIDC requirement",
     )
     parser.add_argument(
         "--reset-app-password",
@@ -221,25 +223,35 @@ def _preflight_settings(cfg: BootstrapConfig):
 
     Checks the Settings built from ``.env`` (when present) and from the
     environment alone; outside development both need the OIDC issuer and JWKS
-    URL. The seed step uses the env-only instance returned here. The migrate
-    subprocess loads only DatabaseSettings, so it would not catch missing OIDC
-    config.
+    URL unless --skip-seed is passed. The seed step uses the env-only instance
+    returned here. The migrate subprocess loads only DatabaseSettings, so it would
+    not catch missing OIDC config, and migration 0012 reads GEOID_PUBLIC_COLLECTION
+    straight from the environment, so only this check validates that slug.
     """
     from pydantic import ValidationError
 
     from geoid.config import Settings
 
+    class _SkipSeedSettings(Settings):
+        def _require_oidc_outside_development(self) -> Settings:  # override drops the validator
+            return self
+
+    # Without seed nothing downstream reads OIDC; every other field, including the
+    # slug migration 0012 writes, stays validated.
+    settings_cls = _SkipSeedSettings if cfg.skip_seed else Settings
     env_file = REPO_ROOT / ".env"
     try:
         if env_file.is_file():  # what the migrate subprocess (cwd=REPO_ROOT) will see
-            Settings(database_url=cfg.app_url, _env_file=str(env_file))
-        return Settings(database_url=cfg.app_url, _env_file=None)  # what the seed step uses
+            settings_cls(database_url=cfg.app_url, _env_file=str(env_file))
+        return settings_cls(database_url=cfg.app_url, _env_file=None)  # what seed uses
     except ValidationError as exc:
-        raise ConfigError(
-            f"settings pre-flight failed:\n{exc}\n"
-            "  Hint: GEOID_ENVIRONMENT != development requires GEOID_OIDC_ISSUER and "
-            "GEOID_OIDC_JWKS_URL in the environment before bootstrapping."
-        ) from exc
+        message = f"settings pre-flight failed:\n{exc}"
+        if not cfg.skip_seed:
+            message += (
+                "\n  Hint: GEOID_ENVIRONMENT != development requires GEOID_OIDC_ISSUER and "
+                "GEOID_OIDC_JWKS_URL in the environment before bootstrapping."
+            )
+        raise ConfigError(message) from exc
 
 
 def _connect(cfg: BootstrapConfig, *, dbname: str | None = None) -> psycopg.Connection:
