@@ -23,20 +23,20 @@ from fastapi.responses import JSONResponse, PlainTextResponse
 from geoid import __version__
 from geoid.config import Settings
 from geoid.deps import Principal
-from geoid.domain.geometry_format import GeometryFormat
+from geoid.domain.geometry_format import GEOJSON_MEDIA_TYPE, WKT_MEDIA_TYPE, GeometryFormat
 from geoid.schemas.ogc import FeatureModel
 from geoid.services import ogc_service
 
 
 class GeoJSONResponse(JSONResponse):
-    media_type = "application/geo+json"
+    media_type = GEOJSON_MEDIA_TYPE
 
 
 class WKTResponse(PlainTextResponse):
     """Bare WKT geometry as ``text/plain`` (its own honest media type — WKT is not
     smuggled into a JSON envelope). Used for the single-feature resolver WKT path."""
 
-    media_type = "text/plain"
+    media_type = WKT_MEDIA_TYPE
 
 
 def feature_response(

@@ -47,7 +47,7 @@ from geoid.deps import (
     principal_from_credentials,
     require_principal,
 )
-from geoid.domain.geometry_format import GeometryFormat
+from geoid.domain.geometry_format import WKT_MEDIA_TYPE, GeometryFormat
 from geoid.repositories import collection_repo, place_repo
 from geoid.schemas.ogc import FeatureModel
 from geoid.schemas.place import (
@@ -302,7 +302,7 @@ async def resolve_geoids(
     response_model=FeatureModel,
     response_class=GeoJSONResponse,
     summary="Durable geoid resolver",
-    responses={200: {"content": {"text/plain": {}}}},
+    responses={200: {"content": {WKT_MEDIA_TYPE: {}}}},
 )
 async def resolve_geoid(
     geoid: uuid.UUID,
@@ -354,7 +354,7 @@ async def resolve_geoid(
         "values are stored but neither unique nor resolvable) — answers 400 "
         "with an explicit message there."
     ),
-    responses={200: {"content": {"text/plain": {}}}},
+    responses={200: {"content": {WKT_MEDIA_TYPE: {}}}},
 )
 async def resolve_by_external_id(
     collection_id: str,
