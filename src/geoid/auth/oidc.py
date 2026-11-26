@@ -79,21 +79,20 @@ def decode_and_validate(token: str, settings: Settings, jwks_client: PyJWKClient
     """
     try:
         signing_key = jwks_client.get_signing_key_from_jwt(token)
-    except (
-        ValueError,
-        RecursionError,
-        OSError,
-        TypeError,
-        KeyError,
-        NotImplementedError,
-        jwt.PyJWKSetError,
-    ) as exc:
-        # PyJWT 2.15.1 wraps only URLError/timeouts/HTTPException from the JWKS fetch:
-        # an undecodable body (e.g. an HTML challenge page), a mid-body connection
-        # reset, one malformed key (it aborts parsing of the whole set) or an empty set
-        # escapes unwrapped or as a non-client error. Token-side parse errors are
-        # already DecodeError, so these are always JWKS-side.
-        raise jwt.PyJWKClientError("Unable to load the JWKS signing keys") from exc
+    except (jwt.PyJWKClientError, jwt.InvalidTokenError):
+        # PyJWT's own JWKS errors, and token-side parse errors such as DecodeError,
+        # already map to the right 401 path in deps.
+        raise
+    except Exception as exc:
+        # Anything else is a JWKS-side failure that PyJWT 2.15.1 lets escape: an
+        # undecodable body (e.g. an HTML challenge page), a mid-body connection
+        # reset, one malformed key (it aborts parsing of the whole set), an empty set
+        # (PyJWKSetError), an oversized Content-Length. It must be the shared 401.
+        # Only the cause's class name goes into the message (and so the log): it says
+        # which failure it was without echoing the response body.
+        raise jwt.PyJWKClientError(
+            f"Unable to load the JWKS signing keys ({type(exc).__name__})"
+        ) from exc
     # Passing the PyJWK (not its raw key) makes PyJWT reject a token whose alg does
     # not match the resolved key's algorithm as InvalidAlgorithmError; a raw non-RSA
     # key would raise TypeError instead.

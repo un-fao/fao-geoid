@@ -129,8 +129,9 @@ async def _resolve_oidc(
     except jwt.PyJWKClientError as exc:
         # JWKS infrastructure failure (IdP down, Cloudflare block, bad URL) — a full
         # IdP outage must be distinguishable from one user's bad token. str(exc) is
-        # server infra detail (URL/error), never the token, so it is safe to log.
-        logger.error("OIDC JWKS failure: %s", exc)
+        # infra detail (URL/error) but can echo an unknown token kid, which is caller
+        # input, so it is escaped: a control character cannot forge a second log line.
+        logger.error("OIDC JWKS failure: %s", str(exc).encode("unicode_escape").decode("ascii"))
         raise _invalid_token() from exc
     except jwt.PyJWTError as exc:
         logger.warning("OIDC token rejected: %s", type(exc).__name__)

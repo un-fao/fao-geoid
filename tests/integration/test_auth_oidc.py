@@ -244,8 +244,18 @@ async def bad_jwks_client(request, db_clean, monkeypatch, oidc_keypair):
         thread.join()
 
 
-@pytest.mark.parametrize("bad_jwks_client", ["html", "malformed-key", "empty-set"], indirect=True)
-async def test_unusable_jwks_response_is_shared_401(bad_jwks_client, make_token, bearer, caplog):
+@pytest.mark.parametrize(
+    ("bad_jwks_client", "cause"),
+    [
+        ("html", "JSONDecodeError"),
+        ("malformed-key", "TypeError"),
+        ("empty-set", "PyJWKSetError"),
+    ],
+    indirect=["bad_jwks_client"],
+)
+async def test_unusable_jwks_response_is_shared_401(
+    bad_jwks_client, cause, make_token, bearer, caplog
+):
     import logging
 
     http_client, jwks_gets = bad_jwks_client
@@ -266,7 +276,7 @@ async def test_unusable_jwks_response_is_shared_401(bad_jwks_client, make_token,
         for r in caplog.records
         if r.name == "geoid.deps" and r.levelno == logging.ERROR
     ]
-    assert jwks_errors == ["OIDC JWKS failure: Unable to load the JWKS signing keys"]
+    assert jwks_errors == [f"OIDC JWKS failure: Unable to load the JWKS signing keys ({cause})"]
     assert not any(_BODY_MARKER in r.getMessage() for r in caplog.records)
 
 
