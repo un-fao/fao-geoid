@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import dataclasses
 import importlib.util
 import sys
 from pathlib import Path
@@ -101,14 +102,8 @@ def test_psycopg_dsn_strips_the_async_driver_and_keeps_credentials():
 # --- _preflight_settings --------------------------------------------------------
 
 
-def test_preflight_error_names_missing_oidc_settings_without_echoing_the_dsn(monkeypatch, tmp_path):
-    # pydantic's error repr ends with the tail of the input dict, which here is the
-    # app URL: a short suffix like "pw@127.0.0.1:5432/geoid" would print the password.
-    monkeypatch.setattr(bootstrap_db, "REPO_ROOT", tmp_path)  # no .env
-    for key in ("GEOID_OIDC_ISSUER", "GEOID_OIDC_JWKS_URL"):
-        monkeypatch.delenv(key, raising=False)
-    monkeypatch.setenv("GEOID_ENVIRONMENT", "production")
-    cfg = bootstrap_db.BootstrapConfig(
+def _config(**overrides):
+    base = bootstrap_db.BootstrapConfig(
         admin_dsn="postgresql://postgres@127.0.0.1:5432/postgres",
         admin_password=None,
         app_url="postgresql+asyncpg://geoid:pw@127.0.0.1:5432/geoid",
@@ -120,12 +115,72 @@ def test_preflight_error_names_missing_oidc_settings_without_echoing_the_dsn(mon
         reset_app_password=False,
         assume_yes=True,
     )
+    return dataclasses.replace(base, **overrides)
+
+
+def _without_oidc_env(monkeypatch):
+    for key in ("GEOID_OIDC_ISSUER", "GEOID_OIDC_JWKS_URL"):
+        monkeypatch.delenv(key, raising=False)
+
+
+def test_preflight_error_names_missing_oidc_settings_without_echoing_the_dsn(monkeypatch, tmp_path):
+    # pydantic's error repr ends with the tail of the input dict, which here is the
+    # app URL: a short suffix like "pw@127.0.0.1:5432/geoid" would print the password.
+    monkeypatch.setattr(bootstrap_db, "REPO_ROOT", tmp_path)  # no .env
+    _without_oidc_env(monkeypatch)
+    monkeypatch.setenv("GEOID_ENVIRONMENT", "production")
 
     with pytest.raises(bootstrap_db.ConfigError) as excinfo:
-        bootstrap_db._preflight_settings(cfg)
+        bootstrap_db._preflight_settings(_config())
 
     message = str(excinfo.value)
     detail = message.split("Hint:")[0]
     assert "OIDC is not configured in 'production'" in detail
     assert "pw@" not in message
     assert "127.0.0.1" not in message
+
+
+@pytest.mark.parametrize("env_file", [None, "GEOID_ENVIRONMENT=production\n"])
+def test_preflight_with_skip_seed_does_not_require_oidc_outside_development(
+    monkeypatch, tmp_path, env_file
+):
+    monkeypatch.setattr(bootstrap_db, "REPO_ROOT", tmp_path)
+    if env_file is not None:
+        (tmp_path / ".env").write_text(env_file)
+    _without_oidc_env(monkeypatch)
+    monkeypatch.setenv("GEOID_ENVIRONMENT", "production")
+
+    settings = bootstrap_db._preflight_settings(_config(skip_seed=True))
+
+    assert settings.environment == "production"
+
+
+@pytest.mark.parametrize(
+    ("process_env", "env_file", "field"),
+    [
+        ({"GEOID_PUBLIC_COLLECTION": "Bad Slug"}, None, "public_collection"),
+        ({"GEOID_ENVIRONMENT": "prodution"}, None, "environment"),
+        ({}, "GEOID_ENVIRONMENT=prodution\n", "environment"),
+    ],
+    ids=["bad-slug", "bad-environment", "bad-environment-in-dotenv"],
+)
+def test_preflight_with_skip_seed_still_rejects_invalid_settings(
+    monkeypatch, tmp_path, process_env, env_file, field
+):
+    # Migration 0012 writes GEOID_PUBLIC_COLLECTION straight from os.environ, so
+    # --skip-seed must keep every non-OIDC check, on both the .env and env-only builds.
+    monkeypatch.setattr(bootstrap_db, "REPO_ROOT", tmp_path)
+    if env_file is not None:
+        (tmp_path / ".env").write_text(env_file)
+    _without_oidc_env(monkeypatch)
+    for key in ("GEOID_ENVIRONMENT", "GEOID_PUBLIC_COLLECTION"):
+        monkeypatch.delenv(key, raising=False)
+    for key, value in process_env.items():
+        monkeypatch.setenv(key, value)
+
+    with pytest.raises(bootstrap_db.ConfigError) as excinfo:
+        bootstrap_db._preflight_settings(_config(skip_seed=True))
+
+    message = str(excinfo.value)
+    assert field in message
+    assert "OIDC" not in message
