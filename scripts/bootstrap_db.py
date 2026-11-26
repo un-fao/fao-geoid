@@ -10,8 +10,9 @@ the local docker-compose PostGIS for rehearsal):
     uv run python scripts/bootstrap_db.py [--dry-run] [--yes]
 
 Steps (each idempotent):
-    1. pre-flight    Settings check — catches the production dev-token trap before
-                     anything mutates (`geoid migrate` would crash on it mid-run)
+    1. pre-flight    validate the full app Settings (from .env if present, and from
+                     the environment alone) before anything mutates; outside
+                     development that requires GEOID_OIDC_ISSUER/GEOID_OIDC_JWKS_URL
     2. role          CREATE ROLE ... LOGIN; an existing role's password is never
                      rotated unless --reset-app-password
     3. database      GRANT role TO admin (Cloud SQL's `postgres` is not a real
@@ -216,10 +217,13 @@ def _load_config(argv: list[str] | None = None) -> BootstrapConfig:
 
 
 def _preflight_settings(cfg: BootstrapConfig):
-    """Catch the production dev-token trap before anything mutates.
+    """Validate the full app Settings before anything mutates.
 
-    The seed step constructs full Settings; the migrate subprocess needs only
-    DatabaseSettings (no token). Failing here keeps the failure clean.
+    Checks the Settings built from ``.env`` (when present) and from the
+    environment alone; outside development both need the OIDC issuer and JWKS
+    URL. The seed step uses the env-only instance returned here. The migrate
+    subprocess loads only DatabaseSettings, so it would not catch missing OIDC
+    config.
     """
     from pydantic import ValidationError
 
