@@ -229,6 +229,7 @@ def make_token(oidc_keypair):
         aud="geoid-be",
         iss=_OIDC_ISSUER,
         exp_delta=300,
+        kid=None,
     ) -> str:
         now = int(time.time())
         claims = {"sub": sub, "iss": iss, "aud": aud, "exp": now + exp_delta, "iat": now}
@@ -237,7 +238,8 @@ def make_token(oidc_keypair):
             claims["email_verified"] = email_verified
         if roles:
             claims["resource_access"] = {"geoid-roles": {"roles": list(roles)}}
-        return jwt.encode(claims, private_key, algorithm="RS256")
+        headers = {"kid": kid} if kid is not None else None
+        return jwt.encode(claims, private_key, algorithm="RS256", headers=headers)
 
     return _make
 
