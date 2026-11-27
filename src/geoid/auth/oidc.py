@@ -77,10 +77,28 @@ def decode_and_validate(token: str, settings: Settings, jwks_client: PyJWKClient
     wrong ``aud``/``iss``, expired, missing required claim, or a JWKS fetch error
     (``PyJWKClientError`` is itself a ``PyJWTError``) — which the caller maps to 401.
     """
-    signing_key = jwks_client.get_signing_key_from_jwt(token)
+    try:
+        signing_key = jwks_client.get_signing_key_from_jwt(token)
+    except (jwt.PyJWKClientError, jwt.InvalidTokenError):
+        # PyJWT's own JWKS errors, and token-side parse errors such as DecodeError,
+        # already map to the right 401 path in deps.
+        raise
+    except Exception as exc:
+        # Anything else is a JWKS-side failure that PyJWT 2.15.1 lets escape: an
+        # undecodable body (e.g. an HTML challenge page), a mid-body connection
+        # reset, one malformed key (it aborts parsing of the whole set), an empty set
+        # (PyJWKSetError), an oversized Content-Length. It must be the shared 401.
+        # Only the cause's class name goes into the message (and so the log): it says
+        # which failure it was without echoing the response body.
+        raise jwt.PyJWKClientError(
+            f"Unable to load the JWKS signing keys ({type(exc).__name__})"
+        ) from exc
+    # Passing the PyJWK (not its raw key) makes PyJWT reject a token whose alg does
+    # not match the resolved key's algorithm as InvalidAlgorithmError; a raw non-RSA
+    # key would raise TypeError instead.
     claims = jwt.decode(
         token,
-        signing_key.key,
+        signing_key,
         algorithms=["RS256"],
         audience=settings.oidc_audience,
         issuer=settings.oidc_issuer,

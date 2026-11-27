@@ -8,12 +8,14 @@ a pure projection.
 
 from __future__ import annotations
 
+import json
 import time
 from types import SimpleNamespace
 
 import jwt
 import pytest
-from cryptography.hazmat.primitives.asymmetric import rsa
+from cryptography.hazmat.primitives.asymmetric import ec, rsa
+from jwt.algorithms import ECAlgorithm, RSAAlgorithm
 
 from geoid.auth.oidc import decode_and_validate, principal_from_claims
 from geoid.config import Settings
@@ -40,7 +42,8 @@ def settings() -> Settings:
 
 
 def _fake_jwks(public_key):
-    return SimpleNamespace(get_signing_key_from_jwt=lambda _token: SimpleNamespace(key=public_key))
+    signing_key = jwt.PyJWK(RSAAlgorithm.to_jwk(public_key, as_dict=True))
+    return SimpleNamespace(get_signing_key_from_jwt=lambda _token: signing_key)
 
 
 def _claims(**overrides):
@@ -164,6 +167,88 @@ def test_unknown_kid_jwks_error_propagates_as_pyjwterror(_keypair, settings):
     assert issubclass(jwt.PyJWKClientError, jwt.PyJWTError)
 
 
+@pytest.mark.parametrize(
+    "raised",
+    [
+        json.JSONDecodeError("Expecting value", "<html>cf-challenge</html>", 0),
+        UnicodeDecodeError("utf-8", b"\xff", 0, 1, "invalid start byte"),
+        RecursionError(),
+        ConnectionResetError(),
+        TypeError("unhashable type: 'list'"),
+        NotImplementedError(),
+        KeyError("k"),
+        jwt.PyJWKSetError("The JWK Set did not contain any keys"),
+        OverflowError("cannot fit 'int' into an index-sized integer"),
+        AttributeError("'NoneType' object has no attribute 'read'"),
+    ],
+    ids=[
+        "html-body",
+        "binary-body",
+        "deeply-nested-body",
+        "reset-mid-body",
+        "list-valued-alg",
+        "alg-none-key",
+        "oct-key-without-k",
+        "empty-key-set",
+        "oversized-content-length",
+        "unforeseen-failure",
+    ],
+)
+def test_undecodable_jwks_response_surfaces_as_pyjwkclienterror(_keypair, settings, raised):
+    # PyJWT lets an unreadable JWKS response escape unwrapped; it must surface as
+    # PyJWKClientError (shared 401) with a fixed message that never echoes the body.
+    private_key, _ = _keypair
+    token = _encode(private_key, _claims())
+
+    def _raise(_token):
+        raise raised
+
+    with pytest.raises(jwt.PyJWKClientError) as exc_info:
+        decode_and_validate(token, settings, SimpleNamespace(get_signing_key_from_jwt=_raise))
+    # The cause's class name tells operators which failure it was; nothing else.
+    assert str(exc_info.value) == (
+        f"Unable to load the JWKS signing keys ({type(raised).__name__})"
+    )
+    assert "cf-challenge" not in str(exc_info.value)
+
+
+@pytest.mark.parametrize(
+    "raised",
+    [
+        jwt.DecodeError("Not enough segments"),
+        jwt.InvalidTokenError("Key ID header parameter must be a string"),
+        jwt.PyJWKClientError('Unable to find a signing key that matches: "x"'),
+    ],
+    ids=["malformed-token", "non-string-kid", "unknown-kid"],
+)
+def test_pyjwt_errors_from_key_lookup_pass_through_unchanged(_keypair, settings, raised):
+    # Token-side errors must stay token rejections (WARNING), and PyJWT's own JWKS
+    # errors keep their message; only foreign exceptions are rewrapped.
+    private_key, _ = _keypair
+    token = _encode(private_key, _claims())
+
+    def _raise(_token):
+        raise raised
+
+    with pytest.raises(type(raised)) as exc_info:
+        decode_and_validate(token, settings, SimpleNamespace(get_signing_key_from_jwt=_raise))
+    assert exc_info.value is raised
+
+
+def test_rs256_token_naming_an_ec_key_is_rejected_as_pyjwterror(_keypair, settings):
+    # A mixed-algorithm realm JWKS: the token's kid resolves to an EC key. The
+    # mismatch must be an ordinary PyJWTError (shared 401), never a TypeError (500).
+    private_key, _ = _keypair
+    token = _encode(private_key, _claims())
+    ec_jwk = jwt.PyJWK(
+        ECAlgorithm.to_jwk(ec.generate_private_key(ec.SECP256R1()).public_key(), as_dict=True)
+    )
+    jwks = SimpleNamespace(get_signing_key_from_jwt=lambda _token: ec_jwk)
+
+    with pytest.raises(jwt.InvalidAlgorithmError):
+        decode_and_validate(token, settings, jwks)
+
+
 # --- principal_from_claims (pure projection) ---------------------------------
 
 
@@ -278,3 +363,36 @@ def test_jwks_client_sends_non_urllib_user_agent(monkeypatch):
     deps.get_jwks_client.cache_clear()
     ua = client.headers.get("User-Agent", "")
     assert ua and "urllib" not in ua.lower()
+
+
+async def test_unknown_kid_cannot_forge_log_lines(_keypair, settings, caplog):
+    # PyJWT echoes an unknown token kid into its PyJWKClientError, and kid is caller
+    # input checked before any signature: a newline in it must not reach the log as
+    # a second, forged line. The caller still gets the shared 401.
+    import logging
+
+    from fastapi import HTTPException
+
+    from geoid.deps import _resolve_oidc
+
+    private_key, public_key = _keypair
+    jwk = RSAAlgorithm.to_jwk(public_key, as_dict=True) | {"kid": "real", "use": "sig"}
+    jwks_client = jwt.PyJWKClient(settings.oidc_jwks_url)
+    jwks_client.fetch_data = lambda: {"keys": [jwk]}
+    token = jwt.encode(
+        _claims(),
+        private_key,
+        algorithm="RS256",
+        headers={"kid": "nope\nCRITICAL geoid forged entry"},
+    )
+    caplog.set_level(logging.WARNING, logger="geoid")
+
+    with pytest.raises(HTTPException) as exc_info:
+        await _resolve_oidc(token, settings, jwks_client)
+
+    assert exc_info.value.status_code == 401
+    messages = [r.getMessage() for r in caplog.records if r.name == "geoid.deps"]
+    assert messages == [
+        "OIDC JWKS failure: Unable to find a signing key that matches: "
+        '"nope\\nCRITICAL geoid forged entry"'
+    ]

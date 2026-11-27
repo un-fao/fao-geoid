@@ -167,6 +167,119 @@ async def test_public_operations_do_not_touch_failing_jwks(
     assert set(resolved.json()["properties"]) == {"geoid", "uri"}
 
 
+_BODY_MARKER = "cf-challenge-marker"
+
+
+@pytest.fixture
+async def bad_jwks_client(request, db_clean, monkeypatch, oidc_keypair):
+    """An OIDC-enabled app whose REAL ``PyJWKClient`` fetches a JWKS URL that answers
+    200 with an unusable body, selected by ``request.param``: an HTML page (a
+    Cloudflare challenge in front of the realm), a set holding a malformed key next to
+    the valid one, or an empty set.
+
+    Yields ``(http_client, jwks_gets)``; ``jwks_gets`` counts the GETs the loopback
+    server saw, proving the fetch reached it rather than a proxy.
+    """
+    import json
+    import threading
+    from http.server import BaseHTTPRequestHandler, HTTPServer
+
+    from httpx import ASGITransport, AsyncClient
+    from jwt import PyJWKClient
+    from jwt.algorithms import RSAAlgorithm
+
+    from geoid.config import Settings, get_settings
+    from geoid.deps import get_jwks_client
+    from geoid.main import create_app
+
+    valid_key = RSAAlgorithm.to_jwk(oidc_keypair[1], as_dict=True) | {"kid": "k1", "use": "sig"}
+    malformed_key = {
+        "kty": "RSA",
+        "kid": _BODY_MARKER,
+        "alg": ["RS256"],
+        "n": valid_key["n"],
+        "e": valid_key["e"],
+    }
+    content_type, body = {
+        "html": ("text/html", f"<html>{_BODY_MARKER}</html>"),
+        "malformed-key": ("application/json", json.dumps({"keys": [valid_key, malformed_key]})),
+        "empty-set": ("application/json", json.dumps({"keys": []})),
+    }[request.param]
+    jwks_gets: list[str] = []
+
+    class _JwksHandler(BaseHTTPRequestHandler):
+        def do_GET(self) -> None:
+            jwks_gets.append(self.path)
+            payload = body.encode()
+            self.send_response(200)
+            self.send_header("Content-Type", content_type)
+            self.send_header("Content-Length", str(len(payload)))
+            self.end_headers()
+            self.wfile.write(payload)
+
+        def log_message(self, *args) -> None:
+            pass
+
+    server = HTTPServer(("127.0.0.1", 0), _JwksHandler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        # Lowercase wins over NO_PROXY in urllib's second pass; keeps a developer proxy
+        # from intercepting the loopback fetch.
+        monkeypatch.setenv("no_proxy", "127.0.0.1")
+        jwks_url = f"http://127.0.0.1:{server.server_port}/jwks"
+
+        settings = Settings(
+            _env_file=None, oidc_issuer="https://idp.test/realms/geoid", oidc_jwks_url=jwks_url
+        )
+        app = create_app()
+        app.dependency_overrides[get_settings] = lambda: settings
+        app.dependency_overrides[get_jwks_client] = lambda: PyJWKClient(jwks_url)
+        transport = ASGITransport(app=app, raise_app_exceptions=False)
+        async with AsyncClient(transport=transport, base_url="http://testserver") as http_client:
+            yield http_client, jwks_gets
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join()
+
+
+@pytest.mark.parametrize(
+    ("bad_jwks_client", "cause"),
+    [
+        ("html", "JSONDecodeError"),
+        ("malformed-key", "TypeError"),
+        ("empty-set", "PyJWKSetError"),
+    ],
+    indirect=["bad_jwks_client"],
+)
+async def test_unusable_jwks_response_is_shared_401(
+    bad_jwks_client, cause, make_token, bearer, caplog
+):
+    import logging
+
+    http_client, jwks_gets = bad_jwks_client
+    caplog.set_level(logging.WARNING, logger="geoid")
+    token = make_token(sub="kc-admin", roles=["geoid.sysadmin"])
+
+    resp = await http_client.get("/manage/collections", headers=bearer(token))
+    # Control: a malformed bearer fails as DecodeError before any JWKS fetch.
+    control = await http_client.get("/manage/collections", headers=bearer("not.a.jwt"))
+
+    assert jwks_gets == ["/jwks"]
+    assert resp.status_code == control.status_code == 401
+    assert resp.content == control.content
+    assert resp.headers.get("content-type") == control.headers.get("content-type")
+    assert resp.headers.get("www-authenticate") == control.headers.get("www-authenticate")
+    jwks_errors = [
+        r.getMessage()
+        for r in caplog.records
+        if r.name == "geoid.deps" and r.levelno == logging.ERROR
+    ]
+    assert jwks_errors == [f"OIDC JWKS failure: Unable to load the JWKS signing keys ({cause})"]
+    assert not any(_BODY_MARKER in r.getMessage() for r in caplog.records)
+
+
 async def test_rejection_401s_are_byte_identical_across_failure_modes(
     oidc_client, make_token, bearer
 ):
