@@ -110,8 +110,8 @@ async def test_expired_just_past_leeway_boundary_is_401(oidc_client, make_token,
 
 @pytest.fixture
 async def jwks_error_client(db_clean):
-    """An OIDC-enabled app whose JWKS client fails for every token (unknown kid /
-    IdP outage / Cloudflare block). The client must still see only the plain 401."""
+    """An OIDC-enabled app whose JWKS client fails for every token (IdP outage /
+    Cloudflare block). The client must still see only the plain 401."""
     from types import SimpleNamespace
 
     import jwt as pyjwt
@@ -128,7 +128,7 @@ async def jwks_error_client(db_clean):
     )
 
     def _raise(_token):
-        raise pyjwt.PyJWKClientError('Unable to find a signing key that matches: "unknown-kid"')
+        raise pyjwt.PyJWKClientConnectionError("Fail to fetch data from the url")
 
     app = create_app()
     app.dependency_overrides[get_settings] = lambda: settings
@@ -140,7 +140,7 @@ async def jwks_error_client(db_clean):
         yield http_client
 
 
-async def test_unknown_kid_jwks_failure_is_401(jwks_error_client, make_token, bearer):
+async def test_jwks_outage_is_401(jwks_error_client, make_token, bearer):
     token = make_token(sub="kc-admin", roles=["geoid.sysadmin"])
     resp = await jwks_error_client.get("/manage/collections", headers=bearer(token))
     assert resp.status_code == 401
@@ -171,11 +171,12 @@ _BODY_MARKER = "cf-challenge-marker"
 
 
 @pytest.fixture
-async def bad_jwks_client(request, db_clean, monkeypatch, oidc_keypair):
-    """An OIDC-enabled app whose REAL ``PyJWKClient`` fetches a JWKS URL that answers
-    200 with an unusable body, selected by ``request.param``: an HTML page (a
-    Cloudflare challenge in front of the realm), a set holding a malformed key next to
-    the valid one, or an empty set.
+async def jwks_server_client(request, db_clean, monkeypatch, oidc_keypair):
+    """An OIDC-enabled app whose REAL ``PyJWKClient`` (one shared instance, as in
+    production) fetches a loopback JWKS URL answering 200 with the body selected by
+    ``request.param``: the valid key alone (``kid`` "k1"), an HTML page (a Cloudflare
+    challenge in front of the realm), a set holding a malformed key next to the valid
+    one, or an empty set.
 
     Yields ``(http_client, jwks_gets)``; ``jwks_gets`` counts the GETs the loopback
     server saw, proving the fetch reached it rather than a proxy.
@@ -185,9 +186,9 @@ async def bad_jwks_client(request, db_clean, monkeypatch, oidc_keypair):
     from http.server import BaseHTTPRequestHandler, HTTPServer
 
     from httpx import ASGITransport, AsyncClient
-    from jwt import PyJWKClient
     from jwt.algorithms import RSAAlgorithm
 
+    from geoid.auth.oidc import RealmJWKClient
     from geoid.config import Settings, get_settings
     from geoid.deps import get_jwks_client
     from geoid.main import create_app
@@ -201,6 +202,14 @@ async def bad_jwks_client(request, db_clean, monkeypatch, oidc_keypair):
         "e": valid_key["e"],
     }
     content_type, body = {
+        "valid-set": ("application/json", json.dumps({"keys": [valid_key]})),
+        "rotation-broken": (
+            "application/json",
+            # k2 lacks its modulus "n": PyJWT raises InvalidKeyError and skips it.
+            json.dumps(
+                {"keys": [valid_key, {"kty": "RSA", "kid": "k2", "use": "sig", "e": "AQAB"}]}
+            ),
+        ),
         "html": ("text/html", f"<html>{_BODY_MARKER}</html>"),
         "malformed-key": ("application/json", json.dumps({"keys": [valid_key, malformed_key]})),
         "empty-set": ("application/json", json.dumps({"keys": []})),
@@ -234,7 +243,8 @@ async def bad_jwks_client(request, db_clean, monkeypatch, oidc_keypair):
         )
         app = create_app()
         app.dependency_overrides[get_settings] = lambda: settings
-        app.dependency_overrides[get_jwks_client] = lambda: PyJWKClient(jwks_url)
+        jwks_client = RealmJWKClient(jwks_url)
+        app.dependency_overrides[get_jwks_client] = lambda: jwks_client
         transport = ASGITransport(app=app, raise_app_exceptions=False)
         async with AsyncClient(transport=transport, base_url="http://testserver") as http_client:
             yield http_client, jwks_gets
@@ -245,20 +255,20 @@ async def bad_jwks_client(request, db_clean, monkeypatch, oidc_keypair):
 
 
 @pytest.mark.parametrize(
-    ("bad_jwks_client", "cause"),
+    ("jwks_server_client", "cause"),
     [
         ("html", "JSONDecodeError"),
         ("malformed-key", "TypeError"),
         ("empty-set", "PyJWKSetError"),
     ],
-    indirect=["bad_jwks_client"],
+    indirect=["jwks_server_client"],
 )
 async def test_unusable_jwks_response_is_shared_401(
-    bad_jwks_client, cause, make_token, bearer, caplog
+    jwks_server_client, cause, make_token, bearer, caplog
 ):
     import logging
 
-    http_client, jwks_gets = bad_jwks_client
+    http_client, jwks_gets = jwks_server_client
     caplog.set_level(logging.WARNING, logger="geoid")
     token = make_token(sub="kc-admin", roles=["geoid.sysadmin"])
 
@@ -278,6 +288,73 @@ async def test_unusable_jwks_response_is_shared_401(
     ]
     assert jwks_errors == [f"OIDC JWKS failure: Unable to load the JWKS signing keys ({cause})"]
     assert not any(_BODY_MARKER in r.getMessage() for r in caplog.records)
+
+
+@pytest.mark.parametrize("jwks_server_client", ["valid-set"], indirect=True)
+async def test_unknown_or_missing_kid_is_a_warning_not_a_jwks_failure(
+    jwks_server_client, make_token, bearer, caplog
+):
+    # Any caller can send a token with a made-up or missing kid; against a healthy
+    # JWKS that is a bad token (WARNING), not an IdP outage (ERROR), so it cannot
+    # flood ERROR-based alerting. PyJWT's refresh cooldown keeps it to one fetch.
+    import logging
+
+    http_client, jwks_gets = jwks_server_client
+    caplog.set_level(logging.WARNING, logger="geoid")
+    admin = {"sub": "kc-admin", "roles": ["geoid.sysadmin"]}
+
+    ok = await http_client.get("/manage/collections", headers=bearer(make_token(**admin, kid="k1")))
+    made_up = await http_client.get(
+        "/manage/collections", headers=bearer(make_token(**admin, kid="made-up"))
+    )
+    no_kid = await http_client.get("/manage/collections", headers=bearer(make_token(**admin)))
+    control = await http_client.get("/manage/collections", headers=bearer("not.a.jwt"))
+
+    assert ok.status_code == 200
+    # Usually one GET; a worker stall past the 30 s cooldown may legitimately add one.
+    assert jwks_gets and set(jwks_gets) == {"/jwks"}
+    for resp in (made_up, no_kid):
+        assert resp.status_code == control.status_code == 401
+        assert resp.content == control.content
+        assert resp.headers.get("www-authenticate") == control.headers.get("www-authenticate")
+    deps_records = [r for r in caplog.records if r.name == "geoid.deps"]
+    assert [r for r in caplog.records if r.levelno >= logging.ERROR] == []
+    assert [r.getMessage() for r in deps_records] == [
+        "OIDC token rejected: UnknownSigningKeyError",
+        "OIDC token rejected: UnknownSigningKeyError",
+        "OIDC token rejected: DecodeError",
+    ]
+
+
+@pytest.mark.parametrize("jwks_server_client", ["rotation-broken"], indirect=True)
+async def test_unusable_advertised_signing_key_still_alerts_at_error(
+    jwks_server_client, make_token, bearer, caplog
+):
+    # A rotation publishes a malformed new key (k2) next to the valid old one (k1):
+    # PyJWT skips k2, so k2 tokens are per-request unknown-kid rejections (WARNING),
+    # but the fetch must still raise the ERROR-level JWKS alarm. k1 keeps working.
+    import logging
+
+    http_client, _ = jwks_server_client
+    caplog.set_level(logging.WARNING, logger="geoid")
+    admin = {"sub": "kc-admin", "roles": ["geoid.sysadmin"]}
+
+    new_key = await http_client.get(
+        "/manage/collections", headers=bearer(make_token(**admin, kid="k2"))
+    )
+    old_key = await http_client.get(
+        "/manage/collections", headers=bearer(make_token(**admin, kid="k1"))
+    )
+
+    assert new_key.status_code == 401
+    assert old_key.status_code == 200
+    errors = [r.getMessage() for r in caplog.records if r.levelno >= logging.ERROR]
+    assert errors and set(errors) == {
+        "OIDC JWKS failure: signing key 'k2' is unusable (InvalidKeyError)"
+    }
+    assert [r.getMessage() for r in caplog.records if r.name == "geoid.deps"] == [
+        "OIDC token rejected: UnknownSigningKeyError"
+    ]
 
 
 async def test_rejection_401s_are_byte_identical_across_failure_modes(

@@ -17,7 +17,7 @@ import pytest
 from cryptography.hazmat.primitives.asymmetric import ec, rsa
 from jwt.algorithms import ECAlgorithm, RSAAlgorithm
 
-from geoid.auth.oidc import decode_and_validate, principal_from_claims
+from geoid.auth.oidc import UnknownSigningKeyError, decode_and_validate, principal_from_claims
 from geoid.config import Settings
 
 pytestmark = pytest.mark.unit
@@ -153,18 +153,31 @@ def test_alg_none_forgery_is_rejected(_keypair, settings):
         decode_and_validate(token, settings, _fake_jwks(public_key))
 
 
-def test_unknown_kid_jwks_error_propagates_as_pyjwterror(_keypair, settings):
-    # A kid the JWKS can't resolve surfaces as PyJWKClientError — a PyJWTError
-    # subclass, so the auth seam's except-clauses map it to the same 401.
-    private_key, _ = _keypair
-    token = _encode(private_key, _claims())
+def _real_jwks(public_key):
+    # A real PyJWKClient whose fetch returns one valid key, kid "real" (no network).
+    jwk = RSAAlgorithm.to_jwk(public_key, as_dict=True) | {"kid": "real", "use": "sig"}
+    jwks_client = jwt.PyJWKClient("https://idp.test/jwks")
+    jwks_client.fetch_data = lambda: {"keys": [jwk]}
+    return jwks_client
 
-    def _raise(_token):
-        raise jwt.PyJWKClientError('Unable to find a signing key that matches: "unknown-kid"')
 
-    with pytest.raises(jwt.PyJWKClientError):
-        decode_and_validate(token, settings, SimpleNamespace(get_signing_key_from_jwt=_raise))
-    assert issubclass(jwt.PyJWKClientError, jwt.PyJWTError)
+@pytest.mark.parametrize("headers", [{"kid": "made-up"}, None], ids=["unknown-kid", "no-kid"])
+def test_unmatched_kid_is_a_token_rejection_not_a_jwks_failure(_keypair, settings, headers):
+    # A kid the healthy JWKS can't resolve (or no kid at all) is a bad token: it must
+    # surface as an InvalidTokenError, not PyJWKClientError (the JWKS-outage signal).
+    private_key, public_key = _keypair
+    token = jwt.encode(_claims(), private_key, algorithm="RS256", headers=headers)
+
+    with pytest.raises(UnknownSigningKeyError) as exc_info:
+        decode_and_validate(token, settings, _real_jwks(public_key))
+    assert isinstance(exc_info.value, jwt.InvalidTokenError)
+    assert not isinstance(exc_info.value, jwt.PyJWKClientError)
+
+
+def test_matching_kid_still_validates_with_a_real_jwks_client(_keypair, settings):
+    private_key, public_key = _keypair
+    token = jwt.encode(_claims(), private_key, algorithm="RS256", headers={"kid": "real"})
+    assert decode_and_validate(token, settings, _real_jwks(public_key))["sub"] == "user-123"
 
 
 @pytest.mark.parametrize(
@@ -217,9 +230,9 @@ def test_undecodable_jwks_response_surfaces_as_pyjwkclienterror(_keypair, settin
     [
         jwt.DecodeError("Not enough segments"),
         jwt.InvalidTokenError("Key ID header parameter must be a string"),
-        jwt.PyJWKClientError('Unable to find a signing key that matches: "x"'),
+        jwt.PyJWKClientError("The JWKS endpoint did not contain any signing keys"),
     ],
-    ids=["malformed-token", "non-string-kid", "unknown-kid"],
+    ids=["malformed-token", "non-string-kid", "jwks-client-error"],
 )
 def test_pyjwt_errors_from_key_lookup_pass_through_unchanged(_keypair, settings, raised):
     # Token-side errors must stay token rejections (WARNING), and PyJWT's own JWKS
@@ -365,10 +378,10 @@ def test_jwks_client_sends_non_urllib_user_agent(monkeypatch):
     assert ua and "urllib" not in ua.lower()
 
 
-async def test_unknown_kid_cannot_forge_log_lines(_keypair, settings, caplog):
-    # PyJWT echoes an unknown token kid into its PyJWKClientError, and kid is caller
-    # input checked before any signature: a newline in it must not reach the log as
-    # a second, forged line. The caller still gets the shared 401.
+async def test_unknown_kid_logs_a_warning_without_echoing_the_kid(_keypair, settings, caplog):
+    # kid is caller input checked before any signature: an unknown one must log as an
+    # ordinary token rejection (WARNING, type only), never as an ERROR JWKS failure,
+    # and its text (here a newline and a forged entry) must not reach the log.
     import logging
 
     from fastapi import HTTPException
@@ -376,9 +389,6 @@ async def test_unknown_kid_cannot_forge_log_lines(_keypair, settings, caplog):
     from geoid.deps import _resolve_oidc
 
     private_key, public_key = _keypair
-    jwk = RSAAlgorithm.to_jwk(public_key, as_dict=True) | {"kid": "real", "use": "sig"}
-    jwks_client = jwt.PyJWKClient(settings.oidc_jwks_url)
-    jwks_client.fetch_data = lambda: {"keys": [jwk]}
     token = jwt.encode(
         _claims(),
         private_key,
@@ -388,11 +398,101 @@ async def test_unknown_kid_cannot_forge_log_lines(_keypair, settings, caplog):
     caplog.set_level(logging.WARNING, logger="geoid")
 
     with pytest.raises(HTTPException) as exc_info:
-        await _resolve_oidc(token, settings, jwks_client)
+        await _resolve_oidc(token, settings, _real_jwks(public_key))
 
     assert exc_info.value.status_code == 401
-    messages = [r.getMessage() for r in caplog.records if r.name == "geoid.deps"]
-    assert messages == [
-        "OIDC JWKS failure: Unable to find a signing key that matches: "
-        '"nope\\nCRITICAL geoid forged entry"'
+    records = [r for r in caplog.records if r.name == "geoid.deps"]
+    assert [(r.levelno, r.getMessage()) for r in records] == [
+        (logging.WARNING, "OIDC token rejected: UnknownSigningKeyError")
     ]
+
+
+async def test_jwks_failure_log_escapes_control_characters(_keypair, settings, caplog):
+    # Backstop: whatever text a PyJWKClientError carries, a control character in it
+    # must not split the ERROR line into a forged second entry.
+    import logging
+
+    from fastapi import HTTPException
+
+    from geoid.deps import _resolve_oidc
+
+    def _raise(_token):
+        raise jwt.PyJWKClientError("upstream\nCRITICAL geoid forged entry")
+
+    caplog.set_level(logging.WARNING, logger="geoid")
+    with pytest.raises(HTTPException):
+        await _resolve_oidc(
+            _encode(_keypair[0], _claims()),
+            settings,
+            SimpleNamespace(get_signing_key_from_jwt=_raise),
+        )
+
+    assert [r.getMessage() for r in caplog.records if r.name == "geoid.deps"] == [
+        "OIDC JWKS failure: upstream\\nCRITICAL geoid forged entry"
+    ]
+
+
+def test_realm_jwk_client_logs_advertised_signing_keys_pyjwt_cannot_use(
+    _keypair, monkeypatch, caplog
+):
+    # PyJWKSet silently skips a key it cannot parse, so a rotation that publishes a
+    # malformed signing key next to a valid old one would surface only as per-request
+    # unknown-kid rejections (WARNING). The fetch itself must report it at ERROR.
+    import logging
+
+    from geoid.auth.oidc import RealmJWKClient
+
+    valid = RSAAlgorithm.to_jwk(_keypair[1], as_dict=True) | {"kid": "k1", "use": "sig"}
+    broken = {"kty": "RSA", "kid": "k2\nforged", "use": "sig", "alg": "RS256", "e": "AQAB"}
+    numeric_kid = valid | {"kid": 42}  # parses, but can never match a token's string kid
+    empty_kid = valid | {"kid": ""}  # PyJWT drops it from the signing keys
+    enc_only = {"kty": "oct", "kid": "enc", "use": "enc"}
+    payload = {"keys": [valid, broken, numeric_kid, empty_kid, enc_only]}
+    monkeypatch.setattr(jwt.PyJWKClient, "fetch_data", lambda self: payload)
+    caplog.set_level(logging.WARNING, logger="geoid")
+
+    assert RealmJWKClient("https://idp.test/jwks").fetch_data() is payload
+
+    assert [(r.levelno, r.getMessage()) for r in caplog.records if r.name.startswith("geoid")] == [
+        (
+            logging.ERROR,
+            "OIDC JWKS failure: signing key 'k2\\nforged' is unusable (InvalidKeyError)",
+        ),
+        (logging.ERROR, "OIDC JWKS failure: signing key 42 is unusable (unusable kid)"),
+        (logging.ERROR, "OIDC JWKS failure: signing key '' is unusable (unusable kid)"),
+    ]
+
+
+def test_realm_jwk_client_passes_unparseable_payloads_through(monkeypatch, caplog):
+    # A non-dict payload is PyJWT's to reject (PyJWKClientError); the check adds nothing.
+    from geoid.auth.oidc import RealmJWKClient
+
+    monkeypatch.setattr(jwt.PyJWKClient, "fetch_data", lambda self: ["not", "a", "set"])
+    assert RealmJWKClient("https://idp.test/jwks").fetch_data() == ["not", "a", "set"]
+    assert [r for r in caplog.records if r.name.startswith("geoid")] == []
+
+
+def test_production_jwks_client_stops_accepting_a_removed_key(_keypair, monkeypatch):
+    # A key the realm removes (e.g. after a compromise) must stop validating once the
+    # 300 s JWKS cache expires: no per-kid cache may outlive the key set.
+    from geoid import config, deps
+
+    oidc_settings = config.Settings(
+        _env_file=None,
+        oidc_issuer="https://idp.test/realms/x",
+        oidc_jwks_url="https://idp.test/jwks",
+    )
+    monkeypatch.setattr(deps, "get_settings", lambda: oidc_settings)
+    jwk = RSAAlgorithm.to_jwk(_keypair[1], as_dict=True)
+    payload = {"keys": [jwk | {"kid": "old", "use": "sig"}, jwk | {"kid": "new", "use": "sig"}]}
+    monkeypatch.setattr(jwt.PyJWKClient, "fetch_data", lambda self: payload)
+    deps.get_jwks_client.cache_clear()
+    client = deps.get_jwks_client()
+    deps.get_jwks_client.cache_clear()
+
+    assert client.get_signing_key("old").key_id == "old"
+    payload["keys"] = payload["keys"][1:]  # the realm removes "old"
+    client.jwk_set_cache = None  # its 300 s JWKS cache has expired
+
+    with pytest.raises(jwt.PyJWKClientError):
+        client.get_signing_key("old")

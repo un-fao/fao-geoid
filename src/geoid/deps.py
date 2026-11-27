@@ -85,20 +85,21 @@ def get_jwks_client() -> PyJWKClient | None:
     """The process-wide JWKS client (cached), or ``None`` when OIDC is disabled.
 
     Injected via ``Depends`` so tests override it with a fake (no network). The real
-    client caches signing keys by ``kid`` in-process with a 300 s lifespan, so the
-    blocking JWKS fetch happens at most once per key-rotation window. PyJWT is
+    client caches the parsed JWKS in-process for 300 s, so the blocking fetch happens
+    at most once per window, and a key the realm removes stops validating when that
+    cache expires. PyJWT's per-``kid`` cache (``cache_keys``) stays off: it never
+    expires, so it would keep accepting a removed key until restart. PyJWT is
     imported lazily so importing this module never requires the ``oidc`` extra.
     """
     settings = get_settings()
     if not settings.oidc_enabled:
         return None
-    from jwt import PyJWKClient
+    from geoid.auth.oidc import RealmJWKClient
 
     # Cloudflare 403s the default Python-urllib User-Agent on the FAO realm's JWKS
     # endpoint; any real UA unblocks it (PyJWKClient forwards headers= to urllib).
-    return PyJWKClient(
+    return RealmJWKClient(
         settings.oidc_jwks_url,
-        cache_keys=True,
         lifespan=300,
         headers={"User-Agent": f"geoid/{__version__}"},
     )
@@ -129,8 +130,9 @@ async def _resolve_oidc(
     except jwt.PyJWKClientError as exc:
         # JWKS infrastructure failure (IdP down, Cloudflare block, bad URL) — a full
         # IdP outage must be distinguishable from one user's bad token. str(exc) is
-        # infra detail (URL/error) but can echo an unknown token kid, which is caller
-        # input, so it is escaped: a control character cannot forge a second log line.
+        # infra detail (URL/error). An unknown token kid is classified as a token
+        # rejection upstream, but PyJWT's message would echo that caller input if
+        # it ever got here, so it is escaped: no control character forges a line.
         logger.error("OIDC JWKS failure: %s", str(exc).encode("unicode_escape").decode("ascii"))
         raise _invalid_token() from exc
     except jwt.PyJWTError as exc:
