@@ -18,7 +18,7 @@ ROOT = Path(__file__).resolve().parents[2]
 def test_migrate_succeeds_without_oidc_config_in_review_environment(_migrated):
     # Strip all GEOID_* (conftest exports the OIDC env session-wide), then
     # provide exactly what the Cloud Run migrate job mounts.
-    env = {key: value for key, value in os.environ.items() if not key.startswith("GEOID_")}
+    env = {key: value for key, value in os.environ.items() if not key.upper().startswith("GEOID_")}
     env["GEOID_DATABASE_URL"] = _migrated
     env["GEOID_ENVIRONMENT"] = "review"
 

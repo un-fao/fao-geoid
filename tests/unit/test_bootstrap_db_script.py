@@ -4,10 +4,14 @@ from __future__ import annotations
 
 import dataclasses
 import importlib.util
+import os
+import subprocess
 import sys
 from pathlib import Path
 
 import pytest
+
+from geoid.config import Settings
 
 pytestmark = pytest.mark.unit
 
@@ -118,9 +122,16 @@ def _config(**overrides):
     return dataclasses.replace(base, **overrides)
 
 
+def _delenv_any_case(monkeypatch, *keys):
+    # pydantic matches env keys case-insensitively, so a stray lowercase variant
+    # would still reach Settings.
+    for key in list(os.environ):
+        if key.upper() in keys:
+            monkeypatch.delenv(key)
+
+
 def _without_oidc_env(monkeypatch):
-    for key in ("GEOID_OIDC_ISSUER", "GEOID_OIDC_JWKS_URL"):
-        monkeypatch.delenv(key, raising=False)
+    _delenv_any_case(monkeypatch, "GEOID_OIDC_ISSUER", "GEOID_OIDC_JWKS_URL")
 
 
 def test_preflight_error_names_missing_oidc_settings_without_echoing_the_dsn(monkeypatch, tmp_path):
@@ -148,6 +159,7 @@ def test_preflight_with_skip_seed_does_not_require_oidc_outside_development(
     if env_file is not None:
         (tmp_path / ".env").write_text(env_file)
     _without_oidc_env(monkeypatch)
+    _delenv_any_case(monkeypatch, "GEOID_PUBLIC_COLLECTION")
     monkeypatch.setenv("GEOID_ENVIRONMENT", "production")
 
     settings = bootstrap_db._preflight_settings(_config(skip_seed=True))
@@ -184,3 +196,144 @@ def test_preflight_with_skip_seed_still_rejects_invalid_settings(
     message = str(excinfo.value)
     assert field in message
     assert "OIDC" not in message
+
+
+def _clean_slug_env(monkeypatch, tmp_path, env_file=None):
+    monkeypatch.setattr(bootstrap_db, "REPO_ROOT", tmp_path)
+    if env_file is not None:
+        (tmp_path / ".env").write_text(env_file)
+    _without_oidc_env(monkeypatch)
+    _delenv_any_case(monkeypatch, "GEOID_PUBLIC_COLLECTION", "GEOID_ENVIRONMENT")
+
+
+@pytest.mark.parametrize(
+    ("skip_migrate", "skip_seed"),
+    [(False, False), (True, False), (False, True)],
+    ids=["migrate-and-seed", "seed-only", "migrate-only"],
+)
+def test_preflight_rejects_public_collection_set_only_in_dotenv(
+    monkeypatch, tmp_path, skip_migrate, skip_seed
+):
+    # Migration 0012 and the seed read only the process env, so a .env-only slug
+    # would bootstrap 'public' while the service later creates 'community'.
+    _clean_slug_env(monkeypatch, tmp_path, "GEOID_PUBLIC_COLLECTION=community\n")
+
+    with pytest.raises(bootstrap_db.ConfigError) as excinfo:
+        bootstrap_db._preflight_settings(_config(skip_migrate=skip_migrate, skip_seed=skip_seed))
+
+    message = str(excinfo.value)
+    assert "'community'" in message
+    assert "'public'" in message
+    assert "export GEOID_PUBLIC_COLLECTION=community" in message
+    assert "already ran migration 0012" in message
+    assert "public_write = false" in message
+    assert "pw@" not in message
+    assert "127.0.0.1" not in message
+
+
+def test_preflight_accepts_public_collection_set_in_dotenv_and_environment(monkeypatch, tmp_path):
+    _clean_slug_env(monkeypatch, tmp_path, "GEOID_PUBLIC_COLLECTION=community\n")
+    monkeypatch.setenv("GEOID_PUBLIC_COLLECTION", "community")
+
+    settings = bootstrap_db._preflight_settings(_config())
+
+    assert settings.public_collection == "community"
+
+
+def test_preflight_accepts_public_collection_without_dotenv(monkeypatch, tmp_path):
+    _clean_slug_env(monkeypatch, tmp_path)
+    monkeypatch.setenv("GEOID_PUBLIC_COLLECTION", "community")
+
+    settings = bootstrap_db._preflight_settings(_config())
+
+    assert settings.public_collection == "community"
+
+
+def test_preflight_rejects_lowercase_process_key_that_migration_cannot_see(monkeypatch, tmp_path):
+    # pydantic (and so the seed) sees the lowercase key; 0012's exact lookup does not.
+    _clean_slug_env(monkeypatch, tmp_path, "GEOID_PUBLIC_COLLECTION=community\n")
+    monkeypatch.setenv("geoid_public_collection", "community")
+
+    with pytest.raises(bootstrap_db.ConfigError) as excinfo:
+        bootstrap_db._preflight_settings(_config())
+
+    message = str(excinfo.value)
+    assert "migration 0012" in message
+    assert "'public'" in message
+    assert "the seed step" not in message
+
+    settings = bootstrap_db._preflight_settings(_config(skip_migrate=True))
+    assert settings.public_collection == "community"
+
+
+@pytest.mark.parametrize(
+    ("exact_value", "slug"),
+    [("postgresql://u:SECRETMARK@h/db", "community"), ("", "public")],
+    ids=["credential", "empty"],
+)
+def test_preflight_rejects_a_shadowed_exact_key_without_echoing_it(
+    monkeypatch, tmp_path, exact_value, slug
+):
+    # Migration 0012 uses the exact key verbatim (an empty value matches no slug).
+    _clean_slug_env(monkeypatch, tmp_path, f"GEOID_PUBLIC_COLLECTION={slug}\n")
+    monkeypatch.setenv("GEOID_PUBLIC_COLLECTION", exact_value)
+    monkeypatch.setenv("geoid_public_collection", slug)
+    # Precondition: pydantic keeps the later (lowercase) variant, so the exact key is
+    # shadowed and never slug-validated.
+    shadowed = Settings(database_url=_config().app_url, _env_file=None)
+    assert shadowed.public_collection == slug
+
+    with pytest.raises(bootstrap_db.ConfigError) as excinfo:
+        bootstrap_db._preflight_settings(_config())
+
+    message = str(excinfo.value)
+    assert "migration 0012" in message
+    assert "hidden; not validated" in message
+    assert "SECRETMARK" not in message
+
+
+def test_preflight_skips_public_collection_check_when_neither_migrating_nor_seeding(
+    monkeypatch, tmp_path
+):
+    _clean_slug_env(monkeypatch, tmp_path, "GEOID_PUBLIC_COLLECTION=community\n")
+
+    settings = bootstrap_db._preflight_settings(_config(skip_migrate=True, skip_seed=True))
+
+    assert settings.public_collection == "public"
+
+
+def test_preflight_requires_oidc_in_environment_even_when_dotenv_supplies_it(monkeypatch, tmp_path):
+    # The seed step uses the env-only build, so OIDC from .env alone is not enough.
+    _clean_slug_env(
+        monkeypatch,
+        tmp_path,
+        "GEOID_OIDC_ISSUER=https://idp.test/realms/x\nGEOID_OIDC_JWKS_URL=https://idp.test/jwks\n",
+    )
+    monkeypatch.setenv("GEOID_ENVIRONMENT", "production")
+
+    with pytest.raises(bootstrap_db.ConfigError) as excinfo:
+        bootstrap_db._preflight_settings(_config())
+
+    assert "OIDC is not configured in 'production'" in str(excinfo.value)
+
+
+# --- run_migrations -------------------------------------------------------------
+
+
+def test_run_migrations_hands_the_child_only_the_confirmed_database_url(monkeypatch):
+    # pydantic in the child would let a later case variant win over the exact key,
+    # migrating a database the operator never confirmed.
+    monkeypatch.setenv("GEOID_DATABASE_URL", "postgresql+asyncpg://u@a/a")
+    monkeypatch.setenv("geoid_database_url", "postgresql+asyncpg://u@b/b")
+    captured = {}
+
+    def fake_run(cmd, *, env, cwd):
+        captured["env"] = env
+        return subprocess.CompletedProcess(cmd, 0)
+
+    monkeypatch.setattr(bootstrap_db.subprocess, "run", fake_run)
+
+    bootstrap_db.run_migrations(_config())
+
+    url_keys = {k: v for k, v in captured["env"].items() if k.upper() == "GEOID_DATABASE_URL"}
+    assert url_keys == {"GEOID_DATABASE_URL": _config().app_url}

@@ -79,6 +79,11 @@ def _migrated(_postgis):
     from geoid.config import get_settings
 
     url = _postgis.get_connection_url()
+    # pydantic matches env keys case-insensitively and a later variant wins, so a
+    # leftover lowercase key (e.g. geoid_database_url) would aim migrations and
+    # TRUNCATE at another database.
+    for key in [k for k in os.environ if k.upper().startswith("GEOID_") and k != k.upper()]:
+        del os.environ[key]
     os.environ["GEOID_DATABASE_URL"] = url
     # The default app is OIDC-enabled (Keycloak is the only auth path); the JWKS
     # fetch is faked per-fixture via the get_jwks_client dependency override.

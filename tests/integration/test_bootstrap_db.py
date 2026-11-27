@@ -41,12 +41,13 @@ def _app_url(pg, role: str, db: str, password: str = APP_PASSWORD) -> str:
 def _run_bootstrap(
     pg, role: str, db: str, *flags: str, password: str = APP_PASSWORD
 ) -> subprocess.CompletedProcess:
-    env = {key: value for key, value in os.environ.items() if not key.startswith("GEOID_")}
+    env = {key: value for key, value in os.environ.items() if not key.upper().startswith("GEOID_")}
     env.update(
         {
             "GEOID_BOOTSTRAP_ADMIN_DSN": _admin_dsn(pg),
             "GEOID_DATABASE_URL": _app_url(pg, role, db, password),
             "GEOID_ENVIRONMENT": "development",
+            "GEOID_PUBLIC_COLLECTION": "public",
         }
     )
     return subprocess.run(
